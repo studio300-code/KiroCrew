@@ -49,6 +49,7 @@ from kiro_crew.acp_backends import (  # noqa: F401 - selectable_backend_values i
     ACP_BACKEND_CLAUDE,
     ACP_BACKEND_KIRO,
     ACP_BACKENDS_LOCAL_HARNESS_COMMANDS,
+    ACP_BACKENDS_MODEL_EFFORT_PAIR_IDS,
     model_registry_namespace,
     selectable_backend_values,
     selectable_stored_backend_values,
@@ -86,12 +87,13 @@ from kiro_crew.agent_files import (  # noqa: F401
 )
 from kiro_crew.agent_sdk import host_auth
 from kiro_crew.agent_sdk.capabilities import capabilities_for, capabilities_of
-from kiro_crew.agent_sdk.drivers.acp import (
+from kiro_crew.agent_sdk.drivers.acp import (  # noqa: F401
     EntitlementRevalidating,
     catalog_row_would_drop,
     is_auth_failure_output,
     resolve_kiro_bin_for_spawn,
     resolve_pin_spelling,
+    resolve_pin_spelling_on,
     resolve_ssh_auth_sock,
 )
 from kiro_crew.agent_sdk.provider_identity import is_claude_code
@@ -317,6 +319,11 @@ from kiro_crew.dashboard.handlers.agent_templates import (  # noqa: F401
     validate_definition_patch,
 )
 from kiro_crew.dashboard.handlers.agents_cc_model_rows import merge_advertised_rows
+from kiro_crew.dashboard.handlers.agents_harness_effort import (  # noqa: F401 - facade names
+    _live_on,
+    harness_effort,
+    own_models_backend,
+)
 from kiro_crew.dashboard.handlers.models_kas_bundle import api_models_kas_bundle
 from kiro_crew.dashboard.handlers.source_providers import (  # noqa: F401
     owner_view_for_request,
@@ -1391,9 +1398,18 @@ async def api_models(request: web.Request) -> web.Response:
     kiro-family backends read kiro-cli's ``--list-models`` catalog (narrowed to a
     live session's entitlement); advertised-selection backends read their own
     adapter's namespace, because they do not accept ids from that catalog.
+
+    ``?backend=<id>`` serves that backend's list instead, for a session or crew
+    on another harness (``models_backend`` names it); a 400 for an unselectable id.
     """
     cfg = await asyncio.to_thread(KiroCrewConfig.load)
     backend = getattr(cfg.agent, "acp_backend", "")
+    if "backend" in request.query:
+        backend = request.query["backend"]
+        if backend not in selectable_backend_values():
+            return web.json_response(
+                {"error": "backend is not selectable", "code": "invalid_backend"}, status=400
+            )
     if backend == ACP_BACKEND_CLAUDE:
         return web.json_response(
             _cc_models(request, configured_default=_scoped_default(cfg, backend))
@@ -1409,11 +1425,12 @@ async def api_models(request: web.Request) -> web.Response:
     # narrowing below never apply (the engine's select is already the signed-in
     # account's list). Decided per ROUTE (backend AND the bundle switch), not per
     # backend, which is why it is not a capability-set branch like the one above.
-    # The one shared predicate (``agent_sdk.kas_bundle``); it re-reads config, so
-    # off the loop. Deferred like the handler module's own engine probe.
-    from kiro_crew.agent_sdk import kas_bundle
+    # The route of THIS backend (a ``?backend=`` one included), as the KAS harness
+    # spawns it (``acp.harness.kas._bundle_route_selected``): not
+    # ``kas_bundle.kas_bundle_route``, which reads the configured backend only.
+    from kiro_crew.agent_sdk.backends import ACP_BACKEND_KAS
 
-    if await asyncio.to_thread(kas_bundle.kas_bundle_route):
+    if backend == ACP_BACKEND_KAS and bool(getattr(cfg.agent, "kas_bundle", False)):
         return await api_models_kas_bundle(request)
     # Signed-out gateways must never reach the spawn below. kiro-cli auto-opens
     # an interactive browser login for ANY subcommand run unauthenticated
