@@ -81,6 +81,7 @@ from kiro_crew.whatsapp.client import WhatsAppClient
 from kiro_crew.whatsapp.commands import parse_command
 from kiro_crew.whatsapp.echo import EchoTracker
 from kiro_crew.whatsapp.group_gate import GroupGate, GroupVerdict
+from kiro_crew.whatsapp.history import recent_chat_context
 from kiro_crew.whatsapp.jids import (
     LID_SERVER,
     is_group_jid,
@@ -366,6 +367,23 @@ class WhatsAppTransport(MessagingTransport):
         last_id = ""
         for message_id in await self._send_tracked(jid, content):
             last_id = message_id
+        if last_id:
+            # Archive the agent's own reply too. The mirror's inbound tap cannot
+            # see what this process sends, and without this row the wake-word
+            # history would show the operator's questions and never the answers.
+            try:
+                self.mirror.submit(
+                    message_id=last_id,
+                    chat=jid,
+                    sender=jid_user(self._client.me.jid),
+                    from_me=True,
+                    ts=int(now),
+                    body=content,
+                    kind="text",
+                    is_group=is_group_jid(jid),
+                )
+            except Exception:  # noqa: BLE001 - history must not fail a send
+                logger.debug("whatsapp: could not archive the sent message", exc_info=True)
         self._recent_sends[key] = (now, last_id)
         if len(self._recent_sends) > 128:
             cutoff = now - max(_DUPLICATE_SEND_WINDOW_S, 60.0)
@@ -657,6 +675,17 @@ class WhatsAppTransport(MessagingTransport):
         # the archive worker once the transcript exists (`_on_voice_wake`).
         musone_trigger = from_me and musone_wake(text)
 
+        # A wake-word turn in a contact chat or an unconfigured group has none of
+        # that chat's recent messages in its session: the transport drops them.
+        # Load the archive's recent history so the agent answers with the
+        # conversation in view instead of only the wake word. The typed text is
+        # kept separately for the durable spool; the model gets the block.
+        model_text = text
+        if musone_trigger:
+            context = await asyncio.to_thread(recent_chat_context, chat, message_id)
+            if context:
+                model_text = f"{context}\n\n[Messaggio attuale]\n{text}"
+
         if from_me and not is_group_early and not self._client.me.matches(chat):
             if musone_trigger:
                 logger.info("whatsapp: musone trigger in contact chat %s", chat)
@@ -715,7 +744,7 @@ class WhatsAppTransport(MessagingTransport):
             channel_type="whatsapp",
             user_id=user_id,
             conversation_id=chat,
-            text=text,
+            text=model_text,
             is_mention=is_mention,
             from_me=from_me,
         )
@@ -764,7 +793,7 @@ class WhatsAppTransport(MessagingTransport):
         # which is a remote-triggered fetch with no authorization behind it.
         temp_paths: list[str] = []
         # The user's own text and media count, before either is rewritten below.
-        self.pending_original[id(msg)] = (msg.text, 1 if desc.has_media else 0)
+        self.pending_original[id(msg)] = (text, 1 if desc.has_media else 0)
         if desc.has_media and not self._may_fetch_media(msg, is_group=is_group):
             # Refusing is said out loud: silence reads as the agent ignoring a
             # photo the sender believes it received.
@@ -853,11 +882,13 @@ class WhatsAppTransport(MessagingTransport):
         if self._client.me.matches(chat_id):
             return
         logger.info("whatsapp: musone wake from voice note in %s", chat_id)
+        context = await asyncio.to_thread(recent_chat_context, chat_id, message_id)
+        model_text = f"{context}\n\n[Messaggio attuale]\n{transcript}" if context else transcript
         msg = InboundMessage(
             channel_type="whatsapp",
             user_id=jid_user(self._client.me.jid),
             conversation_id=chat_id,
-            text=transcript,
+            text=model_text,
             is_mention=True,
             from_me=True,
         )
