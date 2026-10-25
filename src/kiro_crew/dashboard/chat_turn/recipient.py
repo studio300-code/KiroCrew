@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 from kiro_crew.dashboard.chat_utils import slack_mirror_is_paused
 from kiro_crew.messaging.display_safety import redact_for_display
 from kiro_crew.messaging.egress import channel_egress_parts, send_channel_parts
-from kiro_crew.messaging.link import CHAT_TYPE_DIRECT, parse_session_key
+from kiro_crew.messaging.link import CHAT_TYPE_DIRECT, SLACK_NAMESPACE, parse_session_key
 from kiro_crew.messaging.renderer import split_options_trailer
 from kiro_crew.mirror_admission import admission_required, verify_mirror_admission
 from kiro_crew.platform import redact_via_context
@@ -19,7 +19,6 @@ if TYPE_CHECKING:
     from kiro_crew.dashboard.chat_runner import (
         _RECIPIENT_LOGGED,
         _RECIPIENT_LOGGED_CAP,
-        SLACK_NAMESPACE,
         logger,
         mirror_is_paused,
         sel,

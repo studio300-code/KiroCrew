@@ -145,14 +145,23 @@ _LOCAL_PATH_RE = re.compile(
 )
 
 
-def scrub_local_paths(text: str) -> str:
-    """Replace absolute local paths with a neutral marker.
+def _path_basename(match: "re.Match[str]") -> str:
+    """The basename of a matched path, or a neutral noun when there is none."""
+    raw = match.group(0)
+    if raw.startswith("file://"):
+        raw = raw[7:]
+    base = raw.rstrip("/\\").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+    return base or "il file"
 
-    Applied at the WhatsApp boundary: the dashboard may show a path to its owner,
-    but a WhatsApp recipient gets ``[file locale]`` instead of
-    ``/home/<user>/...``.
+
+def scrub_local_paths(text: str) -> str:
+    """Replace an absolute local path with just its FILE NAME.
+
+    Applied at the WhatsApp boundary: the dashboard may show a full path to its
+    owner, but a recipient gets ``filippo.pdf`` — never ``/home/<user>/...`` and
+    never a placeholder that advertises a hidden local file.
     """
-    return _LOCAL_PATH_RE.sub("[file locale]", text or "")
+    return _LOCAL_PATH_RE.sub(_path_basename, text or "")
 
 
 def display_safe_text(text: str) -> str:
