@@ -273,6 +273,40 @@ def _render_qr(code: str) -> "str | None":
         return None
 
 
+async def whatsapp_pair_phone(request: web.Request) -> web.Response:
+    """POST /api/channels/whatsapp/pair-phone — link with a typed code.
+
+    The body carries the operator's own number: ``{"phone": "393451234567"}``.
+    The reply holds the 8-character code WhatsApp expects under "Link with phone
+    number instead". Local-machine only, for the same reason the QR is: the code
+    links a device with full read and send access to every chat.
+    """
+    if not is_direct_local_request(request):
+        return web.json_response({"error": "local machine only", "code": "local_only"}, status=403)
+    client = _live_client(request)
+    if client is None:
+        return web.json_response(
+            {
+                "error": "channel not running (enable whatsapp, or wait for it to reconnect)",
+                "code": "channel_not_running",
+            },
+            status=409,
+        )
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "invalid JSON", "code": "invalid_json"}, status=400)
+    phone = str((body or {}).get("phone") or "")
+    try:
+        code = await client.pair_phone(phone)
+    except ValueError as exc:
+        return web.json_response({"error": str(exc), "code": "invalid_phone"}, status=400)
+    except Exception as exc:  # noqa: BLE001 — surface the pairing refusal verbatim
+        logger.warning("whatsapp: phone pairing failed: %s", exc)
+        return web.json_response({"error": str(exc), "code": "pair_failed"}, status=409)
+    return web.json_response({"ok": True, "code": code, "state": client.state})
+
+
 async def whatsapp_unlink(request: web.Request) -> web.Response:
     """POST /api/channels/whatsapp/unlink: logout, then delete the session DB."""
     if not is_direct_local_request(request):
@@ -346,5 +380,6 @@ def setup_whatsapp_routes(app: web.Application) -> None:
     app.router.add_put("/api/whatsapp/config", whatsapp_config_save)
     app.router.add_get("/api/whatsapp/groups", whatsapp_groups_get)
     app.router.add_post("/api/channels/whatsapp/qr/start", whatsapp_qr_start)
+    app.router.add_post("/api/channels/whatsapp/pair-phone", whatsapp_pair_phone)
     app.router.add_get("/api/channels/whatsapp/qr/status", whatsapp_qr_status)
     app.router.add_post("/api/channels/whatsapp/unlink", whatsapp_unlink)

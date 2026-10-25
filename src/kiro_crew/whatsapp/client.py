@@ -391,6 +391,29 @@ class WhatsAppClient:
             client.idle(), name="whatsapp-idle"
         )
 
+    async def pair_phone(self, phone: str) -> str:
+        """Link this device with an 8-character code instead of a QR scan.
+
+        whatsmeow's ``PairPhone`` only answers while the socket is inside the
+        pairing handshake -- which is exactly what QR emission puts us in -- so
+        the caller asks for a code while a QR is being served. The number is the
+        operator's own, full international form, digits only.
+
+        The code is the pairing credential: it is returned to the local caller
+        only, never logged, and dies with the handshake like a QR does.
+        """
+        client = self._client
+        if client is None:
+            raise RuntimeError("whatsapp client is not connected")
+        if self.state != STATE_PAIRING:
+            raise RuntimeError(f"channel is not in the pairing state (state={self.state})")
+        digits = "".join(ch for ch in phone if ch.isdigit())
+        if len(digits) < 6:
+            raise ValueError("phone must be the full international number, digits only")
+        code = await client.PairPhone(digits, True)
+        self._set_state(STATE_PAIRING, "enter the pairing code on your phone")
+        return code
+
     async def disconnect(self) -> None:
         if self._idle_task is not None:
             self._idle_task.cancel()
@@ -822,6 +845,16 @@ class WhatsAppClient:
         except Exception:  # noqa: BLE001 — picker degrades to manual JID entry
             logger.warning("whatsapp: get_joined_groups failed", exc_info=True)
         return out
+
+    async def group_name(self, jid_str: str) -> str:
+        """Subject of one joined group, "" when unknown (archive labels)."""
+        if self._client is None:
+            return ""
+        try:
+            info = await self._client.get_group_info(self._parse_jid(jid_str))
+        except Exception:  # noqa: BLE001 — a label is never worth a failure
+            return ""
+        return str(getattr(getattr(info, "GroupName", None), "Name", "") or "")
 
     def _parse_jid(self, jid_str: str) -> Any:
         from neonize.proto.Neonize_pb2 import JID
