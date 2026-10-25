@@ -44,6 +44,7 @@ nothing at import.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -360,6 +361,22 @@ def unwrap_message(msg: Any) -> Any:
     submessage out of the message handed to it, and the outer carrier has none.
     """
     return _unwrap(msg)[0]
+
+
+#: The operator's wake word. A message the linked account itself sent that
+#: BEGINS with this word addresses the agent even in a contact DM or in a group
+#: that is not configured. Matched as a whole word so "musonexxx" is not one.
+_MUSONE_WAKE_RE = re.compile(r"^musone\b", re.IGNORECASE)
+
+
+def musone_wake(text: object) -> bool:
+    """Whether *text* opens with the operator's wake word ("musone").
+
+    Shared by the live stanza path (typed text) and the archive worker (a voice
+    note's transcript), so the two cannot disagree about what counts as a
+    summons.
+    """
+    return bool(_MUSONE_WAKE_RE.match(str(text or "").strip()))
 
 
 def describe(msg: Any) -> MediaDescription:
