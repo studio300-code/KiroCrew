@@ -106,8 +106,10 @@ def recent_chat_context(
     group = is_group_jid(chat_id)
     for row in rows:
         sender = "io" if row["from_me"] else str(row["sender"] or "")
-        if group and not row["from_me"] and row["chat_name"]:
-            sender = f"{sender} ({row['chat_name']})"
+        if not row["from_me"] and not group and row["chat_name"]:
+            # A DM's chat_name is the person's address-book name; prefer it to a
+            # bare LID/number the model cannot place.
+            sender = str(row["chat_name"])
         body = " ".join(_message_text(row).split())
         if not body:
             continue
