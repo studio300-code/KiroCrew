@@ -284,6 +284,9 @@ class InboundMessage:
     # gateway built itself (a nudge or monitor wake) leaves it False. The channel
     # dispatchers start a person's turn FOREGROUND from it (kiro_crew.start_priority).
     person_origin: bool = False
+    # Whether the message was sent by the linked account itself (the operator).
+    # Used for musone trigger and other operator-specific logic.
+    from_me: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -294,6 +297,7 @@ class InboundMessage:
             "thread_id": self.thread_id,
             "attachments": list(self.attachments),
             "is_mention": self.is_mention,
+            "from_me": self.from_me,
         }
 
 
