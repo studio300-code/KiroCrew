@@ -131,6 +131,30 @@ def _redact_all(text: str) -> str:
     return out
 
 
+#: Absolute filesystem paths must never reach a chat: they name the operator's
+#: machine, and a recipient can do nothing with them. Matches the common POSIX
+#: and Windows roots, with or without a ``file://`` prefix, and stops at the
+#: characters a path cannot contain unquoted.
+_LOCAL_PATH_RE = re.compile(
+    r"""(?<![\w:/])(?:file://)?"""
+    r"""(?:"""
+    r"""/(?:home|Users|root|tmp|var|opt|srv|mnt|media|private)/[^\s"'`)\]<>|]+"""
+    r"""|~/(?:[^\s"'`)\]<>|]+)"""
+    r""")"""
+    r"""|[A-Za-z]:\\[^\s"'`)\]<>|]+"""
+)
+
+
+def scrub_local_paths(text: str) -> str:
+    """Replace absolute local paths with a neutral marker.
+
+    Applied at the WhatsApp boundary: the dashboard may show a path to its owner,
+    but a WhatsApp recipient gets ``[file locale]`` instead of
+    ``/home/<user>/...``.
+    """
+    return _LOCAL_PATH_RE.sub("[file locale]", text or "")
+
+
 def display_safe_text(text: str) -> str:
     """*text* screened for what WhatsApp SHOWS, with no dialect conversion.
 
@@ -142,7 +166,7 @@ def display_safe_text(text: str) -> str:
     as in a message body.
     """
     safe, _ = redact_for_display(strip_ansi(text or ""), _redact_all)
-    return safe
+    return scrub_local_paths(safe)
 
 
 #: Every outbound reply opens with this. Local product choice: it makes the
@@ -311,7 +335,7 @@ def to_whatsapp_text(content: str) -> str:
     # what sat on either side of it, so this is the only scan whose result does not
     # depend on which reductions ran -- and it reads the form the client renders.
     text, _ = redact_for_display(text, _redact_all)
-    return text.strip()
+    return scrub_local_paths(text.strip())
 
 
 def render_chunks(
