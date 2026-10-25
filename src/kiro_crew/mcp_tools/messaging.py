@@ -1033,13 +1033,14 @@ def file_send(name: str, args: dict[str, Any]) -> str:
     if d.get("error"):
         return f"Error: {d['error']}"
     # Native channel delivery first: when the caller's session is linked to a
-    # non-Slack conversation with a document-capable transport (a Telegram
-    # chat today), the file belongs THERE — the user who asked for it is
-    # reading that surface, and the dashboard card is the fallback, not the
-    # delivery. The endpoint resolves the destination exclusively from the
-    # caller's session map entry (this tool cannot name a conversation) and
-    # answers ``delivered: false`` for every "no destination here" case — in
-    # which case the Slack leg below runs exactly as it always has.
+    # non-Slack conversation with a document-capable transport (Telegram,
+    # Discord, WeCom or WhatsApp), the file belongs THERE — the user who asked
+    # for it is reading that surface, and the dashboard card is the fallback,
+    # not the delivery. The endpoint resolves the destination exclusively from
+    # the caller's own session (its mirror link, or the chat id embedded in a
+    # channel-born key) and answers ``delivered: false`` for every "no
+    # destination here" case — in which case the Slack leg below runs exactly
+    # as it always has.
     #
     # The caller is resolved STRICTLY and pinned on the wire. The default
     # lenient resolution includes a /proc ancestor walk, under which an

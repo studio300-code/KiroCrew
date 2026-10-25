@@ -64,11 +64,13 @@ import asyncio
 import logging
 import time
 from collections import OrderedDict
+from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from kiro_crew.config.sections import _coerce_whatsapp_groups
 from kiro_crew.messaging.attachments import append_attachment_context, cleanup
 from kiro_crew.messaging.dispatch import inbound_permitted
+from kiro_crew.messaging.outbound_files import OutboundFile
 from kiro_crew.messaging.transport import (
     ConfiguredChannelTarget,
     InboundMessage,
@@ -407,13 +409,19 @@ class WhatsAppTransport(MessagingTransport):
     async def send_document(
         self,
         conversation_id: str,
-        data: bytes,
-        filename: str,
+        file: OutboundFile,
         *,
-        mimetype: str = "",
         caption: str = "",
+        thread_id: str | None = None,
     ) -> str:
         """Upload one file as a WhatsApp document, echo-tracked.
+
+        The transport-level upload verb, with the same shape as Telegram's and
+        Discord's: the caller passes the validated :class:`OutboundFile`, never
+        a path to re-open, and ``file_send`` reaches it through
+        ``upload_destination.resolve_channel``. ``thread_id`` exists for
+        cross-transport parity and is unused because a WhatsApp conversation is
+        one flat chat.
 
         The name that travels is the BASENAME only (the client enforces it):
         the caller's path is a real path on the operator's machine and must not
@@ -422,10 +430,10 @@ class WhatsAppTransport(MessagingTransport):
         jid = normalize_jid(conversation_id)
         return await self._client.send_document_bytes(
             jid,
-            data,
-            filename,
-            mimetype=mimetype,
-            caption=caption,
+            file.data,
+            Path(file.path).name,
+            mimetype=file.mime,
+            caption=caption or file.alt,
             on_sent=lambda message_id: self.echo.remember(jid, message_id),
         )
 

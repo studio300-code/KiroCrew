@@ -352,9 +352,11 @@ async def resolve_channel(
     ``may_send_to`` recipient re-authorization, all fail-closed and SEL-audited
     inside ``_resolve_mirror_target`` -- plus the restricted-session ceiling the
     renderers' extraction path enforces, on the same shared predicate. The
-    destination comes exclusively from the caller's session map entry: a request
-    cannot name a conversation, which is what keeps this leg from being a
-    broadcast primitive.
+    destination comes from the caller's OWN session: its persisted mirror link
+    when one exists, and otherwise -- for a channel-born WhatsApp conversation,
+    whose key embeds the chat id -- a link derived from the verified strict
+    session key itself. A request cannot name a conversation, which is what
+    keeps this leg from being a broadcast primitive.
 
     ``_resolve_mirror_target`` is imported inside the call, not at module scope:
     ``chat_runner`` imports the dashboard world, and this module is imported
@@ -393,6 +395,24 @@ async def resolve_channel(
                 link,
                 check_recipient=False,
             )
+        elif session_key.startswith("whatsapp:"):
+            # A channel-born WhatsApp session has no dashboard mirror row: its
+            # own key IS the conversation (`whatsapp:<crew>:<kind>:<jid>`), and
+            # the agent is answering in that chat. Derive the link from the
+            # verified strict key — file_send passes the key it gated on — and
+            # run the same governance/transport rungs. A request can never name
+            # another conversation this way.
+            chat_id = session_key.rsplit(":", 1)[-1]
+            if "@" in chat_id:
+                from kiro_crew.messaging.link import ChannelLink
+
+                target = await asyncio.to_thread(
+                    _resolve_channel_target,
+                    state,
+                    session_key,
+                    ChannelLink(channel_type="whatsapp", channel_id=chat_id),
+                    check_recipient=False,
+                )
     if target is None:
         # No mirror link, a Slack link (the Slack leg owns those), a missing or
         # capability-less transport, a governance denial, or a may_send_to
