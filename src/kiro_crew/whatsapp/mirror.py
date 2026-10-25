@@ -972,6 +972,13 @@ class MirrorTap:
                 else:
                     name = item.get("_sender_name") or item.get("_push") or ""
                     if not name:
+                        # The CHAT's contact, not the sender's: for an outbound
+                        # message the sender is us and the reader still needs the
+                        # conversation's name. Fall back to the sender for an
+                        # inbound stanza whose chat JID is an alias.
+                        chat_user = str(chat).split("@", 1)[0]
+                        name = await asyncio.to_thread(_contact_name, chat_user)
+                    if not name:
                         name = await asyncio.to_thread(
                             _contact_name, str(item.get("sender") or "")
                         )
