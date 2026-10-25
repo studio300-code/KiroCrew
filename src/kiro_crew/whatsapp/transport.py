@@ -404,6 +404,31 @@ class WhatsAppTransport(MessagingTransport):
             jid, data, caption, on_sent=lambda message_id: self.echo.remember(jid, message_id)
         )
 
+    async def send_document(
+        self,
+        conversation_id: str,
+        data: bytes,
+        filename: str,
+        *,
+        mimetype: str = "",
+        caption: str = "",
+    ) -> str:
+        """Upload one file as a WhatsApp document, echo-tracked.
+
+        The name that travels is the BASENAME only (the client enforces it):
+        the caller's path is a real path on the operator's machine and must not
+        reach the recipient.
+        """
+        jid = normalize_jid(conversation_id)
+        return await self._client.send_document_bytes(
+            jid,
+            data,
+            filename,
+            mimetype=mimetype,
+            caption=caption,
+            on_sent=lambda message_id: self.echo.remember(jid, message_id),
+        )
+
     async def react(
         self, conversation_id: str, sender_id: str, message_id: str, emoji: str
     ) -> None:
