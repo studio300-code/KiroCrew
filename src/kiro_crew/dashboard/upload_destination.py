@@ -365,13 +365,34 @@ async def resolve_channel(
     """
     if not session_key or not getattr(state, "sessions", None):
         return Skip("no_session")
-    from kiro_crew.dashboard.chat_runner import _resolve_mirror_target
+    from kiro_crew.dashboard.chat_turn.recipient import (
+        _resolve_channel_target,
+        _resolve_mirror_target,
+    )
 
     # Off-loop like the admission gate: the ladder reloads governance profiles
     # and reads the persisted session map -- synchronous filesystem work
     # (no-blocking-call-on-event-loop). The session map's reads are
     # lock-guarded, so the call is thread-safe.
     target = await asyncio.to_thread(_resolve_mirror_target, state, session_key)
+    if target is None:
+        # A live WhatsApp conversation: the file is part of the reply the
+        # renderer is already delivering into that chat, not a proactive DM.
+        # The generic ladder refuses it only because WhatsApp's `may_send_to`
+        # applies `dm_policy` (self = self-chat only) to every send, while the
+        # text reply path deliberately does not consult it. Re-resolve the
+        # session's OWN link with the recipient rung skipped, keeping governance
+        # and transport capability in force. Scoped to WhatsApp document
+        # delivery; every other channel keeps the strict ladder.
+        link = state.sessions.get_mirror_link(session_key)
+        if link is not None and link.channel_type == "whatsapp" and link.channel_id:
+            target = await asyncio.to_thread(
+                _resolve_channel_target,
+                state,
+                session_key,
+                link,
+                check_recipient=False,
+            )
     if target is None:
         # No mirror link, a Slack link (the Slack leg owns those), a missing or
         # capability-less transport, a governance denial, or a may_send_to
