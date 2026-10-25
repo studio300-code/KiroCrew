@@ -89,7 +89,9 @@ from kiro_crew.whatsapp.jids import (
     normalize_jid,
     wa_id_to_user_jid,
 )
-from kiro_crew.whatsapp.media import describe, unsupported_note, unwrap_message
+
+from kiro_crew.whatsapp.mirror import MirrorTap
+from kiro_crew.whatsapp.media import describe, musone_wake, unsupported_note, unwrap_message
 from kiro_crew.whatsapp.renderer import WHATSAPP_CHUNK_LIMIT
 
 logger = logging.getLogger(__name__)
@@ -205,6 +207,11 @@ class WhatsAppTransport(MessagingTransport):
             normalize_jid(wa_id_to_user_jid(w)) for w in (allowed_wa_ids or []) if str(w).strip()
         )
         self.echo = EchoTracker()
+        #: copy of every message into the local archive (wa.db), independent of
+        #: dm_policy/groups: the archive is history, not admission. The worker
+        #: also calls back once a voice note is transcribed, because a spoken
+        #: wake word is invisible at stanza time (`_on_voice_wake`).
+        self.mirror = MirrorTap(client, on_voice_wake=self._on_voice_wake)
         # Coerced, so a live reload can compare like with like: the loader's
         # coercion is what decides an entry's effective mode and cooldown, and
         # comparing raw config against it would rebuild the gate (resetting its
@@ -584,6 +591,23 @@ class WhatsAppTransport(MessagingTransport):
             logger.debug("whatsapp: dropping replayed history message %s", message_id)
             return
 
+        # 2b. Archive tap: everything that reached this device, before any
+        #     admission decision. Skips nothing but replays above.
+        #     raw_envelope enables the media worker to download voice/images.
+        self.mirror.submit(
+            message_id=message_id,
+            chat=chat,
+            sender=jid_user(sender),
+            from_me=from_me,
+            ts=int(stamp),
+            body=text,
+            kind=getattr(desc, "kind", ""),
+            is_group=is_group,
+            push_name=str(getattr(info, "PushName", "") or ""),
+            sender_name=str(getattr(info, "PushName", "") or ""),
+            raw_envelope=raw_envelope,
+        )
+
         # 3. Echo gate.
         if from_me and self.echo.is_own_echo(chat, message_id):
             return
@@ -595,9 +619,21 @@ class WhatsAppTransport(MessagingTransport):
         #     Groups are exempt: a configured group is where the operator does
         #     address the agent, gated by mention or rules.
         is_group_early = bool(getattr(source, "IsGroup", False)) or is_group_jid(chat)
+
+        # Musone wake: the operator's OWN message beginning with the wake word
+        # addresses the agent even in a contact DM or in a group that is not in
+        # `whatsapp.groups`. Only the operator (from_me) can trigger this.
+        # Voice notes arrive with `text == ""`, so their trigger is decided by
+        # the archive worker once the transcript exists (`_on_voice_wake`).
+        musone_trigger = from_me and musone_wake(text)
+
         if from_me and not is_group_early and not self._client.me.matches(chat):
-            logger.debug("whatsapp: own outgoing message to %s is not a command", chat)
-            return
+            if musone_trigger:
+                logger.info("whatsapp: musone trigger in contact chat %s", chat)
+                # Allow through as a command to the agent
+            else:
+                logger.debug("whatsapp: own outgoing message to %s is not a command", chat)
+                return
 
         # 4. Group gate (before authorize: an unconfigured group must not
         #    even produce an audit row per message).
@@ -609,18 +645,29 @@ class WhatsAppTransport(MessagingTransport):
         # the self-chat, which is the command surface; in a configured group the
         # operator addresses the agent normally, gated by mention or rules.
         self_chat = self._client.me.matches(chat)
+        # Musone trigger makes the operator an operator even in contact chats
         sender_is_operator = (from_me or self._client.me.matches(sender, sender_alt)) and (
-            is_group or self_chat
+            is_group or self_chat or musone_trigger
         )
+        # Musone trigger counts as "addressed" to the agent
+        is_addressed = self._is_addressed(inner, chat, sender_is_operator) or musone_trigger
+
         if is_group:
-            verdict = self.group_gate.evaluate(
-                chat,
-                sender_is_operator=sender_is_operator,
-                addressed=self._is_addressed(inner, chat, sender_is_operator),
-            )
-            if not verdict.respond:
-                logger.debug("whatsapp: group %s drop (%s)", chat, verdict.reason)
-                return
+            if musone_trigger:
+                # An explicit summons by the operator outranks the group roster:
+                # a group absent from `whatsapp.groups` (or one configured as
+                # `off`) still answers it. The per-sender admission below is
+                # unchanged, so only the operator can wake the agent this way.
+                verdict = GroupVerdict(respond=True, may_steer=True)
+            else:
+                verdict = self.group_gate.evaluate(
+                    chat,
+                    sender_is_operator=sender_is_operator,
+                    addressed=is_addressed,
+                )
+                if not verdict.respond:
+                    logger.debug("whatsapp: group %s drop (%s)", chat, verdict.reason)
+                    return
 
         # user_id: the operator's own commands attribute to the operator
         # (self-chat + fromMe in any chat); group members keep their number.
@@ -632,13 +679,17 @@ class WhatsAppTransport(MessagingTransport):
         else:
             attributed = await self._canonical_sender(sender)
         user_id = jid_user(attributed)
+        # Musone trigger counts as a mention/addressed
+        is_mention = bool(verdict and not verdict.unprompted and is_group) or musone_trigger
         msg = InboundMessage(
             channel_type="whatsapp",
             user_id=user_id,
             conversation_id=chat,
             text=text,
-            is_mention=bool(verdict and not verdict.unprompted and is_group),
+            is_mention=is_mention,
+            from_me=from_me,
         )
+        logger.warning("whatsapp: dispatching message id=%s from_me=%s musone=%s chat=%s", message_id, from_me, musone_trigger, chat)
 
         # 5. Authorize. A DM is judged by dm_policy. A group message is judged
         #    by the per-sender allowlist (operator, or a listed number): the
@@ -753,6 +804,46 @@ class WhatsAppTransport(MessagingTransport):
         if stanza_id and chat and self.echo.is_own_echo(chat, stanza_id):
             return True  # quoted message ID is one we sent
         return False
+
+    async def _on_voice_wake(self, chat_id: str, transcript: str, message_id: str) -> None:
+        """Dispatch the operator's own voice note when its transcript wakes the agent.
+
+        A voice note carries no text at stanza time, so `receive` cannot see a
+        spoken "musone" and the note is dropped in a contact DM or an
+        unconfigured group before the transcript exists. The archive worker
+        transcribes it seconds later and calls back here with the text.
+
+        Only the linked account's own notes qualify (the worker checks
+        `from_me`), and the self-chat is excluded: there the ordinary inbound
+        path has already dispatched the note as media, and dispatching again
+        would answer every self-chat voice twice.
+        """
+        if not musone_wake(transcript):
+            return
+        if self._client.me.matches(chat_id):
+            return
+        logger.info("whatsapp: musone wake from voice note in %s", chat_id)
+        msg = InboundMessage(
+            channel_type="whatsapp",
+            user_id=jid_user(self._client.me.jid),
+            conversation_id=chat_id,
+            text=transcript,
+            is_mention=True,
+            from_me=True,
+        )
+        msg.person_origin = True
+        self.pending_message_id[id(msg)] = message_id
+        self.pending_operator[id(msg)] = True
+        self.pending_original[id(msg)] = (transcript, 0)
+        if is_group_jid(chat_id):
+            self.pending_verdicts[id(msg)] = GroupVerdict(respond=True, may_steer=True)
+        try:
+            await self._dispatch(msg)
+        finally:
+            self.pending_verdicts.pop(id(msg), None)
+            self.pending_operator.pop(id(msg), None)
+            self.pending_message_id.pop(id(msg), None)
+            self.pending_original.pop(id(msg), None)
 
     # -- Configured outbound targets ----------------------------------------
 
