@@ -55,6 +55,18 @@ sudo systemctl restart kirocrew.service
 If upstream ever absorbs the mirror or the wake word, drop the corresponding
 local commit instead of resolving against new code.
 
+## Nightly update
+
+A systemd user timer (`kirocrew-selfupdate.timer`) runs the skill's
+`selfupdate.sh apply` every night at 03:00. It refuses a dirty checkout or a
+conflicting rebase, creates a `selfupdate-backup-<timestamp>` tag, and rolls
+back if the gateway does not come healthy.
+
+```bash
+systemctl --user list-timers kirocrew-selfupdate.timer
+journalctl --user -u kirocrew-selfupdate.service -n 50 --no-pager
+```
+
 ## Reinstalling the venv
 
 ```bash
