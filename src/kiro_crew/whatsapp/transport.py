@@ -100,6 +100,12 @@ logger = logging.getLogger(__name__)
 #: older than ``connected_at - GRACE`` are reconnect replay, not live traffic.
 _REPLAY_GRACE_S = 60.0
 
+#: An identical reply sent to the same chat inside this window is a duplicate of
+#: the previous one, not a second answer. The renderer's documented trade and a
+#: retried send can both put the same text on the wire twice; a reader sees that
+#: as the agent answering twice, so the transport refuses the second copy.
+_DUPLICATE_SEND_WINDOW_S = 15.0
+
 #: Distinct ``@lid`` senders whose phone JID is remembered. An alias is stable
 #: for the life of an account, so this only bounds memory against a group with
 #: churning membership; a miss costs one resolver round-trip, never a denial.
@@ -220,6 +226,9 @@ class WhatsAppTransport(MessagingTransport):
         self.group_gate = GroupGate(self._group_rules)
         self._group_allowed = _group_allowlists(self._group_rules)
         self._clock = clock or time.time
+        #: ``(chat, exact text) -> (sent_at, last message id)`` for the duplicate
+        #: guard in ``send_message``. Bounded and pruned on write.
+        self._recent_sends: dict[tuple[str, str], tuple[float, str]] = {}
         #: ``@lid`` alias -> phone JID, resolved once per sender (see
         #: ``_canonical_sender``). Confined to the gateway event loop like the
         #: echo tracker, so no lock is taken.
@@ -337,11 +346,32 @@ class WhatsAppTransport(MessagingTransport):
     ) -> str:
         """Chunked send. Every id is remembered for echo discipline the moment
         its chunk lands, via the ``on_sent`` callback, so an echo arriving during
-        the inter-chunk delay cannot race the tracker."""
+        the inter-chunk delay cannot race the tracker.
+
+        An identical text sent to the same chat within
+        :data:`_DUPLICATE_SEND_WINDOW_S` is suppressed: a retried or re-rendered
+        reply must not reach the reader twice.
+        """
         jid = normalize_jid(conversation_id)
+        key = (jid, content)
+        now = self._clock()
+        previous = self._recent_sends.get(key)
+        if previous is not None and now - previous[0] < _DUPLICATE_SEND_WINDOW_S:
+            logger.warning(
+                "whatsapp: suppressed duplicate send to %s (identical text %.1fs ago)",
+                jid,
+                now - previous[0],
+            )
+            return previous[1]
         last_id = ""
         for message_id in await self._send_tracked(jid, content):
             last_id = message_id
+        self._recent_sends[key] = (now, last_id)
+        if len(self._recent_sends) > 128:
+            cutoff = now - max(_DUPLICATE_SEND_WINDOW_S, 60.0)
+            self._recent_sends = {
+                k: v for k, v in self._recent_sends.items() if v[0] >= cutoff
+            }
         return last_id
 
     async def _send_tracked(self, jid: str, content: str) -> list[str]:

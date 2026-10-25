@@ -145,6 +145,26 @@ def display_safe_text(text: str) -> str:
     return safe
 
 
+#: Every outbound reply opens with this. Local product choice: it makes the
+#: agent recognizable in a mixed WhatsApp inbox and is enforced here rather
+#: than trusted to the model, so a reply can never lose it.
+ROBOT_PREFIX = "🤖"
+
+
+def with_robot_prefix(text: str) -> str:
+    """Return *text* whose FIRST character is :data:`ROBOT_PREFIX`.
+
+    Idempotent: a reply the model already opened with the emoji is returned
+    with its leading whitespace trimmed, not prefixed twice.
+    """
+    body = (text or "").lstrip()
+    if not body:
+        return text or ""
+    if body.startswith(ROBOT_PREFIX):
+        return body
+    return f"{ROBOT_PREFIX} {body}"
+
+
 def _fence_info(opener: str) -> str:
     """The lowercased info string of a fence *opener* line, or ``""``."""
     match = _FENCE_INFO_RE.match(opener)
