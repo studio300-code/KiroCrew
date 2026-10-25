@@ -741,7 +741,9 @@ class WhatsAppDispatcher:
         if self.transport is None:
             return False
         try:
-            await self.transport.send_message(chat_jid, text)
+            from kiro_crew.whatsapp.renderer import with_robot_prefix
+
+            await self.transport.send_message(chat_jid, with_robot_prefix(text))
         except Exception:
             logger.warning("whatsapp: out-of-band send failed", exc_info=True)
             return False
