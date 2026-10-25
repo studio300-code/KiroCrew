@@ -43,6 +43,58 @@ DB_PATH = os.environ.get(
     "KIROCREW_WA_ARCHIVE",
     str(Path.home() / "whatsapp-web/data/wa.db"),
 )
+
+#: whatsmeow's own store, where the contact book lives. The archive's
+#: ``chat_name`` was empty for @lid chats whose stanza carried no PushName, so a
+#: name search ("what did Filippo say?") missed their whole history.
+_SESSION_DB = Path(
+    os.environ.get("KIROCREW_HOME", str(Path.home() / ".kiro" / "crew"))
+) / "whatsapp" / "session.db"
+
+
+def _contact_name(sender_user: str) -> str:
+    """The address book's name for *sender_user*, or ``""``.
+
+    Reads whatsmeow's read-only contact store: the same LID can be looked up
+    directly, and a LID with no row is mapped to its phone JID first. Cosmetic
+    only -- every failure returns ``""`` rather than blocking a message.
+    """
+    if not sender_user or not _SESSION_DB.is_file():
+        return ""
+    con = None
+    try:
+        con = sqlite3.connect(f"file:{_SESSION_DB}?mode=ro", uri=True, timeout=2.0)
+        candidates = [f"{sender_user}@lid", f"{sender_user}@s.whatsapp.net"]
+        row = con.execute(
+            "SELECT COALESCE(NULLIF(push_name,''), NULLIF(full_name,''), "
+            "NULLIF(first_name,'')) FROM whatsmeow_contacts "
+            "WHERE their_jid IN (?, ?) LIMIT 1",
+            tuple(candidates),
+        ).fetchone()
+        if row and row[0]:
+            return str(row[0]).strip()
+        phone = con.execute(
+            "SELECT pn FROM whatsmeow_lid_map WHERE lid = ? LIMIT 1", (sender_user,)
+        ).fetchone()
+        if phone and phone[0]:
+            row = con.execute(
+                "SELECT COALESCE(NULLIF(push_name,''), NULLIF(full_name,''), "
+                "NULLIF(first_name,'')) FROM whatsmeow_contacts "
+                "WHERE their_jid = ? LIMIT 1",
+                (f"{phone[0]}@s.whatsapp.net",),
+            ).fetchone()
+            if row and row[0]:
+                return str(row[0]).strip()
+    except sqlite3.Error:
+        return ""
+    finally:
+        if con is not None:
+            try:
+                con.close()
+            except Exception:  # noqa: BLE001
+                pass
+    return ""
+
 MEDIA_ROOT = os.environ.get(
     "KIROCREW_WA_MEDIA",
     str(Path.home() / "whatsapp-web/data/media"),
@@ -919,6 +971,10 @@ class MirrorTap:
                         name = await asyncio.wait_for(getter(chat), 3)
                 else:
                     name = item.get("_sender_name") or item.get("_push") or ""
+                    if not name:
+                        name = await asyncio.to_thread(
+                            _contact_name, str(item.get("sender") or "")
+                        )
             except Exception:  # noqa: BLE001 - names are cosmetic
                 name = ""
             if name:
