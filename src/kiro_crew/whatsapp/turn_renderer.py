@@ -72,6 +72,7 @@ from kiro_crew.whatsapp.renderer import (
     _redact_all,
     display_safe_text,
     render_chunks_off_loop,
+    with_robot_prefix,
 )
 
 if TYPE_CHECKING:
@@ -230,9 +231,13 @@ class WhatsAppRenderer(Renderer):
             # An unprompted group turn may end up choosing silence, and a
             # streamed prefix cannot be unsent. It stays buffered to the end.
             return
-        if self._flush_task is not None and not self._flush_task.done():
-            return
-        self._flush_task = asyncio.create_task(self._flush_after_throttle())
+        # Local: WhatsApp gets ONE bubble per reply. The live-edit path can leave
+        # a partial bubble plus a fresh full one when an edit is refused (the
+        # module docstring calls the duplicate "the right trade" for a missing
+        # sentence), and a reader sees that as the agent answering twice. Buffer
+        # the stream and deliver it once from `on_done`; the typing indicator
+        # still shows progress.
+        return
 
     async def _flush_after_throttle(self) -> None:
         wait = self._last_edit_at + _EDIT_INTERVAL_S - asyncio.get_running_loop().time()
@@ -340,7 +345,11 @@ class WhatsAppRenderer(Renderer):
         body = await asyncio.to_thread(hide_local_refs, visible)
         if not body:
             return []
-        return await render_chunks_off_loop(body, self.capabilities.max_message_chars, stable=True)
+        # The robot prefix is applied to the WHOLE reply, never per chunk: a long
+        # answer split into two messages must not open both with the emoji.
+        return await render_chunks_off_loop(
+            with_robot_prefix(body), self.capabilities.max_message_chars, stable=True
+        )
 
     def _edit_window_closed(self) -> bool:
         if not self._live_sent_at:
@@ -570,7 +579,7 @@ class WhatsAppRenderer(Renderer):
         # never passed through ``to_whatsapp_text``, so it never met the display
         # screen either, and this branch would put the one form of the reply that
         # was scanned only as literal bytes into the chat.
-        chunks = await self._rendered_chunks() or [display_safe_text(body)]
+        chunks = await self._rendered_chunks() or [display_safe_text(with_robot_prefix(body))]
         # Not the count: a streaming send that raised advanced it without landing,
         # and this is the last pass, so starting at the count would drop that
         # chunk for good. Re-sending from the earliest unlanded one can repeat a
@@ -719,7 +728,7 @@ class WhatsAppRenderer(Renderer):
         conversion.
         """
         try:
-            await self._transport.send_message(self._chat, display_safe_text(body))
+            await self._transport.send_message(self._chat, display_safe_text(with_robot_prefix(body)))
         except Exception:
             logger.warning("whatsapp: send failed, failing the turn", exc_info=True)
             raise
