@@ -373,19 +373,7 @@ class WhatsAppTransport(MessagingTransport):
             # Archive the agent's own reply too. The mirror's inbound tap cannot
             # see what this process sends, and without this row the wake-word
             # history would show the operator's questions and never the answers.
-            try:
-                self.mirror.submit(
-                    message_id=last_id,
-                    chat=jid,
-                    sender=jid_user(self._client.me.jid),
-                    from_me=True,
-                    ts=int(now),
-                    body=content,
-                    kind="text",
-                    is_group=is_group_jid(jid),
-                )
-            except Exception:  # noqa: BLE001 - history must not fail a send
-                logger.debug("whatsapp: could not archive the sent message", exc_info=True)
+            self._archive_outbound(last_id, jid, body=content, kind="text")
         self._recent_sends[key] = (now, last_id)
         if len(self._recent_sends) > 128:
             cutoff = now - max(_DUPLICATE_SEND_WINDOW_S, 60.0)
@@ -393,6 +381,29 @@ class WhatsAppTransport(MessagingTransport):
                 k: v for k, v in self._recent_sends.items() if v[0] >= cutoff
             }
         return last_id
+
+    def _archive_outbound(self, message_id: str, jid: str, *, body: str, kind: str) -> None:
+        """Record a message this transport sent, keeping both sides of the chat.
+
+        The mirror's inbound tap never sees what this process sends, so a reply
+        or an attachment would be missing from the wake-word history without
+        this row. History must never fail a send, hence the swallowed error.
+        """
+        if not message_id:
+            return
+        try:
+            self.mirror.submit(
+                message_id=message_id,
+                chat=jid,
+                sender=jid_user(self._client.me.jid),
+                from_me=True,
+                ts=int(self._clock()),
+                body=body,
+                kind=kind,
+                is_group=is_group_jid(jid),
+            )
+        except Exception:  # noqa: BLE001 - history must not fail a send
+            logger.debug("whatsapp: could not archive the sent %s", kind, exc_info=True)
 
     async def _send_tracked(self, jid: str, content: str) -> list[str]:
         return await self._client.send_text(
@@ -402,9 +413,11 @@ class WhatsAppTransport(MessagingTransport):
     async def send_image(self, conversation_id: str, data: bytes, caption: str = "") -> str:
         """Upload one image, echo-tracked like every other send this makes."""
         jid = normalize_jid(conversation_id)
-        return await self._client.send_image_bytes(
+        mid = await self._client.send_image_bytes(
             jid, data, caption, on_sent=lambda message_id: self.echo.remember(jid, message_id)
         )
+        self._archive_outbound(mid, jid, body=caption, kind="image")
+        return mid
 
     async def send_document(
         self,
@@ -428,14 +441,23 @@ class WhatsAppTransport(MessagingTransport):
         reach the recipient.
         """
         jid = normalize_jid(conversation_id)
-        return await self._client.send_document_bytes(
+        name = Path(file.path).name
+        mid = await self._client.send_document_bytes(
             jid,
             file.data,
-            Path(file.path).name,
+            name,
             mimetype=file.mime,
             caption=caption or file.alt,
             on_sent=lambda message_id: self.echo.remember(jid, message_id),
         )
+        note = (caption or file.alt or "").strip()
+        self._archive_outbound(
+            mid,
+            jid,
+            body=f"{note} ({name})" if note else name,
+            kind="document",
+        )
+        return mid
 
     async def react(
         self, conversation_id: str, sender_id: str, message_id: str, emoji: str
