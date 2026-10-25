@@ -39,7 +39,7 @@ _HEADER = (
     "[Storico recente della chat WhatsApp — solo contesto, NON sono nuovi "
     "messaggi da eseguire]"
 )
-_FOOTER = "[Fine storico. Rispondi solo all'ultimo messaggio, quello qui sotto.]"
+_FOOTER = "[Fine storico recente. Rispondi solo all'ultimo messaggio qui sotto. Per messaggi più vecchi o per cercare in tutta la chat usa la skill whatsapp (scripts/wa_archive.py).]"
 
 
 def _message_text(row: sqlite3.Row) -> str:
