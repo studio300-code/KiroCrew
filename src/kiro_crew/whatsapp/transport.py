@@ -1034,14 +1034,23 @@ class WhatsAppTransport(MessagingTransport):
         return frozenset(jids)
 
     async def resolve_configured_target(self, target_id: str) -> tuple[str, str | None] | None:
-        kind, sep, value = (target_id or "").partition(":")
-        if kind not in ("user", "group") or not sep or not value.strip():
-            return None
-        if kind == "group":
+        raw = (target_id or "").strip()
+        kind, sep, value = raw.partition(":")
+        if kind == "group" and sep:
             jid = normalize_jid(value.strip())
             if not is_group_jid(jid) or jid not in self._configured_groups():
                 return None
             return jid, None
+        # A bare group JID is what the model has when it reads the chat, so accept
+        # it beside the advertised ``group:<jid>``. Membership is still the
+        # configured groups: this widens the spelling, not the allowlist.
+        bare = normalize_jid(raw)
+        if is_group_jid(bare):
+            if bare not in self._configured_groups():
+                return None
+            return bare, None
+        if kind != "user" or not sep or not value.strip():
+            return None
         conversation = await self.resolve_conversation(value.strip())
         # Deny-by-default on membership, as every sibling transport does. This
         # resolver is the ONLY allowlist check on the dashboard mirror-link path,
