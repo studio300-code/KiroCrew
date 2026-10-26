@@ -75,6 +75,7 @@ _OPENCODE_VERSION_ARGS = ("--version",)
 # lives beside the probe's argv -- the only code that reads it -- the way the pi
 # harness keeps its minimum version in its own module.
 _OPENCODE_TESTED_MAJOR = 1
+_OPENCODE_TESTED_MAJORS = (1, 2)
 # The version child is bounded like the read-back: a binary that hangs on the
 # flag must refuse the launch, not stall the gateway loop that awaited it.
 _OPENCODE_VERSION_TIMEOUT_S = 15.0
@@ -104,7 +105,7 @@ def _opencode_version_remedy() -> str:
     return (
         f"Install a tested release with '{OPENCODE_INSTALL_COMMAND}', or set "
         f"{_OPENCODE_LAUNCH.bin_env_var} to a binary of major "
-        f"{_OPENCODE_TESTED_MAJOR}."
+        f"{' or '.join(str(m) for m in _OPENCODE_TESTED_MAJORS)}."
     )
 
 
@@ -203,7 +204,7 @@ async def _opencode_version_refusal(
     sandbox with the same mask as the read-back -- same binary, same trust level --
     and runs off the loop like it.
     """
-    tested = _OPENCODE_TESTED_MAJOR
+    tested = _OPENCODE_TESTED_MAJORS
     version_argv, cleanup = await wrap_argv_async(
         [opencode_bin, *_OPENCODE_VERSION_ARGS],
         mode=sandbox_mode,
@@ -220,18 +221,21 @@ async def _opencode_version_refusal(
         # child has exited -- refusal paths included.
         if cleanup:
             await asyncio.to_thread(launch_mod._unlink_readback_launcher, cleanup)
-    if major == tested:
+    if major in tested:
+        # The read-back branch below keys on this fact. Set only on an accepted
+        # binary, so a refused launch cannot leave a stale major behind.
+        session._opencode_major = major
         return "", ""
     if major is None:
         return (
             "the resolved binary did not report a readable version, so the launch "
-            f"cannot establish it is the tested major {tested}",
+            f"cannot establish it is one of the tested majors {', '.join(str(m) for m in tested)}",
             _opencode_version_remedy(),
         )
     return (
         f"the resolved binary reports major {major}, and this launch has only been "
-        f"tested against major {tested}: the permission read-back and the ACP spawn "
-        "have never run against that line",
+        f"tested against majors {', '.join(str(m) for m in tested)}: the permission "
+        "read-back and the ACP spawn have never run against that line",
         _opencode_version_remedy(),
     )
 
@@ -514,7 +518,9 @@ def _opencode_seeded_deny_rules(config_content: str, setting_key: str) -> tuple[
     )
 
 
-def _opencode_routing_config(backend: str, deny_rules: Collection[str] = ()) -> str:
+def _opencode_routing_config(
+    backend: str, deny_rules: Collection[str] = (), major: int = 1
+) -> str:
     """The inline harness config that makes this session ask, as one env value.
 
     *deny_rules* are the tool ids the session's projection asks the harness itself to
@@ -549,6 +555,22 @@ def _opencode_routing_config(backend: str, deny_rules: Collection[str] = ()) -> 
                     _ENV_OPENCODE_CONFIG_CONTENT,
                 )
     rules = tuple(deny_rules)
+    if major >= 2:
+        # v2 spells the permission surface as an array of action/resource/effect
+        # rules. The ask-all rule comes FIRST and the per-session deny rules
+        # after it, matching v2's last-match-wins order: the deny rules switch
+        # off exactly the tools the projection withheld, while every other call
+        # still reaches the host gate.
+        permissions = [{"action": "*", "resource": "*", "effect": value}]
+        permissions.extend(
+            {"action": rule, "resource": "*", "effect": "deny"} for rule in rules
+        )
+        merged["permissions"] = permissions
+        # A v1 ``permission`` key left in an ambient JSON would be a second
+        # spelling of the same setting; v2 normalizes it, so drop it rather
+        # than let two shapes race.
+        merged.pop("permission", None)
+        return json.dumps(merged)
     if rules and value == "ask":
         # Each switched-off tool AFTER the "*", because the harness lets the last
         # matching rule win; the read-back checks that order survived the merge.
@@ -559,6 +581,159 @@ def _opencode_routing_config(backend: str, deny_rules: Collection[str] = ()) -> 
     else:
         merged[setting_key] = value
     return json.dumps(merged)
+
+
+def _opencode_v2_permission_rules(raw: object) -> list[tuple[str, str, str]]:
+    """v2 ``permissions`` entries as ``(action, resource, effect)`` triples.
+
+    A v2 config carries an array of ``{"action": ..., "resource": ...,
+    "effect": ...}`` rules. The same shape is used at the top level and under
+    ``agent.<name>.permissions``. Anything else -- including a v1 map -- is
+    ignored here; the v1 read-back owns that shape.
+    """
+    if isinstance(raw, dict) and isinstance(raw.get("permissions"), list):
+        raw = raw["permissions"]
+    if not isinstance(raw, list):
+        return []
+    rules: list[tuple[str, str, str]] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        action = entry.get("action")
+        resource = entry.get("resource", "*")
+        effect = entry.get("effect")
+        if isinstance(action, str) and isinstance(resource, str) and isinstance(effect, str):
+            rules.append((action, resource, effect))
+    return rules
+
+
+def _opencode_v2_all_tools_effect(raw: object) -> str | None:
+    """The last effect that names every tool and every resource, or None.
+
+    v2 evaluates its array in order and the last matching rule wins. A rule whose
+    action and resource are both ``*`` is the only one that can cover the whole
+    surface; specific deny rules after it deliberately do not change this answer.
+    """
+    effect: str | None = None
+    for action, resource, entry_effect in _opencode_v2_permission_rules(raw):
+        if action == "*" and resource == "*":
+            effect = entry_effect
+    return effect
+
+
+def _opencode_v2_seeded_denies(config_content: str) -> tuple[str, ...]:
+    """The per-tool deny actions Crew seeded into a v2 ``permissions`` array."""
+    try:
+        seed = json.loads(config_content)
+    except ValueError:
+        return ()
+    if not isinstance(seed, dict):
+        return ()
+    return tuple(
+        action
+        for action, _resource, effect in _opencode_v2_permission_rules(seed.get("permissions"))
+        if action != "*" and effect == "deny"
+    )
+
+
+def _opencode_v2_routing_remedy(observed: str) -> str:
+    return (
+        "OpenCode v2 must resolve to an ask-all permission rule "
+        '({"action": "*", "resource": "*", "effect": "ask"}) for this session. '
+        f"Observed: {observed}. Remove the config source that overrides it, or "
+        "restore the ask rule in the sidecar's opencode.jsonc."
+    )
+
+
+def _verify_opencode_v2_routing(
+    session: ProcessSession, stdout: str, config_content: str
+) -> tuple[str, str]:
+    """The v2 half of the permission read-back.
+
+    v2 changed ``debug config`` from "print the merged document" to "list the
+    configuration sources". The read-back therefore merges the ``info`` documents
+    it returns and checks the v2 ``permissions`` array shape, then folds in the
+    inline seed Crew itself writes (the env source is not listed by ``debug
+    config``, but the ACP permission flow was measured against it). The ask-all
+    rule is the security precondition; the seeded specific denies are checked
+    against any MCP server the config mounts itself.
+    """
+    start = stdout.find("[")
+    sources: object = None
+    if start >= 0:
+        try:
+            sources = json.loads(stdout[start:])
+        except ValueError:
+            sources = None
+    if not isinstance(sources, list):
+        return "the resolved configuration could not be parsed", _opencode_readback_remedy()
+
+    docs = [
+        entry.get("info")
+        for entry in sources
+        if isinstance(entry, dict) and isinstance(entry.get("info"), dict)
+    ]
+    if not docs:
+        return "the resolved configuration carried no readable documents", _opencode_readback_remedy()
+
+    merged: dict = {}
+    for info in docs:
+        merged.update(info)
+
+    # The file sources first; the inline seed is applied after them, so an ask
+    # in the seed wins over a permissive file rule. If the seed does not name
+    # the setting, the last file source's all-tools rule is the answer.
+    file_effect: str | None = None
+    for info in docs:
+        if "permissions" in info:
+            effect = _opencode_v2_all_tools_effect(info.get("permissions"))
+            if effect is not None:
+                file_effect = effect
+    try:
+        seed = json.loads(config_content)
+    except ValueError:
+        seed = {}
+    seed_effect = _opencode_v2_all_tools_effect(seed.get("permissions")) if isinstance(seed, dict) else None
+    resolved_effect = seed_effect if seed_effect is not None else file_effect
+    if resolved_effect != "ask":
+        return (
+            "the resolved permissions do not put the ask posture in force "
+            f"(all-tools effect={resolved_effect!r})",
+            _opencode_v2_routing_remedy(repr(resolved_effect)),
+        )
+
+    # A per-agent permission array REPLACES the top-level one for that agent.
+    # A broad allow there is one agent whose calls never reach the host gate.
+    # v1 spells the per-agent map ``agent``; v2's config source uses ``agents``.
+    # Check both so a per-agent broad allow cannot hide behind the plural key.
+    for agents_key in ("agent", "agents"):
+        agents = merged.get(agents_key)
+        if not isinstance(agents, dict):
+            continue
+        for agent_name, entry in agents.items():
+            if not isinstance(entry, dict) or "permissions" not in entry:
+                continue
+            effect = _opencode_v2_all_tools_effect(entry.get("permissions"))
+            if effect is not None and effect != "ask":
+                return (
+                    f"{agents_key} {agent_name!r} overrides it with all-tools effect {effect!r}",
+                    _opencode_v2_routing_remedy(
+                        f"{agents_key} {agent_name!r} effect={effect!r}"
+                    ),
+                )
+
+    config_servers, servers_issue = _opencode_config_mcp_server_names(merged)
+    if servers_issue:
+        return servers_issue, _opencode_config_mcp_servers_remedy()
+    session._opencode_config_mcp_servers = config_servers
+
+    mounts = merged.get("mcp")
+    session._opencode_native_mounts = frozenset(mounts) if isinstance(mounts, dict) else frozenset()
+    seeded_denies = _opencode_v2_seeded_denies(config_content)
+    native = _opencode_native_servers_holding(merged, seeded_denies)
+    if native:
+        return _native_mount_refusal(session, native)
+    return "", ""
 
 
 def _verify_opencode_routing(
@@ -651,6 +826,8 @@ def _verify_opencode_routing(
             f"the resolved configuration could not be read back ({detail})",
             _opencode_readback_remedy(),
         )
+    if getattr(session, "_opencode_major", 1) >= 2:
+        return _verify_opencode_v2_routing(session, completed.stdout, config_content)
     # The harness prints a banner before the document, so the object is found
     # rather than assumed to start at byte zero.
     start = completed.stdout.find("{")
@@ -857,7 +1034,9 @@ class OpencodeLaunch(ProcessAdapter):
         # synchronous spawn on the gateway loop is the stall this path guards
         # against everywhere else.
         self._config_content = _opencode_routing_config(
-            self.backend, getattr(session, "_session_harness_deny_rules", ())
+            self.backend,
+            getattr(session, "_session_harness_deny_rules", ()),
+            major=getattr(session, "_opencode_major", 1),
         )
         # Wrapped in the SAME sandbox, with the SAME credential mask, as the session
         # spawn. The read-back runs the harness's own binary, and this harness
