@@ -54,6 +54,32 @@ if TYPE_CHECKING:
     from kiro_crew.dashboard.chat_turn.turn_reply_seams import _cut_segment
 
 
+def _pending_harness_tool_id(client: object, event: object) -> str:
+    """Qualified harness id for a tool_call event that did not carry one.
+
+    OpenCode/Goose name the tool on the first ``tool_call`` frame; the
+    permission frame later carries the qualified id. The PostToolUse hook fires
+    after the result, so the initial event's name is the only identity left.
+    Build the same id shape the gate uses, but only for a name the backend's
+    table actually lists (a display title is not a tool name).
+    """
+    backend = (
+        getattr(client, "backend", "")
+        or getattr(getattr(client, "_client", None), "backend", "")
+        or getattr(getattr(client, "client", None), "backend", "")
+        or ""
+    )
+    name = getattr(event, "tool_name", "") or getattr(event, "title", "") or ""
+    if not backend or not name:
+        return ""
+    from kiro_crew.acp.harness_tool_names import HARNESS_TOOL_TABLES
+
+    table = HARNESS_TOOL_TABLES.get(backend)
+    if not table or not any(name in ids for ids in table.values()):
+        return ""
+    return f"{backend}#{name}"
+
+
 async def _persist_tool_result_rows(state: Any, slot: Any) -> Any:
     """Persist tool rows without leaving a same-file replacement looser."""
     history_key = slot_history_key(slot)
@@ -211,6 +237,8 @@ async def _on_tool_call(turn: _ChatTurn, event) -> None:
     _pending_dir_tool = turn._pending_dir_tool
     _pending_input_digest = turn._pending_input_digest
     _pending_tools = turn._pending_tools
+    _pending_tool_ids = turn._pending_tool_ids
+    _pending_tool_idents = turn._pending_tool_idents
     _repeat_loop = turn._repeat_loop
     _seen_tool_identity = turn._seen_tool_identity
     _shell_tool_calls = turn._shell_tool_calls
@@ -383,6 +411,10 @@ async def _on_tool_call(turn: _ChatTurn, event) -> None:
         _raw = _raw[9:]
     if event.tool_call_id:
         _pending_tools[event.tool_call_id] = _raw
+        _pending_tool_ids[event.tool_call_id] = (
+            event.harness_tool_id or _pending_harness_tool_id(client, event)
+        )
+        _pending_tool_idents[event.tool_call_id] = event.tool_name or event.title or ""
         # The claim key binds the TOOL to its arguments, so only a call
         # that resolves to a directive tool records one: trusted
         # _meta.kiro identity first, else kiro-agent's own
@@ -499,6 +531,8 @@ async def _on_tool_call_update(turn: _ChatTurn, event) -> None:
     _pending_dir_for_digest = turn._pending_dir_for_digest
     _pending_input_digest = turn._pending_input_digest
     _pending_tools = turn._pending_tools
+    _pending_tool_ids = turn._pending_tool_ids
+    _pending_tool_idents = turn._pending_tool_idents
     _repeat_loop = turn._repeat_loop
     _shell_tool_calls = turn._shell_tool_calls
     _tcid_collapsed = turn._tcid_collapsed

@@ -87,7 +87,7 @@ GOOSE_TOOL_IDS_BY_KIRO_TOOL: dict[str, tuple[str, ...]] = {
 
 #: kiro-cli tool name -> the opencode tools that do the same job.
 OPENCODE_TOOL_IDS_BY_KIRO_TOOL: dict[str, tuple[str, ...]] = {
-    "execute_bash": ("bash",),
+    "execute_bash": ("bash", "shell"),
     "fs_read": ("read", "list"),
     "fs_write": ("write", "edit", "apply_patch", "patch", "multiedit"),
     "grep": ("grep",),

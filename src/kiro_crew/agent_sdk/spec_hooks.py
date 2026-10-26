@@ -233,9 +233,10 @@ def _hook(agent_id: str, event: str, index: int, entry: dict, timeout: int) -> S
         # A finished call reaches the turn loop with no harness tool id, so a
         # PostToolUse is matched on the call's title, which a kiro-cli tool name
         # rarely matches. Said once here rather than left to miss silently.
-        logger.warning(
-            "agent %r: spec postToolUse matcher %s is compared with the call's "
-            "title, since the harness names no tool on a finished call",
+        logger.debug(
+            "agent %r: spec postToolUse matcher %s will use the harness tool id "
+            "when the backend supplies one; otherwise it is compared with the "
+            "call title",
             agent_id,
             _diagnostic(matcher),
         )

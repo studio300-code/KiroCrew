@@ -68,6 +68,8 @@ async def _on_tool_result(turn: _ChatTurn, event) -> None:
     _pending_dir_tool = turn._pending_dir_tool
     _pending_input_digest = turn._pending_input_digest
     _pending_tools = turn._pending_tools
+    _pending_tool_ids = turn._pending_tool_ids
+    _pending_tool_idents = turn._pending_tool_idents
     _repeat_loop = turn._repeat_loop
     _rows_before_turn = turn._rows_before_turn
     _seen_tool_identity = turn._seen_tool_identity
@@ -906,6 +908,8 @@ async def _on_tool_result(turn: _ChatTurn, event) -> None:
                 logger.debug("mcp-app flag broadcast failed", exc_info=True)
     # Fire PostToolUse hooks
     _tool_name = _pending_tools.pop(event.tool_call_id, "")
+    _tool_id = _pending_tool_ids.pop(event.tool_call_id, "")
+    _tool_identity = _pending_tool_idents.pop(event.tool_call_id, "")
     try:
         _redacted_out_bounded = _redacted_out[:2000]
         await _fire(
@@ -913,6 +917,8 @@ async def _on_tool_result(turn: _ChatTurn, event) -> None:
             HOOK_EVENT_POST_TOOL_USE,
             tool_name=_tool_name,
             tool_response={"output": _redacted_out_bounded},
+            tool_id=_tool_id,
+            tool_identity=_tool_identity,
         )
     except Exception:
         logger.debug("PostToolUse hook error", exc_info=True)
