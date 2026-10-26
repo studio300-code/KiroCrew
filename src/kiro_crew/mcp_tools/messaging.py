@@ -196,7 +196,9 @@ def schemas() -> list[dict[str, Any]]:
                             "advertises it. Requires channel_type. Omit it to reach "
                             "the conversation this session already belongs to. The "
                             "channel's own allow-list is re-checked at send time, so "
-                            "an id that is no longer configured is refused."
+                            "an id that is no longer configured is refused. For a "
+                            "WhatsApp group, both the advertised 'group:<jid>' and "
+                            "the bare group JID are accepted."
                         ),
                     },
                     "unfurl_links": {

@@ -488,3 +488,17 @@ class TestFlushSegmentQuietPersist:
         assert [(m["role"], m["content"]) for m in slot.messages] == [
             ("assistant", "normal segment")
         ]
+
+
+def test_a_channel_session_is_never_steered_from_the_dashboard():
+    """The channel's turn must deliver to the channel, not to the dashboard.
+
+    A dashboard send into a channel session is queued, so the running channel
+    turn finishes and its reply reaches the person waiting there.
+    """
+    from kiro_crew.dashboard.chat_api.chat_send import _is_channel_slot_key
+
+    assert _is_channel_slot_key("whatsapp_kirocrew_forum_120363430853234757_g.us")
+    assert _is_channel_slot_key("telegram:kirocrew:direct:57689110")
+    assert not _is_channel_slot_key("dashboard_chat-26-1793036825")
+    assert not _is_channel_slot_key("")
