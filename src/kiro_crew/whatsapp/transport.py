@@ -772,7 +772,15 @@ class WhatsAppTransport(MessagingTransport):
             is_group or self_chat or musone_trigger
         )
         # Musone trigger counts as "addressed" to the agent
-        is_addressed = self._is_addressed(inner, chat, sender_is_operator) or musone_trigger
+        # The operator's ordinary message in a group is NOT a summons: a group
+        # is a room full of people, and "I wrote something" is not "agent,
+        # answer". Only the wake word, an @mention of the linked account, a
+        # quote of its message, or an explicit slash command count.
+        is_addressed = (
+            self._is_addressed(inner, chat)
+            or musone_trigger
+            or (sender_is_operator and bool(parse_command(text)))
+        )
 
         if is_group:
             if musone_trigger:
@@ -898,10 +906,15 @@ class WhatsAppTransport(MessagingTransport):
                     # worker owns it; deleting inline beats leaving decrypted media.
                     cleanup(temp_paths)
 
-    def _is_addressed(self, message: Any, chat: str, sender_is_operator: bool) -> bool:
+    def _is_addressed(self, message: Any, chat: str) -> bool:
         """Mentioned (@-tag of the linked account) or replying to the agent's
-        own message. The operator addressing their own agent in a group is
-        always 'addressed'.
+        own message.
+
+        The operator's own message is deliberately NOT addressed merely because
+        it is theirs: in a group the operator talks to the room like everyone
+        else, and the agent answers only when called (`musone`, an @mention, or
+        a quote of something it sent). The caller treats an explicit slash
+        command as a summons; the self-chat never reaches the group gate.
 
         Takes the UNWRAPPED message, not the envelope: ``contextInfo`` carries the
         mention list, and it is invisible when the message arrived inside an
@@ -909,8 +922,6 @@ class WhatsAppTransport(MessagingTransport):
         a disappearing group message read as "not addressed", so the agent stayed
         silent exactly when it was called on.
         """
-        if sender_is_operator:
-            return True
         extended = getattr(message, "extendedTextMessage", None) if message else None
         ctx = getattr(extended, "contextInfo", None) if extended is not None else None
         if ctx is None:

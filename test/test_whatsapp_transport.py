@@ -291,6 +291,20 @@ class TestGroups:
         )
         assert len(h.dispatched) == 1
 
+    async def test_operator_unaddressed_group_message_is_dropped(self):
+        """Writing in a group is not calling the agent, even for the operator."""
+        h = Harness(groups=self.cfg())
+        await h.transport.receive(
+            event(
+                chat=GROUP,
+                sender=OWN_JID,
+                from_me=True,
+                is_group=True,
+                text="what is next?",
+            )
+        )
+        assert h.dispatched == []
+
 
 @pytest.mark.asyncio
 class TestGroupSenderAllowlist:
@@ -366,7 +380,14 @@ class TestGroupSenderAllowlist:
         seen = self._audit(monkeypatch)
         h = Harness(groups=self.cfg())
         await h.transport.receive(
-            event(chat=GROUP, sender=OWN_JID, from_me=True, is_group=True, text="status?")
+            event(
+                chat=GROUP,
+                sender=OWN_JID,
+                from_me=True,
+                is_group=True,
+                text="status?",
+                mentions=[OWN_JID],
+            )
         )
         assert len(h.dispatched) == 1
         assert seen == []
@@ -761,12 +782,18 @@ class TestOwnOutgoingMessages:
         )
         assert len(harness.dispatched) == 1
 
-    async def test_the_operator_can_still_address_a_configured_group(self):
+    async def test_the_operator_can_still_call_a_configured_group(self):
         h = Harness(
             groups=[{"jid": GROUP, "name": "G", "mode": "mention", "rules": "", "cooldown_s": 0}]
         )
         await h.transport.receive(
-            event(chat=GROUP, sender=OWN_JID, from_me=True, is_group=True, text="what is next?")
+            event(
+                chat=GROUP,
+                sender=OWN_JID,
+                from_me=True,
+                is_group=True,
+                text="musone what is next?",
+            )
         )
         assert len(h.dispatched) == 1
 
