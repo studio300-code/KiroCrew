@@ -16,6 +16,7 @@ import os
 import sqlite3
 from pathlib import Path
 
+from kiro_crew.whatsapp.identity import identity
 from kiro_crew.whatsapp.jids import is_group_jid
 
 DB_PATH = os.environ.get(
@@ -105,11 +106,23 @@ def recent_chat_context(
     used = 0
     group = is_group_jid(chat_id)
     for row in rows:
-        sender = "io" if row["from_me"] else str(row["sender"] or "")
-        if not row["from_me"] and not group and row["chat_name"]:
-            # A DM's chat_name is the person's address-book name; prefer it to a
-            # bare LID/number the model cannot place.
-            sender = str(row["chat_name"])
+        if row["from_me"]:
+            sender = "io"
+        elif str(row["msg_type"] or "") == "system":
+            sender = "sistema"
+        else:
+            # wa.db stores a LID or phone number for a group sender. Resolve it
+            # through the contact book the WhatsApp client owns; never reuse
+            # the group's chat_name as if it were the author, and never guess a
+            # name from the conversation. An unknown number stays a number.
+            raw = str(row["sender"] or "").strip()
+            sender = identity().resolve(raw) if raw else ""
+            if not sender:
+                if not group and row["chat_name"]:
+                    # A DM's chat_name is the person's address-book name.
+                    sender = str(row["chat_name"])
+                else:
+                    sender = "?"
         body = " ".join(_message_text(row).split())
         if not body:
             continue
