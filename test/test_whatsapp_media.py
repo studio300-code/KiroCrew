@@ -169,9 +169,14 @@ _SCHEMA: dict[str, dict[str, str]] = {
     "LiveLocationMessage": {"degreesLatitude": "float", "caption": "str"},
     "ContactMessage": {"displayName": "str", "vcard": "str"},
     "ContactsArrayMessage": {"displayName": "str", "contacts": "[]ContactMessage"},
-    "PollCreationMessage": {"name": "str", "selectableOptionsCount": "int"},
+    "PollCreationMessage": {
+        "name": "str",
+        "selectableOptionsCount": "int",
+        "options": "[]PollOption",
+    },
+    "PollOption": {"optionName": "str", "optionHash": "str"},
     "PollUpdateMessage": {"senderTimestampMS": "int"},
-    "PollAddOptionMessage": {"senderTimestampMS": "int"},
+    "PollAddOptionMessage": {"senderTimestampMS": "int", "addOption": "PollOption"},
     "SenderKeyDistributionMessage": {"groupID": "str"},
     "MessageKey": {"ID": "str", "remoteJID": "str"},
     "ContextInfo": {"stanzaID": "str", "participant": "str"},
@@ -566,6 +571,41 @@ def test_uningestible_kinds_are_named_and_explained(field_name, sub_type, kind, 
     assert desc.kind == kind
     assert desc.has_media is False
     assert unsupported_note(desc) == note
+
+
+def test_poll_creation_carries_question_and_options():
+    poll = _Fake(
+        "PollCreationMessage",
+        name="Dove lo facciamo?",
+        options=[
+            _Fake("PollOption", optionName="Roma"),
+            _Fake("PollOption", optionName="Milano"),
+        ],
+    )
+    for field_name in (
+        "pollCreationMessage",
+        "pollCreationMessageV2",
+        "pollCreationMessageV3",
+        "pollCreationMessageV5",
+        "pollCreationMessageV6",
+    ):
+        desc = describe(_msg(**{field_name: poll}))
+        assert desc.kind == KIND_POLL
+        assert desc.caption == "[Poll: Dove lo facciamo? Options: Roma, Milano]"
+
+
+def test_poll_events_without_a_question_are_still_marked():
+    assert (
+        describe(_msg(pollUpdateMessage=_Fake("PollUpdateMessage"))).caption
+        == "[Poll vote update]"
+    )
+    added = _Fake("PollAddOptionMessage", addOption=_Fake("PollOption", optionName="Torino"))
+    assert describe(_msg(pollAddOptionMessage=added)).caption == (
+        "[Poll option added: Torino]"
+    )
+    assert describe(_msg(pollCreationMessage=_Fake("PollCreationMessage"))).caption == (
+        "[Poll]"
+    )
 
 
 def test_ingestible_and_text_kinds_get_no_note():

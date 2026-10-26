@@ -170,6 +170,25 @@ _CONVERSATION_FIELD = "conversation"
 _EXTENDED_TEXT_FIELD = "extendedTextMessage"
 _TEXT_FIELD = "text"
 
+#: Poll creation fields, all shaped as ``name`` (the question) plus repeated
+#: ``options`` whose ``optionName`` is what the voter sees. Reading them into
+#: the caption is what makes a poll answerable later from the archive; the
+#: arrival itself is still dropped by the transport, never handed to a turn.
+_POLL_CREATION_FIELDS = frozenset(
+    {
+        "pollCreationMessage",
+        "pollCreationMessageV2",
+        "pollCreationMessageV3",
+        "pollCreationMessageV5",
+        "pollCreationMessageV6",
+    }
+)
+
+#: Poll events that are not a question. A vote is an encrypted payload this
+#: channel cannot decrypt; it is still archived as a marker so a reader knows
+#: the poll moved, without pretending to know the choice.
+_POLL_VOTE_FIELDS = frozenset({"pollUpdateMessage"})
+
 #: The caption field on a media submessage, where one exists.
 _CAPTION_FIELD = "caption"
 #: Document names, in preference order: ``fileName`` is what the sender's client
@@ -427,10 +446,44 @@ def describe(msg: Any) -> MediaDescription:
         )
 
     for name, kind in _OTHER_FIELDS:
-        if _has(inner, name):
-            return MediaDescription(kind=kind, carrier_field=name, wrappers=wrappers)
+        if not _has(inner, name):
+            continue
+        caption = _poll_text(name, getattr(inner, name)) if kind == KIND_POLL else ""
+        return MediaDescription(
+            kind=kind,
+            carrier_field=name,
+            caption=caption,
+            wrappers=wrappers,
+        )
 
     return MediaDescription(kind=KIND_UNSUPPORTED, wrappers=wrappers)
+
+
+def _poll_text(field: str, sub: Any) -> str:
+    """The readable part of a poll event, or a marker when there is none.
+
+    A creation carries the question and the options, which is what the operator
+    needs later ("read the poll"): ``[Poll: <question> Options: a, b]``. A vote
+    is an encrypted payload and is recorded as ``[Poll vote update]`` without a
+    guessed option; an added option is recorded with its name.
+    """
+    if field in _POLL_VOTE_FIELDS:
+        return "[Poll vote update]"
+    if field == "pollAddOptionMessage":
+        added = _string_at(getattr(sub, "addOption", None), "optionName").strip()
+        return f"[Poll option added: {added}]" if added else "[Poll option added]"
+    if field not in _POLL_CREATION_FIELDS:
+        return ""
+    question = _string_at(sub, "name").strip()
+    options = [
+        _string_at(option, "optionName").strip()
+        for option in (getattr(sub, "options", None) or [])
+    ]
+    options = [option for option in options if option]
+    text = "Poll" + (f": {question}" if question else "")
+    if options:
+        text += " Options: " + ", ".join(options)
+    return f"[{text}]"
 
 
 def caption_text(msg: Any) -> str:
