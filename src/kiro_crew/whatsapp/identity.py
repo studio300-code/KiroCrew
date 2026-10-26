@@ -51,6 +51,7 @@ class IdentityResolver:
         by_jid: dict[str, str] = {}
         lid_to_pn: dict[str, str] = {}
         rows = []
+        loaded = False
         try:
             con = sqlite3.connect(f"file:{self._path}?mode=ro", uri=True, timeout=5.0)
             con.row_factory = sqlite3.Row
@@ -70,6 +71,7 @@ class IdentityResolver:
                     "SELECT their_jid, first_name, full_name, push_name "
                     "FROM whatsmeow_contacts"
                 ).fetchall()
+                loaded = True
             except sqlite3.Error:
                 rows = []
             finally:
@@ -77,6 +79,11 @@ class IdentityResolver:
                     con.close()
                 except Exception:  # noqa: BLE001
                     pass
+        if not loaded:
+            # A transient lock or a missing file must not erase names already
+            # resolved; leave the previous map in place and retry in a minute.
+            self._loaded_at = time.monotonic() - (RELOAD_SECONDS - 60)
+            return
         for row in rows:
             jid = str(row["their_jid"] or "").strip()
             if not jid:
