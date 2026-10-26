@@ -12,9 +12,15 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 import inspect
 import json
 import logging
+import os
+import shutil
+import tempfile
+import wave
+from pathlib import Path
 from typing import Any, AsyncIterator, Awaitable, Callable, Iterator
 
 from aiohttp import WSMessage, WSMsgType, web
@@ -56,6 +62,62 @@ PROVIDER_LOCAL = "local"
 # `apple` streams on-device via SpeechAnalyzer (macOS 26+), and `transcribe`
 # streams from AWS. The default is first.
 _STREAMING_PROVIDERS = (PROVIDER_LOCAL, "apple", "transcribe")
+
+#: The high-quality local engine used to REPLACE the resident whisper final.
+#: Whisper stays the streaming decoder because it is the only engine that keeps
+#: up with live partials; orukeet is markedly better on Italian technical speech
+#: and only needs to run once, when the speaker stops. A missing script or a
+#: failed run falls back to the whisper text, never fails the dictation.
+_ORUKEET_TRANSCRIBER = Path("/home/marco/.config/opencode/scripts/transcriber.sh")
+
+
+async def _orukeet_pcm(pcm: bytes, language: str) -> str:
+    """Transcribe 16 kHz mono Int16 PCM with orukeet; "" on any failure.
+
+    The dashboard's streaming contract has no second-final frame, so the
+    accurate text has to be produced BEFORE the final is sent. The caller waits
+    for it; the client's advertised ``final_timeout_ms`` is far longer than a
+    dictation, and live partials keep arriving until then.
+    """
+    if not pcm or not _ORUKEET_TRANSCRIBER.is_file():
+        return ""
+    fd, wav_path = tempfile.mkstemp(prefix="orukeet-final-", suffix=".wav")
+    os.close(fd)
+    outdir = tempfile.mkdtemp(prefix="orukeet-final-out-")
+    try:
+        with wave.open(wav_path, "wb") as wav:
+            wav.setnchannels(1)
+            wav.setsampwidth(2)
+            wav.setframerate(STREAM_SAMPLE_RATE_HZ)
+            wav.writeframes(pcm)
+        proc = await asyncio.create_subprocess_exec(
+            str(_ORUKEET_TRANSCRIBER),
+            "--lang",
+            language or "auto",
+            "--model",
+            "orukeet",
+            "--out",
+            outdir,
+            wav_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120.0)
+        if proc.returncode != 0:
+            logger.debug("orukeet final failed: %s", stderr.decode(errors="replace")[:300])
+            return ""
+        for line in stdout.decode(errors="replace").splitlines():
+            if line.startswith("TXT="):
+                txt = Path(line[4:].strip())
+                if txt.is_file():
+                    return txt.read_text(encoding="utf-8", errors="replace").strip()
+        return ""
+    except Exception:
+        logger.debug("orukeet final failed", exc_info=True)
+        return ""
+    finally:
+        shutil.rmtree(outdir, ignore_errors=True)
+        Path(wav_path).unlink(missing_ok=True)
 
 
 def streaming_providers() -> tuple[str, ...]:
@@ -651,6 +713,13 @@ async def _run_local_session(
     acknowledged_audio_end = 0
     latest_speech_audio_end = 0
     received_samples = 0
+    #: Every PCM byte this socket received, so the accurate engine can re-decode
+    #: the exact utterance the resident whisper model just finalised. 300 s at
+    #: 16 kHz mono int16 is 9.6 MB, and the session cap bounds it.
+    pcm_buffer = bytearray()
+    #: Cumulative sample position of the last final, so each orukeet run gets
+    #: one utterance and not the whole session.
+    last_final_sample = 0
     with _audited_setup(caller):
         # Imported here, not at module scope: both modules import numpy, and this
         # module is on the import path of every ``kirocrew mcp-dashboard`` server.
@@ -709,7 +778,7 @@ async def _run_local_session(
 
     async def _relay(events: list["stt.SttEvent"]) -> bool:
         """Forward session events to the client. False means stop the session."""
-        nonlocal acknowledged_audio_end, drain_failure
+        nonlocal acknowledged_audio_end, drain_failure, last_final_sample
         for event in events:
             if event.kind == stt.KIND_ERROR:
                 if fatal_outcome is None:
@@ -732,11 +801,26 @@ async def _run_local_session(
                 ):
                     return False
                 continue
-            text = _redacted(event.text).strip()
             if event.kind == stt.KIND_FINAL:
                 acknowledged_audio_end = max(acknowledged_audio_end, event.audio_end_sample)
-                if endpointer is not None:
-                    endpointer.note_audio_final(text)
+                if event.text.strip() and not client_gone and not ws.closed:
+                    start = max(0, last_final_sample) * 2
+                    end = max(0, event.audio_end_sample) * 2
+                    segment = bytes(pcm_buffer[start:end]) if end > start else b""
+                    if segment:
+                        accurate = await _orukeet_pcm(
+                            segment, _whisper_language(cfg.stt.language_code) or "auto"
+                        )
+                        if accurate:
+                            # The resident model produced the live partials and
+                            # the segment boundaries; orukeet replaces only the
+                            # committed words, and only when it actually heard
+                            # something. A failed run keeps the whisper final.
+                            event = dataclasses.replace(event, text=accurate)
+                last_final_sample = max(last_final_sample, event.audio_end_sample)
+            text = _redacted(event.text).strip()
+            if event.kind == stt.KIND_FINAL and endpointer is not None:
+                endpointer.note_audio_final(text)
             if not text:
                 # An empty final retracts the live hypothesis (for example after
                 # hallucination filtering). Silence here would leave that partial
@@ -1049,6 +1133,10 @@ async def _run_local_session(
                 ):
                     break
                 buffered_bytes -= len(raw)
+                # Keep the exact PCM bytes alongside the resident decoder: the
+                # accurate engine re-decodes this utterance once the final is
+                # known, and the event's audio_end_sample indexes this buffer.
+                pcm_buffer.extend(raw)
                 # The next queued frame makes this frame's partial obsolete.
                 # Stopping has the same effect: drain all audio directly to finals.
                 events = await session.feed(
