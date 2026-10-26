@@ -525,6 +525,28 @@ class TestOutboundAndTargets:
         resolved = await harness.transport.resolve_configured_target(targets[0].target_id)
         assert resolved == (OWN_JID, None)
 
+    async def test_a_configured_group_is_an_offered_and_resolvable_target(self):
+        """A group listed in `whatsapp.groups` is an explicit destination.
+
+        `allowed_wa_ids` cannot carry one: its coercion keeps digit-only phone
+        ids, so a group JID is dropped on load. Without this path a proactive
+        send can never reach a group that the operator configured.
+        """
+        h = Harness(
+            groups=[
+                {"jid": GROUP, "name": "Cape Town", "mode": "mention", "rules": "", "cooldown_s": 0}
+            ]
+        )
+        offered = {t.target_id for t in h.transport.configured_targets()}
+        assert f"group:{GROUP}" in offered
+        assert await h.transport.resolve_configured_target(f"group:{GROUP}") == (GROUP, None)
+
+    async def test_an_unconfigured_group_is_not_a_resolvable_target(self):
+        h = Harness()
+        assert await h.transport.resolve_configured_target("group:120363000000000999@g.us") is None
+        # A group JID dressed as a `user:` target gets no free pass either.
+        assert await h.transport.resolve_configured_target("user:120363000000000999@g.us") is None
+
     async def test_an_unlisted_number_is_not_a_resolvable_target(self):
         """The dashboard mirror-link path offers what `configured_targets` lists
         and then round-trips the chosen id back through the resolver, which is the
