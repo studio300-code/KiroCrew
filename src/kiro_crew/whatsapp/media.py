@@ -191,7 +191,9 @@ NOTE_VIDEO = "[A video arrived and was skipped: send a screenshot or a summary i
 NOTE_REACTION = ""
 NOTE_LOCATION = "[A location arrived and was skipped: locations are not supported]"
 NOTE_CONTACTS = "[A contact card arrived and was skipped: contact cards are not supported]"
-NOTE_POLL = "[A poll arrived and was skipped: polls are not supported]"
+#: Polls are archived by the collector and never handed to a turn: the
+#: agent reads the stored question/options only when the operator asks.
+NOTE_POLL = ""
 
 #: Kind -> note. :data:`KIND_UNSUPPORTED` is deliberately absent: that bucket is
 #: dominated by traffic no human sent (key distribution, receipts, revocations,
