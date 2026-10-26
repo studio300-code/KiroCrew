@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING, Any
 from aiohttp import web
 from aiohttp.client_exceptions import ClientConnectionResetError
 
+from kiro_crew.constants import CHANNEL_SESSION_NAMESPACES
+
 if TYPE_CHECKING:
     from kiro_crew.dashboard.chat_handlers import (
         _CREATABLE_MODES,
@@ -80,6 +82,20 @@ if TYPE_CHECKING:
         warm_project_agent_names,
         warn_if_not_durable,
     )
+
+
+def _is_channel_slot_key(key: str) -> bool:
+    """Whether *key* is a session started on a messaging channel.
+
+    A channel session has a person waiting in that channel; the dashboard is a
+    window onto it, not the surface that person reads. Steering a dashboard
+    message into the channel's running turn makes the turn answer the dashboard
+    and leaves the channel's own message without a reply. Such a send queues
+    instead, so the channel turn finishes and delivers to the channel before the
+    dashboard turn runs.
+    """
+    key = str(key or "")
+    return any(key.startswith((f"{ns}:", f"{ns}_")) for ns in CHANNEL_SESSION_NAMESPACES)
 
 
 def _sweep_stale_permissions(slot: "_ChatSlot") -> None:
@@ -969,7 +985,15 @@ async def _api_chat_send(request: web.Request) -> web.StreamResponse:
             if slot.task is not _turn_before:
                 _auto_queues = False
                 _auto_strip = None
-        if steer and not request_app and not _auto_queues:
+        if (
+            steer
+            and not request_app
+            and not _auto_queues
+            # A channel session's running turn belongs to the person waiting in
+            # that channel: queue the dashboard message instead of steering it,
+            # so the channel reply is not replaced by a dashboard answer.
+            and not _is_channel_slot_key(slot.key)
+        ):
             # Client-minted send correlation id (the same `meta.sendId`
             # convention the plain send path persists): thread it through the
             # steer so the persisted row and the steer_push echo can be matched

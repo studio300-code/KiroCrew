@@ -561,6 +561,12 @@ class TestOutboundAndTargets:
         offered = {t.target_id for t in h.transport.configured_targets()}
         assert f"group:{GROUP}" in offered
         assert await h.transport.resolve_configured_target(f"group:{GROUP}") == (GROUP, None)
+        # The model often has the bare JID from the chat, not the advertised
+        # prefix; both spellings must resolve to the same destination.
+        assert await h.transport.resolve_configured_target(GROUP) == (GROUP, None)
+        assert await h.transport.resolve_configured_target(
+            "120363999999999999@g.us"
+        ) is None
 
     async def test_an_unconfigured_group_is_not_a_resolvable_target(self):
         h = Harness()
