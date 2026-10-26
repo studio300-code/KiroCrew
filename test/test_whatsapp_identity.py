@@ -86,16 +86,18 @@ def test_lid_with_only_its_own_contact_still_resolves(tmp_path):
     assert _resolver(tmp_path).resolve("72254402592996") == "Maki"
 
 
-def test_phone_and_text_alias_resolve_to_the_same_push_name(tmp_path):
+def test_phone_resolves_to_push_name(tmp_path):
     resolver = _resolver(tmp_path)
     assert resolver.resolve("393403486586") == "FedeM"
     assert resolver.resolve("393403486586@s.whatsapp.net") == "FedeM"
-    assert resolver.resolve("Mara") == "FedeM"
-    assert resolver.resolve("pano") == "Ale_pano"
 
 
-def test_ambiguous_name_is_left_alone(tmp_path):
-    assert _resolver(tmp_path).resolve("Marco") == "Marco"
+def test_stored_display_name_is_kept_verbatim(tmp_path):
+    # "Piersito" is a group nickname and "Mara" is a saved name; neither may be
+    # rewritten to the contact's push name.
+    resolver = _resolver(tmp_path)
+    assert resolver.resolve("Mara") == "Mara"
+    assert resolver.resolve("Piersito") == "Piersito"
 
 
 def test_unknown_number_stays_a_number(tmp_path):
@@ -118,6 +120,7 @@ def test_recent_context_uses_resolved_names_not_the_group_name(
             ("m2", GROUP, "Cape Town 27", "393453396492", 1, 1001, "musone", "text"),
             ("m3", GROUP, "Cape Town 27", "999999999999", 0, 1002, "eh", "text"),
             ("m4", GROUP, "Cape Town 27", "Cape Town 27", 0, 1003, "x", "system"),
+            ("m5", GROUP, "Cape Town 27", "Piersito", 0, 1004, "yo", "text"),
         ],
     )
     monkeypatch.setattr(history, "identity", lambda: _resolver(tmp_path))
@@ -126,4 +129,5 @@ def test_recent_context_uses_resolved_names_not_the_group_name(
     assert "io: musone" in text
     assert "999999999999: eh" in text
     assert "sistema: x" in text
+    assert "Piersito: yo" in text
     assert "Cape Town 27:" not in text

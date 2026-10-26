@@ -8,11 +8,11 @@ plausible. The linked device's own store (``session.db``) is the authority:
 * a LID is followed through ``whatsmeow_lid_map`` to its phone JID;
 * the label is the contact's **push name** (what the group sees), then the full
   name, then the first name;
-* a number with no contact entry stays a number.
-
-Names already stored as text ("Mara", "pano") are aliases of the same contact;
-they are rewritten to the push name only when the alias points at exactly one
-push name. An ambiguous alias is left untouched.
+* a number with no contact entry stays a number;
+* a display name already stored in ``wa.db`` is kept verbatim. It was written
+  by WhatsApp when the message arrived and may be a group nickname ("Piersito")
+  that is not the contact's push name; rewriting it would rename the wrong
+  person.
 """
 
 from __future__ import annotations
@@ -42,7 +42,6 @@ class IdentityResolver:
         self._loaded_at = 0.0
         self._by_jid: dict[str, str] = {}
         self._lid_to_pn: dict[str, str] = {}
-        self._by_name: dict[str, set[str]] = {}
 
     @staticmethod
     def _local(raw: str) -> str:
@@ -51,7 +50,6 @@ class IdentityResolver:
     def _load(self) -> None:
         by_jid: dict[str, str] = {}
         lid_to_pn: dict[str, str] = {}
-        by_name: dict[str, set[str]] = {}
         rows = []
         try:
             con = sqlite3.connect(f"file:{self._path}?mode=ro", uri=True, timeout=5.0)
@@ -96,13 +94,8 @@ class IdentityResolver:
             # own, so a phone-number sender still resolves.
             if jid.endswith("@lid") and local in lid_to_pn:
                 by_jid.setdefault(f"{lid_to_pn[local]}@s.whatsapp.net", label)
-            if push:
-                for alias in (full, first):
-                    if alias:
-                        by_name.setdefault(alias.casefold(), set()).add(push)
         self._by_jid = by_jid
         self._lid_to_pn = lid_to_pn
-        self._by_name = by_name
         self._loaded_at = time.monotonic()
 
     def _ensure_loaded(self) -> None:
@@ -121,9 +114,8 @@ class IdentityResolver:
         self._ensure_loaded()
         local = self._local(raw)
         if not local.isdigit():
-            names = self._by_name.get(raw.casefold()) or set()
-            if len(names) == 1:
-                return next(iter(names))
+            # A display name written by WhatsApp at capture time. Keep it: it
+            # can be a nickname the group knows, not the contact's push name.
             return raw
         candidates: list[str] = []
         if local in self._lid_to_pn:
