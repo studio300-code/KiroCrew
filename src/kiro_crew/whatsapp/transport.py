@@ -94,7 +94,7 @@ from kiro_crew.whatsapp.jids import (
 )
 
 from kiro_crew.whatsapp.mirror import MirrorTap
-from kiro_crew.whatsapp.media import describe, musone_wake, unsupported_note, unwrap_message
+from kiro_crew.whatsapp.media import KIND_POLL, describe, musone_wake, unsupported_note, unwrap_message
 from kiro_crew.whatsapp.renderer import WHATSAPP_CHUNK_LIMIT
 
 logger = logging.getLogger(__name__)
@@ -711,6 +711,14 @@ class WhatsAppTransport(MessagingTransport):
             raw_envelope=raw_envelope,
         )
 
+        # 3. Polls are archived by the collector but never dispatched. A poll
+        #    is not a request to the agent; answering its arrival caused the
+        #    "polls are not supported" turns. Read it later from wa.db when the
+        #    operator explicitly asks.
+        if desc.kind == KIND_POLL:
+            logger.info("whatsapp: poll %s in %s archived and skipped", message_id, chat)
+            return
+
         # 3. Echo gate.
         if from_me and self.echo.is_own_echo(chat, message_id):
             return
@@ -979,16 +987,36 @@ class WhatsAppTransport(MessagingTransport):
                     f"user:{wa_id}", f"WhatsApp DM · {wa_id}", available, reason
                 )
             )
+        for rule in self._group_rules:
+            jid = normalize_jid(rule["jid"])
+            label = rule.get("name") or jid
+            targets.append(
+                ConfiguredChannelTarget(
+                    f"group:{jid}", f"WhatsApp group · {label}", available, reason
+                )
+            )
         return targets
+
+    def _configured_groups(self) -> frozenset[str]:
+        """Group JIDs the operator listed in ``whatsapp.groups``.
+
+        A group is an explicit, reviewable allowlist entry like ``allowed_wa_ids``
+        is for DMs; a JID that is not in this set is never a proactive target.
+        """
+        return frozenset(
+            normalize_jid(rule["jid"])
+            for rule in self._group_rules
+            if str(rule.get("jid", "")).strip()
+        )
 
     def _proactive_targets(self) -> frozenset[str]:
         """Conversation JIDs a CONFIGURED proactive send may address: the linked
-        account plus the DM allowlist, and nothing else.
+        account, the DM allowlist, and the configured groups.
 
-        Deliberately the same two sources :meth:`configured_targets` lists from, so
+        Deliberately the same sources :meth:`configured_targets` lists from, so
         what the dashboard OFFERS and what it will ACCEPT cannot drift apart.
         """
-        jids = set(self._allowed)
+        jids = set(self._allowed) | set(self._configured_groups())
         me = self._client.me.wa_id
         if me:
             jids.add(normalize_jid(wa_id_to_user_jid(me)))
@@ -996,8 +1024,13 @@ class WhatsAppTransport(MessagingTransport):
 
     async def resolve_configured_target(self, target_id: str) -> tuple[str, str | None] | None:
         kind, sep, value = (target_id or "").partition(":")
-        if kind != "user" or not sep or not value.strip():
+        if kind not in ("user", "group") or not sep or not value.strip():
             return None
+        if kind == "group":
+            jid = normalize_jid(value.strip())
+            if not is_group_jid(jid) or jid not in self._configured_groups():
+                return None
+            return jid, None
         conversation = await self.resolve_conversation(value.strip())
         # Deny-by-default on membership, as every sibling transport does. This
         # resolver is the ONLY allowlist check on the dashboard mirror-link path,
