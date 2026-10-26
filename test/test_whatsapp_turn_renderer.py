@@ -117,6 +117,15 @@ class TestBufferedEmit:
         await r.on_done(stop_reason="error")
         assert "went wrong" in transport.sent[0][1]
 
+    async def test_empty_turn_sends_a_notice_not_three_dots(self):
+        """An empty turn must say so: "..." leaves the reader waiting forever."""
+        r, transport, _ = make()
+        await r.on_turn_start()
+        await r.on_done()
+        assert len(transport.sent) == 1
+        assert transport.sent[0][1] != "🤖 ..."
+        assert "went wrong" in transport.sent[0][1]
+
     async def test_close_finalizes_an_unfinished_turn(self):
         r, transport, _ = make()
         await r.on_turn_start()

@@ -569,7 +569,10 @@ class WhatsAppRenderer(Renderer):
             logger.debug("whatsapp: unprompted group turn suppressed")
             return
         if not body:
-            body = "..." if ok else _ERROR_TEXT
+            # A turn that produced no text has nothing to say. Three dots is not
+            # an answer and leaves the reader waiting for a reply that will never
+            # come; say so instead, so the operator retries.
+            body = _ERROR_TEXT
 
         # Deliver only what streaming has not already shown, counted in the same
         # chunks it delivered. Re-sending the whole body would repeat every word
