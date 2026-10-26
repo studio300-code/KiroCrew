@@ -71,6 +71,19 @@ _STREAMING_PROVIDERS = (PROVIDER_LOCAL, "apple", "transcribe")
 _ORUKEET_TRANSCRIBER = Path("/home/marco/.config/opencode/scripts/transcriber.sh")
 
 
+def _live_preview_enabled() -> bool:
+    """Whether live whisper partials are sent to the browser.
+
+    The committed final is orukeet either way. A deployment that does not want
+    the intermediate (often wrong) preview can set
+    ``KIROCREW_STT_LIVE_PREVIEW=0``; the microphone still records, and the final
+    arrives after the utterance. Default on, because a silent mic while the user
+    speaks looks like a hang.
+    """
+    value = os.environ.get("KIROCREW_STT_LIVE_PREVIEW", "1").strip().lower()
+    return value not in ("0", "false", "no", "off")
+
+
 async def _orukeet_pcm(pcm: bytes, language: str) -> str:
     """Transcribe 16 kHz mono Int16 PCM with orukeet; "" on any failure.
 
@@ -836,6 +849,11 @@ async def _run_local_session(
                 # stale COMPLETE emits, auto-submitting a truncated request.
                 if event.kind == stt.KIND_PARTIAL:
                     endpointer.note_partial(text)
+            # The endpointer was fed above even when the preview is suppressed:
+            # it decides whether a stable final may auto-submit, and that must not
+            # depend on whether the human wanted to SEE the hypothesis.
+            if event.kind == stt.KIND_PARTIAL and not _live_preview_enabled():
+                continue
             if not await _send({"type": event.kind, "text": text}):
                 return False
         return True
