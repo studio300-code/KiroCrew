@@ -701,6 +701,17 @@ class MirrorTap:
             logger.warning("whatsapp mirror: VISION VIDEO start job_id=%s", job_id)
             media_desc, frames_desc = await self._describe_video(path)
             logger.warning("whatsapp mirror: VISION VIDEO done job_id=%s", job_id)
+            # A video carries a soundtrack too: transcribe it with the same
+            # orukeet engine as a voice note, so the archive has words and not
+            # only a frame description. A clip with music or no speech returns
+            # "", which is not a failure: the frame description still lands.
+            logger.warning("whatsapp mirror: TRANSCRIBE VIDEO start job_id=%s", job_id)
+            transcript = await self._transcribe(path, timeout=600.0)
+            logger.warning(
+                "whatsapp mirror: TRANSCRIBE VIDEO done job_id=%s len=%s",
+                job_id,
+                len(transcript),
+            )
 
         # Update DB row (messages table)
         if transcript or media_desc or frames_desc:
@@ -770,7 +781,7 @@ class MirrorTap:
             "document": "bin",
         }.get(kind, "bin")
 
-    async def _transcribe(self, path: Path) -> str:
+    async def _transcribe(self, path: Path, timeout: float = 120.0) -> str:
         """Run transcriber.sh and return transcript text."""
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -781,7 +792,7 @@ class MirrorTap:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120.0)
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
             if proc.returncode != 0:
                 logger.debug("transcriber failed: %s", stderr.decode()[:200])
                 return ""
