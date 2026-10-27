@@ -760,10 +760,11 @@ async def _run_local_session(
             idle_evict_secs=cfg.stt.idle_evict_secs,
             timeout_secs=cfg.stt.timeout_secs,
             threads=cfg.stt.threads,
-            # Live text comes from Orukeet below. Whisper still owns VAD,
-            # endpointing and the final fallback, but its own partial decodes
-            # would only duplicate the GPU work.
+            # Live text and the final both come from Orukeet below. Whisper
+            # still owns VAD and endpointing, but its own decodes would only add
+            # latency before being replaced.
             emit_partials=False,
+            decode_final=False,
         )
 
     # The FIRST fatal cause wins. Both the duration cap and a failed send can end
@@ -872,7 +873,7 @@ async def _run_local_session(
                 continue
             if event.kind == stt.KIND_FINAL:
                 acknowledged_audio_end = max(acknowledged_audio_end, event.audio_end_sample)
-                if event.text.strip() and not client_gone and not ws.closed:
+                if not client_gone and not ws.closed:
                     start = max(0, last_final_sample) * 2
                     end = max(0, event.audio_end_sample) * 2
                     segment = bytes(pcm_buffer[start:end]) if end > start else b""
@@ -881,10 +882,9 @@ async def _run_local_session(
                             segment, _whisper_language(cfg.stt.language_code) or "auto"
                         )
                         if accurate:
-                            # The resident model produced the live partials and
-                            # the segment boundaries; orukeet replaces only the
-                            # committed words, and only when it actually heard
-                            # something. A failed run keeps the whisper final.
+                            # The resident VAD gave the segment; Orukeet owns the
+                            # words. When it fails, the event's own text (empty
+                            # for the Orukeet path) is all that is left.
                             event = dataclasses.replace(event, text=accurate)
                 last_final_sample = max(last_final_sample, event.audio_end_sample)
             text = _redacted(event.text).strip()

@@ -214,6 +214,7 @@ class LocalSession:
         timeout_secs: int = engine_mod.DEFAULT_TIMEOUT_SECS,
         threads: int | None = None,
         emit_partials: bool = True,
+        decode_final: bool = True,
     ) -> None:
         self._model_name = model_name
         self._language = language
@@ -221,6 +222,10 @@ class LocalSession:
         # the resident model still owns VAD, endpointing and the final fallback,
         # but its own partial decodes are pure duplicate work then.
         self._emit_partials = bool(emit_partials)
+        # A transport that re-decodes the utterance on a better engine (the
+        # dashboard does, with Orukeet) skips the resident final too: the decode
+        # is the slow part and its text would be replaced anyway.
+        self._decode_final = bool(decode_final)
         self._partial_interval = max(MIN_PARTIAL_INTERVAL_MS / 1000.0, partial_interval_ms / 1000.0)
         self._engine = engine_mod.shared_engine(
             idle_evict_secs=idle_evict_secs, timeout_secs=timeout_secs, threads=threads
@@ -480,6 +485,11 @@ class LocalSession:
         """
         audio_end_sample = self._finalized_samples + self._buffers.total_samples
         if self._cancelled:
+            return SttEvent(KIND_FINAL, text="", audio_end_sample=audio_end_sample)
+        if not self._decode_final:
+            # The caller has a better engine for the final (Orukeet) and only
+            # needs the VAD/endpoint boundary from this session. Decoding here
+            # would add the resident model's latency and then be discarded.
             return SttEvent(KIND_FINAL, text="", audio_end_sample=audio_end_sample)
         audio = self._joined(self._buffers.full)
         if not _is_audible(audio):
