@@ -128,7 +128,17 @@ async def _orukeet_pcm(pcm: bytes, language: str) -> str:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120.0)
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120.0)
+        except BaseException:
+            # A cancelled preview must not leave the child writing into the
+            # output directory this function is about to remove: kill it and
+            # reap it first, or the server logs a spurious "No such file".
+            if proc.returncode is None:
+                proc.kill()
+                with contextlib.suppress(ProcessLookupError):
+                    await proc.wait()
+            raise
         if proc.returncode != 0:
             logger.debug("orukeet final failed: %s", stderr.decode(errors="replace")[:300])
             return ""
