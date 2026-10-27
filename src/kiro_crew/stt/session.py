@@ -213,9 +213,14 @@ class LocalSession:
         idle_evict_secs: int = engine_mod.DEFAULT_IDLE_EVICT_SECS,
         timeout_secs: int = engine_mod.DEFAULT_TIMEOUT_SECS,
         threads: int | None = None,
+        emit_partials: bool = True,
     ) -> None:
         self._model_name = model_name
         self._language = language
+        # A transport that renders live text from a faster engine sets this off:
+        # the resident model still owns VAD, endpointing and the final fallback,
+        # but its own partial decodes are pure duplicate work then.
+        self._emit_partials = bool(emit_partials)
         self._partial_interval = max(MIN_PARTIAL_INTERVAL_MS / 1000.0, partial_interval_ms / 1000.0)
         self._engine = engine_mod.shared_engine(
             idle_evict_secs=idle_evict_secs, timeout_secs=timeout_secs, threads=threads
@@ -363,7 +368,12 @@ class LocalSession:
 
         self._buffers.append(pcm)
 
-        if events or not allow_partial or self._partials_stopped:
+        if (
+            events
+            or not allow_partial
+            or self._partials_stopped
+            or not self._emit_partials
+        ):
             return events
 
         if not self._endpointer.speech_frames_seen:
