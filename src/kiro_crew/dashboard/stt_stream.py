@@ -19,7 +19,6 @@ import logging
 import os
 import shutil
 import tempfile
-import time
 import wave
 from pathlib import Path
 from typing import Any, AsyncIterator, Awaitable, Callable, Iterator
@@ -71,27 +70,14 @@ _STREAMING_PROVIDERS = (PROVIDER_LOCAL, "apple", "transcribe")
 #: failed run falls back to the whisper text, never fails the dictation.
 _ORUKEET_TRANSCRIBER = Path("/home/marco/.config/opencode/scripts/transcriber.sh")
 
-#: How often a live partial is recomputed from the utterance-so-far through the
-#: resident Orukeet CUDA service. Deliberately slower than the final decode: a
-#: partial is only a preview, and every request it sends delays the final that
-#: actually gets committed.
-_ORUKEET_PARTIAL_INTERVAL_S = 2.0
-
-#: Audio a preview must contain before the first partial is shown. Short windows
-#: are where the recogniser is least sure of the language, and an English-looking
-#: first line over Italian speech is worse than no line for another second.
-_ORUKEET_PARTIAL_MIN_AUDIO_S = 2.5
-
-
 def _live_preview_enabled() -> bool:
-    """Whether live Orukeet partials are sent to the browser.
+    """Whether live partials are forwarded to the browser.
 
-    The committed final is Orukeet either way, decoded from the whole utterance.
-    The preview is a second, shorter decode of the audio so far: it cannot be as
-    accurate as the final, and on a short first window it can even guess the
-    wrong language. Default OFF, so the textbox receives only the accurate final
-    and never shows a word that is later replaced. Set
-    ``KIROCREW_STT_LIVE_PREVIEW=1`` to opt back into the live preview.
+    The committed final is the whole-utterance decode either way. A partial is a
+    shorter, provisional decode of the audio so far: it cannot be as accurate as
+    the final and can even guess the wrong language on the first words. Default
+    OFF, so the textbox receives only the accurate final and never shows a word
+    that is later replaced. ``KIROCREW_STT_LIVE_PREVIEW=1`` opts back in.
     """
     value = os.environ.get("KIROCREW_STT_LIVE_PREVIEW", "0").strip().lower()
     return value not in ("0", "false", "no", "off")
@@ -817,54 +803,9 @@ async def _run_local_session(
             client_gone = True
             return False
 
-    #: Generation of the current utterance; a late Orukeet partial from the
-    #: previous one is discarded rather than shown under the new final.
-    orukeet_partial_gen = 0
-    orukeet_partial_task: asyncio.Task[None] | None = None
-    last_orukeet_partial_at = 0.0
-
-    async def _orukeet_partial_worker(segment: bytes, gen: int) -> None:
-        try:
-            text = await _orukeet_pcm(
-                segment, _whisper_language(cfg.stt.language_code) or "auto"
-            )
-        except Exception:
-            logger.debug("orukeet live partial failed", exc_info=True)
-            return
-        if not text or gen != orukeet_partial_gen or ws.closed:
-            return
-        await _send({"type": stt.KIND_PARTIAL, "text": _redacted(text)})
-
-    def _maybe_orukeet_partial() -> None:
-        """Start one live partial from the utterance heard so far.
-
-        Single-flight: a request still running means the next audio frame is
-        skipped rather than queued behind it. The resident CUDA service answers
-        seconds of audio in under a second, so a one-second cadence keeps the
-        textbox moving. A final increments the generation, and a late partial
-        from the previous utterance is discarded.
-        """
-        nonlocal orukeet_partial_task, last_orukeet_partial_at
-        if not _live_preview_enabled() or ws.closed or input_finished or capped:
-            return
-        if orukeet_partial_task is not None and not orukeet_partial_task.done():
-            return
-        now = time.monotonic()
-        if now - last_orukeet_partial_at < _ORUKEET_PARTIAL_INTERVAL_S:
-            return
-        start = max(0, last_final_sample) * 2
-        segment = bytes(pcm_buffer[start:])
-        if len(segment) < STREAM_SAMPLE_RATE_HZ * 2 * _ORUKEET_PARTIAL_MIN_AUDIO_S:
-            return
-        last_orukeet_partial_at = now
-        orukeet_partial_task = asyncio.create_task(
-            _orukeet_partial_worker(segment, orukeet_partial_gen)
-        )
-
     async def _relay(events: list["stt.SttEvent"]) -> bool:
         """Forward session events to the client. False means stop the session."""
         nonlocal acknowledged_audio_end, drain_failure, last_final_sample
-        nonlocal orukeet_partial_gen, last_orukeet_partial_at
         for event in events:
             if event.kind == stt.KIND_ERROR:
                 if fatal_outcome is None:
@@ -904,9 +845,6 @@ async def _run_local_session(
                             event = dataclasses.replace(event, text=accurate)
                 last_final_sample = max(last_final_sample, event.audio_end_sample)
             text = _redacted(event.text).strip()
-            if event.kind == stt.KIND_FINAL:
-                orukeet_partial_gen += 1
-                last_orukeet_partial_at = 0.0
             if event.kind == stt.KIND_FINAL and endpointer is not None:
                 endpointer.note_audio_final(text)
             if not text:
@@ -1230,7 +1168,6 @@ async def _run_local_session(
                 # accurate engine re-decodes this utterance once the final is
                 # known, and the event's audio_end_sample indexes this buffer.
                 pcm_buffer.extend(raw)
-                _maybe_orukeet_partial()
                 # The next queued frame makes this frame's partial obsolete.
                 # Stopping has the same effect: drain all audio directly to finals.
                 events = await session.feed(
@@ -1298,8 +1235,6 @@ async def _run_local_session(
             receive_task.cancel()
         if drain_task is not None and not drain_task.done():
             drain_task.cancel()
-        if orukeet_partial_task is not None and not orukeet_partial_task.done():
-            orukeet_partial_task.cancel()
         if timed_out:
             logger.info("local streaming STT session hit the %ds cap", _MAX_STREAM_DURATION_SECS)
         if not session.ended:
@@ -1313,7 +1248,6 @@ async def _run_local_session(
             deadline_task,
             *([receive_task] if receive_task is not None else []),
             *([drain_task] if drain_task is not None else []),
-            *([orukeet_partial_task] if orukeet_partial_task is not None else []),
             return_exceptions=True,
         )
         # The cap's own frame goes out AFTER the trailing final it let through,
