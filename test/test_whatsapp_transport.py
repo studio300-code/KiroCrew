@@ -161,6 +161,23 @@ class TestGauntlet:
         assert msg.conversation_id == OWN_JID
         assert msg.channel_type == "whatsapp"
 
+    async def test_quoted_message_reaches_the_model(self, harness, monkeypatch):
+        monkeypatch.setattr(
+            "kiro_crew.whatsapp.transport.quoted_message_context",
+            lambda chat, msg_id: f"[Messaggio citato] id={msg_id}",
+        )
+        await harness.transport.receive(
+            event(
+                chat=FRIEND,
+                sender=OWN_JID,
+                from_me=True,
+                text="musone trascrivi",
+                quoted_stanza="QUOTED1",
+            )
+        )
+        assert len(harness.dispatched) == 1
+        assert "id=QUOTED1" in harness.dispatched[0].text
+
     async def test_own_echo_is_dropped(self, harness):
         ids = await harness.transport._send_tracked(OWN_JID, "agent reply")
         await harness.transport.receive(

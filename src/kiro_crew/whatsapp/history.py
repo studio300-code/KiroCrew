@@ -61,6 +61,70 @@ def _message_text(row: sqlite3.Row) -> str:
     return body or f"[{kind}]"
 
 
+def quoted_message_context(
+    chat_id: str,
+    msg_id: str,
+    *,
+    db_path: str | None = None,
+) -> str:
+    """Render the exact message the operator replied to, or ``""``.
+
+    A WhatsApp reply carries the quoted message only in ``contextInfo.stanzaID``;
+    the archive row has no quote column. Without this block the model sees the
+    recent chat and can pick a different voice note with the same shape — the
+    bug where "trascrivi" transcribed another audio. The quoted row is fetched by
+    its stanza id and marked as the ONLY message the request refers to.
+    """
+    if not chat_id or not msg_id:
+        return ""
+    path = db_path or DB_PATH
+    if not Path(path).is_file():
+        return ""
+    con = None
+    try:
+        con = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=5.0)
+        con.row_factory = sqlite3.Row
+        row = con.execute(
+            "SELECT msg_id, datetime(ts,'unixepoch','localtime') AS when_, "
+            "sender, from_me, msg_type, body, transcript, media_desc, audio_path "
+            "FROM messages WHERE chat_id=? AND msg_id=? LIMIT 1",
+            (chat_id, msg_id),
+        ).fetchone()
+    except sqlite3.Error:
+        return ""
+    finally:
+        if con is not None:
+            try:
+                con.close()
+            except Exception:  # noqa: BLE001
+                pass
+    if row is None:
+        return ""
+    kind = str(row["msg_type"] or "text")
+    if row["from_me"]:
+        sender = "io"
+    elif kind == "system":
+        sender = "sistema"
+    else:
+        sender = identity().resolve(str(row["sender"] or "")) or "?"
+    text = _message_text(row)
+    if kind in ("voice", "audio") and not str(row["transcript"] or "").strip():
+        audio_path = str(row["audio_path"] or "").strip()
+        text = (
+            f"[vocale senza trascrizione — file audio: {audio_path}]"
+            if audio_path
+            else "[vocale senza trascrizione]"
+        )
+    return "\n".join(
+        [
+            "[Messaggio citato — è QUESTO il messaggio a cui l'operatore ha "
+            "risposto: se è un audio, trascrivi questo, non un altro.]",
+            f"[{row['when_']}] {sender}: {text}",
+            f"[msg_id={msg_id}]",
+        ]
+    )
+
+
 def recent_chat_context(
     chat_id: str,
     exclude_msg_id: str = "",
