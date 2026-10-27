@@ -54,6 +54,7 @@ from kiro_crew.config.sections import (  # noqa: F401 -- read by chat_api.slot_s
     AutocompactPctError,
     parse_autocompact_pct,
 )
+from kiro_crew.constants import CHANNEL_SESSION_NAMESPACES
 from kiro_crew.dashboard import display_verdicts  # noqa: F401 -- read by chat_api.slot_detail
 from kiro_crew.dashboard.approval_posture import trust_carries  # noqa: F401
 from kiro_crew.dashboard.body_numbers import body_int  # noqa: F401
@@ -681,6 +682,25 @@ _DEFERRED_PLAIN_CREATE_KNOWN_KEYS = frozenset(
         "default_folder",
     }
 )
+
+
+def _is_channel_slot_key(key: str) -> bool:
+    """Whether *key* is a session started on a messaging channel.
+
+    A channel session has a person waiting in that channel; the dashboard is a
+    window onto it, not the surface that person reads. Steering a dashboard
+    message into the channel's running turn makes the turn answer the dashboard
+    and leaves the channel's own message without a reply. Such a send queues
+    instead, so the channel turn finishes and delivers to the channel before the
+    dashboard turn runs.
+
+    Lives here, on the handlers namespace, because every owner function in
+    :mod:`kiro_crew.dashboard.chat_api` runs on these globals (see
+    :func:`kiro_crew._facade_compose.compose`): a copy defined in an owner module
+    is invisible to ``api_chat`` at call time.
+    """
+    key = str(key or "")
+    return any(key.startswith((f"{ns}:", f"{ns}_")) for ns in CHANNEL_SESSION_NAMESPACES)
 
 
 def _unblock_pending_waits(state: DashboardState, slot: _ChatSlot) -> None:
