@@ -72,22 +72,28 @@ _STREAMING_PROVIDERS = (PROVIDER_LOCAL, "apple", "transcribe")
 _ORUKEET_TRANSCRIBER = Path("/home/marco/.config/opencode/scripts/transcriber.sh")
 
 #: How often a live partial is recomputed from the utterance-so-far through the
-#: resident Orukeet CUDA service. The service answers a few seconds of audio in
-#: well under a second, so this is faster than the old whisper partial cadence
-#: while still leaving the GPU to the final decode.
-_ORUKEET_PARTIAL_INTERVAL_S = 1.0
+#: resident Orukeet CUDA service. Deliberately slower than the final decode: a
+#: partial is only a preview, and every request it sends delays the final that
+#: actually gets committed.
+_ORUKEET_PARTIAL_INTERVAL_S = 2.0
+
+#: Audio a preview must contain before the first partial is shown. Short windows
+#: are where the recogniser is least sure of the language, and an English-looking
+#: first line over Italian speech is worse than no line for another second.
+_ORUKEET_PARTIAL_MIN_AUDIO_S = 2.5
 
 
 def _live_preview_enabled() -> bool:
-    """Whether live whisper partials are sent to the browser.
+    """Whether live Orukeet partials are sent to the browser.
 
-    The committed final is orukeet either way. A deployment that does not want
-    the intermediate (often wrong) preview can set
-    ``KIROCREW_STT_LIVE_PREVIEW=0``; the microphone still records, and the final
-    arrives after the utterance. Default on, because a silent mic while the user
-    speaks looks like a hang.
+    The committed final is Orukeet either way, decoded from the whole utterance.
+    The preview is a second, shorter decode of the audio so far: it cannot be as
+    accurate as the final, and on a short first window it can even guess the
+    wrong language. Default OFF, so the textbox receives only the accurate final
+    and never shows a word that is later replaced. Set
+    ``KIROCREW_STT_LIVE_PREVIEW=1`` to opt back into the live preview.
     """
-    value = os.environ.get("KIROCREW_STT_LIVE_PREVIEW", "1").strip().lower()
+    value = os.environ.get("KIROCREW_STT_LIVE_PREVIEW", "0").strip().lower()
     return value not in ("0", "false", "no", "off")
 
 
@@ -838,7 +844,7 @@ async def _run_local_session(
             return
         start = max(0, last_final_sample) * 2
         segment = bytes(pcm_buffer[start:])
-        if len(segment) < STREAM_SAMPLE_RATE_HZ * 2 * 0.4:
+        if len(segment) < STREAM_SAMPLE_RATE_HZ * 2 * _ORUKEET_PARTIAL_MIN_AUDIO_S:
             return
         last_orukeet_partial_at = now
         orukeet_partial_task = asyncio.create_task(
