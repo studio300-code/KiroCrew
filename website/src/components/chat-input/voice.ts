@@ -115,7 +115,15 @@ export function useDictationControls({ composerControl, value, autoFocusKey, any
   // next partial rebuilds away — the panel (showDictation) already handles the
   // visible streaming case, where the user watches rather than types.
   useEffect(() => {
-    if (showDictation || voiceTranscribing) composerControl()?.focus()
+    if (!showDictation && !voiceTranscribing) return
+    // On a touch device a programmatic focus opens the on-screen keyboard. The
+    // dictation panel and the hold bar ARE the surface there: the user is
+    // speaking, not typing, and the keyboard would cover the transcript they
+    // are watching. They tap the textarea when they actually want to type.
+    // Same predicate as `useComposerFocus`, which already refuses to autofocus
+    // on touch for exactly this reason.
+    if (isTouchDevice()) return
+    composerControl()?.focus()
   }, [showDictation, voiceTranscribing, composerControl])
 
   // Discarding a drain from the strip's own button removes the element the press
@@ -135,7 +143,9 @@ export function useDictationControls({ composerControl, value, autoFocusKey, any
     () => onVoiceCancel
       ? () => {
         onVoiceCancel()
-        composerControl()?.focus()
+        // The discard is a touch gesture too; do not reopen the keyboard on
+        // the way back to the hold bar.
+        if (!isTouchDevice()) composerControl()?.focus()
       }
       : undefined,
     [onVoiceCancel, composerControl],
@@ -205,7 +215,11 @@ export function useDictationControls({ composerControl, value, autoFocusKey, any
 /** Hold-to-talk: on a touch device the mic switches the composer between the
  *  keyboard and a press-and-hold target, and every label on those controls
  *  says what the next press actually does. */
+<<<<<<< HEAD
 export function useHoldToTalk({ onVoiceStart, onVoiceStop, onVoiceCancel, voiceCaptureActive, voiceRecording, voiceTranscribeActive, voiceTranscribing, voiceDownload, voiceSubmitOnRelease = false, voicePttBinding = null, voiceBusyElsewhere, voiceBusyElsewhereSession, composerHasDraft, disabled, optimizing, placeholder, showDictation }: {
+=======
+export function useHoldToTalk({ onVoiceStart, onVoiceStop, onVoiceCancel, voiceCaptureActive, voiceRecording, voiceTranscribeActive, voiceTranscribing, voiceDownload, voiceSubmitOnRelease = false, voiceBusyElsewhere, voiceBusyElsewhereSession, composerHasDraft, disabled, optimizing, placeholder, showDictation, composerControl }: {
+>>>>>>> 48798ded37 (fix(chat): do not open the mobile keyboard while holding to talk)
   onVoiceStart: VoiceInput['onVoiceStart']
   onVoiceStop: VoiceInput['onVoiceStop']
   onVoiceCancel: VoiceInput['onVoiceCancel']
@@ -228,6 +242,7 @@ export function useHoldToTalk({ onVoiceStart, onVoiceStop, onVoiceCancel, voiceC
   optimizing: boolean
   placeholder: string
   showDictation: VoiceInput['voiceSampleRef'] | null
+  composerControl: () => ComposerControl | null
 }) {
   /**
    * Hold-to-talk mode: the textarea is swapped for a press-and-hold target and
@@ -389,12 +404,20 @@ export function useHoldToTalk({ onVoiceStart, onVoiceStop, onVoiceCancel, voiceC
    */
   const textareaParked = !!showDictation || voiceHoldMode
   const toggleVoiceMode = useCallback(() => {
+    // Switching INTO hold mode hides the textarea; if it owns focus, the
+    // on-screen keyboard would stay over the bar the user is about to hold.
+    // Switching back is the opposite gesture: the keyboard is what the user
+    // asked for, so focus the textarea once it is visible again.
+    if (isTouchDevice()) {
+      if (voiceHoldMode) requestAnimationFrame(() => composerControl()?.focus())
+      else composerControl()?.getRootElement()?.blur()
+    }
     setVoiceModePref(prev => {
       const next = !prev
       safeSetItem(VOICE_MODE_LS_KEY, next ? '1' : '0')
       return next
     })
-  }, [])
+  }, [voiceHoldMode, composerControl])
   /**
    * One label for the mic button, which is two different controls depending on
    * the device: a mode SWITCH on touch, the record toggle everywhere else.
