@@ -1,6 +1,7 @@
 {
  "base_public_names": [
   "ActivationResult",
+  "DECLARED_NO_EXPIRY_TEXT",
   "DroppedGrant",
   "NO_EXPIRY_TEXT",
   "OverrideStatus",
