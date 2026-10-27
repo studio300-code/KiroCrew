@@ -53,7 +53,9 @@ export function YoloDurationCard() {
   // a bounded one.
   let activeNote: string | null = null
   if (status?.yolo) {
-    if (status.yolo_until_shutdown) {
+    if (status.yolo_declared) {
+      activeNote = i18nT('pages.settings.securityPanel.yolo_active_permanent')
+    } else if (status.yolo_until_shutdown) {
       activeNote = i18nT('pages.settings.securityPanel.yolo_active_until_restart')
     } else if (status.yolo_expires_at) {
       activeNote = i18nT('pages.settings.securityPanel.yolo_active_expires_at', {

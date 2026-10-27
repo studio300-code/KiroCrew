@@ -275,6 +275,12 @@ async def api_status(request: web.Request) -> web.Response:
             # config, or ad-hoc under yolo_duration: until_shutdown).
             # ``yolo_remaining_secs`` is -1 and ``yolo_expires_at`` empty then.
             "yolo_until_shutdown": so_status.permanent,
+            # True when the live grant is the operator's DECLARED config grant
+            # (agent.dangerously_skip_permissions), not a session/dashboard
+            # activation. A declared grant is re-established on every startup;
+            # only an ad-hoc until_shutdown grant dies with the process.
+            "yolo_declared": so_status.source == "config",
+            "yolo_source": so_status.source,
             # The configured ad-hoc duration, and whether policy allows the
             # no-timed-expiry option — the Settings card lock-badges it when not.
             "yolo_duration": yolo_duration,

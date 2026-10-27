@@ -157,6 +157,8 @@ export interface StatusData {
   yolo_remaining_secs?: number
   /** True when the active grant has no timed expiry (declared in config, or until_shutdown). */
   yolo_until_shutdown?: boolean
+  /** True when the live grant is the DECLARED config grant, which survives restarts. */
+  yolo_declared?: boolean
   /** Configured ad-hoc duration: a timed label, or 'until_shutdown'. */
   yolo_duration?: '30m' | '1h' | '6h' | '12h' | '24h' | 'until_shutdown'
   /** Whether enterprise governance currently allows the until_shutdown option. */
