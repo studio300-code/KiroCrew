@@ -64,6 +64,40 @@ class TestApiChatSteer:
         assert "queue_push" not in events  # steered, not queued
 
     @pytest.mark.asyncio
+    async def test_channel_session_send_queues_instead_of_steering(
+        self, tmp_path, monkeypatch, _patch_sel
+    ):
+        """A dashboard send into a channel session must not replace its reply.
+
+        The channel turn answers the person waiting in that channel; steering it
+        with dashboard text would send that answer to the wrong surface. The send
+        queues instead, so the channel turn finishes first.
+        """
+        monkeypatch.setattr("kiro_crew.dashboard.state.config_dir", lambda: tmp_path)
+        state = _make_state(tmp_path)
+        state.broadcast_ws = MagicMock()
+        slot = _running_slot(state, "whatsapp_kirocrew_forum_120363430853234757_g.us")
+        client_mock = MagicMock()
+        client_mock.supports_steer = True
+        client_mock.steer = AsyncMock(return_value=True)
+        slot._acp_client = client_mock
+
+        async with TestClient(TestServer(_make_app(state))) as client:
+            resp = await client.post(
+                "/api/chat",
+                json={"slot": slot.key, "message": "go left", "steer": True},
+            )
+            assert resp.status == 200
+            data = await resp.json()
+            assert data.get("queued") is True
+            assert data.get("steered") is not True
+
+        client_mock.steer.assert_not_awaited()
+        events = [c.args[0] for c in state.broadcast_ws.call_args_list]
+        assert "queue_push" in events
+        assert "steer_push" not in events
+
+    @pytest.mark.asyncio
     async def test_composer_steer_records_its_admission_for_the_requeue(
         self, tmp_path, monkeypatch, _patch_sel
     ):
@@ -496,7 +530,7 @@ def test_a_channel_session_is_never_steered_from_the_dashboard():
     A dashboard send into a channel session is queued, so the running channel
     turn finishes and its reply reaches the person waiting there.
     """
-    from kiro_crew.dashboard.chat_api.chat_send import _is_channel_slot_key
+    from kiro_crew.dashboard.chat_handlers import _is_channel_slot_key
 
     assert _is_channel_slot_key("whatsapp_kirocrew_forum_120363430853234757_g.us")
     assert _is_channel_slot_key("telegram:kirocrew:direct:57689110")
