@@ -83,7 +83,7 @@ from kiro_crew.whatsapp.client import WhatsAppClient
 from kiro_crew.whatsapp.commands import parse_command
 from kiro_crew.whatsapp.echo import EchoTracker
 from kiro_crew.whatsapp.group_gate import GroupGate, GroupVerdict
-from kiro_crew.whatsapp.history import recent_chat_context
+from kiro_crew.whatsapp.history import quoted_message_context, recent_chat_context
 from kiro_crew.whatsapp.jids import (
     LID_SERVER,
     is_group_jid,
@@ -738,16 +738,36 @@ class WhatsAppTransport(MessagingTransport):
         # the archive worker once the transcript exists (`_on_voice_wake`).
         musone_trigger = from_me and musone_wake(text)
 
+        # A reply/quote carries its target only in contextInfo.stanzaID. Fetch
+        # that exact archived row into the prompt: otherwise "trascrivi" sees a
+        # recent chat full of voice notes and can transcribe the wrong one.
+        cited_id = ""
+        extended = getattr(inner, "extendedTextMessage", None)
+        ctx = getattr(extended, "contextInfo", None) if extended is not None else None
+        if ctx is not None:
+            cited_id = str(getattr(ctx, "stanzaID", "") or "").strip()
+        quoted = ""
+        if cited_id:
+            quoted = await asyncio.to_thread(
+                quoted_message_context, chat, cited_id
+            )
+
         # A wake-word turn in a contact chat or an unconfigured group has none of
         # that chat's recent messages in its session: the transport drops them.
         # Load the archive's recent history so the agent answers with the
         # conversation in view instead of only the wake word. The typed text is
         # kept separately for the durable spool; the model gets the block.
-        model_text = text
+        parts: list[str] = []
+        if quoted:
+            parts.append(quoted)
         if musone_trigger:
             context = await asyncio.to_thread(recent_chat_context, chat, message_id)
             if context:
-                model_text = f"{context}\n\n[Messaggio attuale]\n{text}"
+                parts.append(context)
+            parts.append(f"[Messaggio attuale]\n{text}")
+        else:
+            parts.append(text)
+        model_text = "\n\n".join(part for part in parts if part)
 
         if from_me and not is_group_early and not self._client.me.matches(chat):
             if musone_trigger:
