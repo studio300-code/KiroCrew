@@ -191,6 +191,7 @@ def grant_declared_yolo() -> ActivationResult:
 # ── User-facing grant-lifetime text (channel-neutral) ──
 
 NO_EXPIRY_TEXT = "stays on until Kiro Crew restarts"
+DECLARED_NO_EXPIRY_TEXT = "stays on permanently (declared in config)"
 
 
 def fmt_grant_duration(secs: int) -> str:
@@ -210,6 +211,10 @@ def describe_grant_lifetime() -> str:
     so = safety_override()
     if not so.is_active():
         return "off"
+    if so.is_declared:
+        # The declared grant is re-established at every startup; only an ad-hoc
+        # until_shutdown grant dies with the process.
+        return DECLARED_NO_EXPIRY_TEXT
     if so.is_permanent:
         return NO_EXPIRY_TEXT
     return f"{max(0, so.remaining_secs()) // 60}min remaining"

@@ -222,6 +222,7 @@ export function SecurityPanel({ basePath }: { basePath?: string } = {}) {
         // is currently weakening the install, so it is what the rail reports —
         // WHEN THE GRANT ENDS, not that it exists.
         if (status?.yolo) {
+          if (status.yolo_declared) return i18nT('pages.settings.securityPanel.rail_permanent')
           if (status.yolo_until_shutdown) return i18nT('pages.settings.securityPanel.rail_until_restart')
           // Parse before formatting, and fall back to the bare "active" string
           // when the timestamp will not parse: "Until —" on a row asserting a

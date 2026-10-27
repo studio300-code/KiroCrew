@@ -1214,7 +1214,7 @@ class TestGrantLifetimeCopy:
             mock_sel.return_value = MagicMock()
             so.activate_declared()
         text = describe_grant_lifetime()
-        assert "restart" in text
+        assert "permanent" in text
         assert "remaining" not in text
         assert "-1" not in text
 
