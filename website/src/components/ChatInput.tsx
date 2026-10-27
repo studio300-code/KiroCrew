@@ -794,7 +794,7 @@ function ChatInput({
     voiceModePlaceholder,
   } = useHoldToTalk({
     onVoiceStart, onVoiceStop, onVoiceCancel, voiceCaptureActive, voiceRecording, voiceTranscribeActive, voiceTranscribing, voiceDownload, voiceSubmitOnRelease,
-    voiceBusyElsewhere, voiceBusyElsewhereSession, composerHasDraft, disabled, optimizing, placeholder, showDictation,
+    voiceBusyElsewhere, voiceBusyElsewhereSession, composerHasDraft, disabled, optimizing, placeholder, showDictation, composerControl,
   })
   // The name in the status row is the way there: one click switches to the
   // chat that holds the mic, where the user can end the capture.

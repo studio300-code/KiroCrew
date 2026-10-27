@@ -94,6 +94,42 @@ describe('ChatInput — dictation panel', () => {
     expect(document.activeElement).toBe(ta)
   })
 
+  it('does not focus the textarea on a touch device while recording', () => {
+    // Programmatic focus on a phone opens the on-screen keyboard, covering the
+    // dictation panel the user is watching. The touch surface is the panel and
+    // the hold bar; tapping the textarea is how typing starts.
+    vi.stubGlobal('matchMedia', (q: string) => ({
+      matches: q.includes('pointer: coarse') || q.includes('hover: none'),
+      media: q,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }))
+    renderWithProviders(
+      <ComposerVoiceSliceOverride inputProps={{ voiceRecording: true, voiceDictationPanel: true, voiceSampleRef: sampleRef }}>
+        <ChatInput {...base} />
+      </ComposerVoiceSliceOverride>,
+    )
+    expect(document.activeElement).not.toBe(screen.getByLabelText('Message input'))
+  })
+
+  it('does not focus the textarea on a touch device while a batch transcript lands', () => {
+    // The same guard covers the post-release path: `voiceTranscribing` used to
+    // focus the composer as the transcript arrived, which popped the keyboard
+    // over the message the user had just dictated.
+    vi.stubGlobal('matchMedia', (q: string) => ({
+      matches: q.includes('pointer: coarse') || q.includes('hover: none'),
+      media: q,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }))
+    renderWithProviders(
+      <ComposerVoiceSliceOverride inputProps={{ voiceTranscribing: true }}>
+        <ChatInput {...base} />
+      </ComposerVoiceSliceOverride>,
+    )
+    expect(document.activeElement).not.toBe(screen.getByLabelText('Message input'))
+  })
+
   it('leaves the textarea visible when the panel is not showing', () => {
     renderWithProviders(<ChatInput {...base} value="hello" />)
     const ta = screen.getByLabelText('Message input')
