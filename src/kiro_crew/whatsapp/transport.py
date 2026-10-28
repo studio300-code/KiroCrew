@@ -79,6 +79,7 @@ from kiro_crew.messaging.transport import (
 )
 from kiro_crew.sel import sel
 from kiro_crew.whatsapp.attachments import ingest_media
+from kiro_crew.whatsapp.bot_sent import BotSentLog
 from kiro_crew.whatsapp.client import WhatsAppClient
 from kiro_crew.whatsapp.commands import parse_command
 from kiro_crew.whatsapp.echo import EchoTracker
@@ -216,6 +217,16 @@ class WhatsAppTransport(MessagingTransport):
             normalize_jid(wa_id_to_user_jid(w)) for w in (allowed_wa_ids or []) if str(w).strip()
         )
         self.echo = EchoTracker()
+        #: Durable answer to "did the agent send the quoted message?" for the
+        #: group reply gate. The echo tracker forgets after 20 minutes and on
+        #: every restart; a reply may quote yesterday's answer. This lives in
+        #: the owner-only whatsapp data directory beside the session store.
+        bot_sent_path = (
+            Path(client.db_path).parent / "bot-sent.log"
+            if getattr(client, "db_path", "")
+            else None
+        )
+        self.bot_sent = BotSentLog(bot_sent_path)
         #: copy of every message into the local archive (wa.db), independent of
         #: dm_policy/groups: the archive is history, not admission. The worker
         #: also calls back once a voice note is transcribed, because a spoken
@@ -405,16 +416,21 @@ class WhatsAppTransport(MessagingTransport):
         except Exception:  # noqa: BLE001 - history must not fail a send
             logger.debug("whatsapp: could not archive the sent %s", kind, exc_info=True)
 
+    def _remember_sent(self, conversation_jid: str, message_id: str) -> None:
+        """Track one outbound id for echo suppression and the reply gate."""
+        self.echo.remember(conversation_jid, message_id)
+        self.bot_sent.remember(conversation_jid, message_id)
+
     async def _send_tracked(self, jid: str, content: str) -> list[str]:
         return await self._client.send_text(
-            jid, content, on_sent=lambda message_id: self.echo.remember(jid, message_id)
+            jid, content, on_sent=lambda message_id: self._remember_sent(jid, message_id)
         )
 
     async def send_image(self, conversation_id: str, data: bytes, caption: str = "") -> str:
         """Upload one image, echo-tracked like every other send this makes."""
         jid = normalize_jid(conversation_id)
         mid = await self._client.send_image_bytes(
-            jid, data, caption, on_sent=lambda message_id: self.echo.remember(jid, message_id)
+            jid, data, caption, on_sent=lambda message_id: self._remember_sent(jid, message_id)
         )
         self._archive_outbound(mid, jid, body=caption, kind="image")
         return mid
@@ -448,7 +464,7 @@ class WhatsAppTransport(MessagingTransport):
             name,
             mimetype=file.mime,
             caption=caption or file.alt,
-            on_sent=lambda message_id: self.echo.remember(jid, message_id),
+            on_sent=lambda message_id: self._remember_sent(jid, message_id),
         )
         note = (caption or file.alt or "").strip()
         self._archive_outbound(
@@ -471,7 +487,7 @@ class WhatsAppTransport(MessagingTransport):
         jid = normalize_jid(conversation_id)
         sent_id = await self._client.react(jid, sender_id, message_id, emoji)
         if sent_id:
-            self.echo.remember(jid, sent_id)
+            self._remember_sent(jid, sent_id)
 
     async def resolve_conversation(self, user_id: str) -> str:
         return normalize_jid(wa_id_to_user_jid(user_id))
@@ -933,8 +949,11 @@ class WhatsAppTransport(MessagingTransport):
         The operator's own message is deliberately NOT addressed merely because
         it is theirs: in a group the operator talks to the room like everyone
         else, and the agent answers only when called (`musone`, an @mention, or
-        a quote of something it sent). The caller treats an explicit slash
-        command as a summons; the self-chat never reaches the group gate.
+        a quote of something it sent). A reply to the operator's OWN message is
+        not a summons either, even though both addresses are the same linked
+        account: only message ids recorded on an agent send count. The caller
+        treats an explicit slash command as a summons; the self-chat never
+        reaches the group gate.
 
         Takes the UNWRAPPED message, not the envelope: ``contextInfo`` carries the
         mention list, and it is invisible when the message arrived inside an
@@ -950,12 +969,12 @@ class WhatsAppTransport(MessagingTransport):
         for mentioned in getattr(ctx, "mentionedJID", []) or []:
             if me.matches(str(mentioned)):
                 return True
-        participant = str(getattr(ctx, "participant", "") or "")
         stanza_id = str(getattr(ctx, "stanzaID", "") or "")
-        if participant and me.matches(participant):
-            return True  # replying to one of the agent's/operator's messages
-        if stanza_id and chat and self.echo.is_own_echo(chat, stanza_id):
-            return True  # quoted message ID is one we sent
+        if stanza_id and chat and (
+            self.echo.is_own_echo(chat, stanza_id)
+            or self.bot_sent.contains(chat, stanza_id)
+        ):
+            return True  # quoted message is one the AGENT sent, not the operator
         return False
 
     async def _on_voice_wake(self, chat_id: str, transcript: str, message_id: str) -> None:
