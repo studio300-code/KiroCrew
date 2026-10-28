@@ -12,8 +12,10 @@ from __future__ import annotations
 
 import logging
 import time
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
+from kiro_crew.acp.transport_errors import AcpError
 from kiro_crew.config import live
 from kiro_crew.config.sections import _normalize_threshold_pair
 from kiro_crew.history import mint_row_mid
@@ -472,85 +474,141 @@ class WhatsAppDispatcher:
             if approval_mode == APPROVAL_INTERACTIVE and may_approve
             else None
         )
-        renderer = WhatsAppRenderer(
-            transport,
-            client,
-            inbound.conversation_id,
-            WHATSAPP_CAPABILITIES,
-            unprompted=unprompted,
-            session_key=session_key,
-            approval_session_key=session_key if decider is not None else None,
-            # Resolved at delivery time: the shared pipeline acquires the
-            # provider inside the turn, so its cwd is not known here yet.
-            upload_root=lambda: self._provider_cwd(session_key),
-            scratch_root=lambda: self._provider_scratch_dir(session_key),
-        )
+        def _make_renderer(*, suppress_error: bool) -> WhatsAppRenderer:
+            return WhatsAppRenderer(
+                transport,
+                client,
+                inbound.conversation_id,
+                WHATSAPP_CAPABILITIES,
+                unprompted=unprompted,
+                suppress_error=suppress_error,
+                session_key=session_key,
+                approval_session_key=session_key if decider is not None else None,
+                # Resolved at delivery time: the shared pipeline acquires the
+                # provider inside the turn, so its cwd is not known here yet.
+                upload_root=lambda: self._provider_cwd(session_key),
+                scratch_root=lambda: self._provider_scratch_dir(session_key),
+            )
+
+        # The first attempt suppresses the failure notice: a session that was
+        # reset between turns must not post "Something went wrong" before the
+        # automatic retry has had its chance. The retry's renderer is built with
+        # suppression OFF, so only a second failure reaches the group.
+        renderer = _make_renderer(suppress_error=True)
         user_text = inbound.text
         if unprompted:
             user_text = build_silence_contract(verdict.rules) + "\n\n" + user_text
         await self._react(inbound, REACTION_WORKING, session_key=session_key)
-        await drive_turn(
-            ChannelTurn(
-                start_priority=person_priority(inbound.person_origin),
-                channel_type="whatsapp",
-                session_key=session_key,
-                conversation_id=f"whatsapp:{scope}",
-                # Durable inbound spool: DMs ONLY. The replay is a
-                # restart notice gated on ``may_send_to``, and this transport's
-                # ``may_send_to`` answers from ``dm_policy`` alone -- it knows
-                # nothing of the group roster, so a group removed or set to ``off``
-                # while the gateway was down would still receive the notice.
-                # Rather than teach the egress gate a roster it was never asked to
-                # hold, group routes are not declared and a refused group message
-                # degrades as any un-spooled refusal does: lost, with no restart notice.
-                #
-                # The text is the PRE-INGESTION original the transport captured,
-                # not ``inbound.text`` (by now rewritten with attachment context
-                # and temp paths that are dead after a restart) and not
-                # ``user_text`` (which can carry ``build_silence_contract`` --
-                # private operating rules -- prepended to the model prompt). The
-                # notice quotes the spooled text back into the conversation, so
-                # only what the user actually sent may be spooled.
-                inbound_route=inbound_route,
-                agent=agent,
-                user_text=user_text,
-                renderer=renderer,
-                approval_mode=approval_mode,
-                decider=decider,
-                auto_approve_session=(decider.trusted if decider is not None else None),
-                deny_all_tools=deny_all_tools,
-                unprompted=unprompted,
-                # Private context is withheld whenever the SESSION is shared, not
-                # merely when the current sender is not the operator. Denying
-                # their tools does not reach this: the disclosure is in the
-                # assembled context, before any tool runs.
-                #
-                # A group's key is the group, so one session serves every member.
-                # Keying this on the sender alone leaked anyway, one turn later:
-                # the operator addressing the agent in a group injected their
-                # memory, lessons and skills into that shared session, and ACP
-                # replays native history, so a member's own minimal-context turn
-                # could still be answered out of it. The property that matters
-                # belongs to the conversation, so a group turn is minimal for
-                # everyone, INCLUDING the operator. The self-chat and DMs are
-                # where context-rich work belongs; anything the agent says in a
-                # group is visible to the group anyway.
-                minimal_context=group or not is_operator,
-                persist=(
-                    None if unprompted else lambda u, r, n: self._persist_turn(session_key, u, r, n)
-                ),
-                # The channel's ONLY reach into context accounting: this is what
-                # calls check_context_usage, which is in turn the sole trigger
-                # for the backend autocompactor. Omitting it leaves a
-                # shared-pipeline channel with no compaction of any kind.
-                notice=lambda sk, provider: self._maybe_notice(
-                    scope, sk, provider, unprompted=unprompted
-                ),
-                audit_caller=f"whatsapp:{inbound.user_id}",
+        # Which attempt is running, read by the persist closure below. A first
+        #: attempt that produced no answer is retried immediately, so recording
+        #: its prompt would duplicate the user's message in the conversation log
+        #: beside the retry's copy.
+        attempt_no = 0
+
+        def _persist_retryable(u: str, r: str, n: bool) -> None:
+            if attempt_no == 0 and not r:
+                return
+            self._persist_turn(session_key, u, r, n)
+
+        turn = ChannelTurn(
+            start_priority=person_priority(inbound.person_origin),
+            channel_type="whatsapp",
+            session_key=session_key,
+            conversation_id=f"whatsapp:{scope}",
+            # Durable inbound spool: DMs ONLY. The replay is a
+            # restart notice gated on ``may_send_to``, and this transport's
+            # ``may_send_to`` answers from ``dm_policy`` alone -- it knows
+            # nothing of the group roster, so a group removed or set to ``off``
+            # while the gateway was down would still receive the notice.
+            # Rather than teach the egress gate a roster it was never asked to
+            # hold, group routes are not declared and a refused group message
+            # degrades as any un-spooled refusal does: lost, with no restart notice.
+            #
+            # The text is the PRE-INGESTION original the transport captured,
+            # not ``inbound.text`` (by now rewritten with attachment context
+            # and temp paths that are dead after a restart) and not
+            # ``user_text`` (which can carry ``build_silence_contract`` --
+            # private operating rules -- prepended to the model prompt). The
+            # notice quotes the spooled text back into the conversation, so
+            # only what the user actually sent may be spooled.
+            inbound_route=inbound_route,
+            agent=agent,
+            user_text=user_text,
+            renderer=renderer,
+            approval_mode=approval_mode,
+            decider=decider,
+            auto_approve_session=(decider.trusted if decider is not None else None),
+            deny_all_tools=deny_all_tools,
+            unprompted=unprompted,
+            # Private context is withheld whenever the SESSION is shared, not
+            # merely when the current sender is not the operator. Denying
+            # their tools does not reach this: the disclosure is in the
+            # assembled context, before any tool runs.
+            #
+            # A group's key is the group, so one session serves every member.
+            # Keying this on the sender alone leaked anyway, one turn later:
+            # the operator addressing the agent in a group injected their
+            # memory, lessons and skills into that shared session, and ACP
+            # replays native history, so a member's own minimal-context turn
+            # could still be answered out of it. The property that matters
+            # belongs to the conversation, so a group turn is minimal for
+            # everyone, INCLUDING the operator. The self-chat and DMs are
+            # where context-rich work belongs; anything the agent says in a
+            # group is visible to the group anyway.
+            minimal_context=group or not is_operator,
+            persist=None if unprompted else _persist_retryable,
+            # The channel's ONLY reach into context accounting: this is what
+            # calls check_context_usage, which is in turn the sole trigger
+            # for the backend autocompactor. Omitting it leaves a
+            # shared-pipeline channel with no compaction of any kind.
+            notice=lambda sk, provider: self._maybe_notice(
+                scope, sk, provider, unprompted=unprompted
             ),
-            sessions=self.sessions,
-            ctx_builder=self.ctx_builder,
+            audit_caller=f"whatsapp:{inbound.user_id}",
         )
+        for attempt in range(2):
+            attempt_no = attempt
+            if attempt:
+                # A plain reset is what recovers a channel session whose
+                # backend was reset between turns; the retry's renderer may send
+                # the notice if this too fails.
+                renderer = _make_renderer(suppress_error=False)
+                turn = replace(turn, renderer=renderer)
+                try:
+                    await self.sessions.reset(session_key)
+                except Exception:
+                    logger.warning(
+                        "whatsapp: session reset before retry failed session=%s",
+                        session_key,
+                        exc_info=True,
+                    )
+            try:
+                await drive_turn(turn, sessions=self.sessions, ctx_builder=self.ctx_builder)
+            except AcpError:
+                if attempt == 0 and not renderer.delivered:
+                    logger.warning(
+                        "whatsapp: ACP/session error before any text session=%s; "
+                        "retrying on a fresh session",
+                        session_key,
+                        exc_info=True,
+                    )
+                    continue
+                await renderer.flush_suppressed_error()
+                raise
+            except Exception:
+                # A failure the retry cannot fix (shutdown, ceiling, a bug) is
+                # not replayed; flush_suppressed_error keeps the reader's one
+                # notice even though the first renderer was built in retry mode.
+                await renderer.flush_suppressed_error()
+                raise
+            if not renderer.failed or renderer.delivered:
+                break
+            if attempt == 0:
+                logger.warning(
+                    "whatsapp: turn failed without text session=%s; retrying on a fresh session",
+                    session_key,
+                )
+                continue
         if unprompted and renderer.delivered:
             transport.group_gate.record_unprompted_reply(scope)
         # The OUTCOME, which is not the complement of "something reached the

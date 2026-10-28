@@ -122,6 +122,9 @@ class FakeSessions:
         self.context_checks: list[str] = []
         self._acquirable = acquirable
         self._session_exists = session_exists
+        #: A stale channel session is recovered by resetting it before the
+        #: replay; the count proves the retry took that path.
+        self.resets = 0
 
     def is_busy(self, key: str) -> bool:
         return self._busy
@@ -148,6 +151,10 @@ class FakeSessions:
 
     async def get_or_create(self, key, agent=None, channel_id=None, start_priority=None):
         return self.provider, True, False
+
+    async def reset(self, key, **kwargs):
+        self.resets += 1
+        return True
 
     def begin_turn(self, key: str) -> None:
         """The real manager's synchronous pre-dispatch closing gate."""
@@ -1328,3 +1335,107 @@ def test_say_reports_whether_the_message_landed():
     assert asyncio.run(d._say(_GROUP, "hi")) is False
     d.transport = None
     assert asyncio.run(d._say(_GROUP, "hi")) is False
+
+
+# ── dispatcher: retry after a reset ─────────────────────────────────────────
+#: The incident this guards: the group session was reset between turns, the
+#: first turn died before producing text, and the renderer posted
+#: "Something went wrong on my side" before a manual retry produced the answer.
+_ERROR_TEXT = "🤖 Something went wrong on my side. Please try again."
+
+
+def test_a_turn_that_fails_without_text_is_retried_before_any_error(monkeypatch):
+    """The reader sees the answer, never the intermediate failure notice."""
+    import kiro_crew.whatsapp.transport_dispatch as mod
+
+    d, _client, sessions, transport = _make()
+    inbound = _msg("quante camere ha glicine?", conv=_GROUP)
+    transport.pending_verdicts[id(inbound)] = GroupVerdict(respond=True)
+    attempts = []
+
+    async def fake_drive_turn(turn, **kwargs):
+        attempts.append(turn)
+        if len(attempts) == 1:
+            # Exactly how a reset session fails: no text, terminal error.
+            await turn.renderer.on_done("error")
+            return
+        await turn.renderer.on_text_chunk("6 camere da letto e 5 bagni")
+        await turn.renderer.on_done("end_turn")
+
+    monkeypatch.setattr(mod, "drive_turn", fake_drive_turn)
+    asyncio.run(d.handle_message(inbound))
+
+    assert len(attempts) == 2, "a failed turn with no text must be replayed"
+    assert sessions.resets == 1, "the replay must start from a fresh session"
+    assert [t for _, t in transport.sent] == ["🤖 6 camere da letto e 5 bagni"]
+
+
+def test_a_turn_that_raises_acp_error_is_retried_before_any_error(monkeypatch):
+    """A dead backend raises; the dispatcher resets and replays silently."""
+    import kiro_crew.whatsapp.transport_dispatch as mod
+    from kiro_crew.acp.transport_errors import AcpError
+
+    d, _client, sessions, transport = _make()
+    inbound = _msg("quante camere ha glicine?", conv=_GROUP)
+    transport.pending_verdicts[id(inbound)] = GroupVerdict(respond=True)
+    attempts = []
+
+    async def fake_drive_turn(turn, **kwargs):
+        attempts.append(turn)
+        if len(attempts) == 1:
+            raise AcpError("session was reset")
+        await turn.renderer.on_text_chunk("6 camere")
+        await turn.renderer.on_done("end_turn")
+
+    monkeypatch.setattr(mod, "drive_turn", fake_drive_turn)
+    asyncio.run(d.handle_message(inbound))
+
+    assert len(attempts) == 2
+    assert sessions.resets == 1
+    assert [t for _, t in transport.sent] == ["🤖 6 camere"]
+
+
+def test_two_failed_attempts_post_the_error_exactly_once(monkeypatch):
+    """The retry is one shot: a second failure must still tell the reader."""
+    import kiro_crew.whatsapp.transport_dispatch as mod
+
+    d, _client, sessions, transport = _make()
+    inbound = _msg("quante camere ha glicine?", conv=_GROUP)
+    transport.pending_verdicts[id(inbound)] = GroupVerdict(respond=True)
+    attempts = []
+
+    async def fake_drive_turn(turn, **kwargs):
+        attempts.append(turn)
+        await turn.renderer.on_done("error")
+
+    monkeypatch.setattr(mod, "drive_turn", fake_drive_turn)
+    asyncio.run(d.handle_message(inbound))
+
+    assert len(attempts) == 2
+    assert sessions.resets == 1
+    assert [t for _, t in transport.sent] == [_ERROR_TEXT]
+
+
+def test_a_non_retryable_failure_still_posts_the_suppressed_error(monkeypatch):
+    """A bug or shutdown is not replayed, but the reader still gets one notice."""
+    import kiro_crew.whatsapp.transport_dispatch as mod
+
+    d, _client, sessions, transport = _make()
+    inbound = _msg("quante camere ha glicine?", conv=_GROUP)
+    transport.pending_verdicts[id(inbound)] = GroupVerdict(respond=True)
+    attempts = []
+
+    async def fake_drive_turn(turn, **kwargs):
+        attempts.append(turn)
+        await turn.renderer.on_done("error")
+        raise RuntimeError("not a session failure")
+
+    monkeypatch.setattr(mod, "drive_turn", fake_drive_turn)
+    try:
+        asyncio.run(d.handle_message(inbound))
+    except RuntimeError:
+        pass
+
+    assert len(attempts) == 1, "a non-ACP failure must not be replayed"
+    assert sessions.resets == 0
+    assert [t for _, t in transport.sent] == [_ERROR_TEXT]
