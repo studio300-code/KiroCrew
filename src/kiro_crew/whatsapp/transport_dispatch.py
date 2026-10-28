@@ -164,6 +164,13 @@ BUSY_NOTE = "Still working on the last message; please resend shortly."
 #: turn. It deliberately never asks the operator to send it again.
 QUEUED_NOTE = "⏳ Queued — I'll answer this after the current turn."
 
+
+def _queued_note(depth: int) -> str:
+    """The receipt for the *depth*-th question waiting behind the current turn."""
+    if depth <= 1:
+        return QUEUED_NOTE
+    return f"⏳ Queued ({depth}) — I'll answer these after the current turn."
+
 #: Phase reactions placed on the OPERATOR'S OWN inbound message, which is the
 #: same affordance Slack draws with its status reactions. Reacting to their
 #: message rather than to ours is deliberate: whether a linked device may react
@@ -229,6 +236,10 @@ class WhatsAppDispatcher:
         #: released during a backoff, so without this a second question would
         #: start a concurrent turn while the first one is still waiting.
         self._retrying: set[str] = set()
+        #: Conversations that already had one question steered into the running
+        #: turn. A second follow-up queues instead, so a burst of questions is
+        #: answered in order rather than all folded into one reply.
+        self._steered: set[str] = set()
         # Held on self: the watcher holds the owner WEAKLY, so a subscription
         # dropped here would be collected and the applier would silently stop
         # firing.
@@ -749,6 +760,7 @@ class WhatsAppDispatcher:
                 )
         finally:
             self._retrying.discard(scope)
+            self._steered.discard(scope)
         if unprompted and renderer.delivered:
             transport.group_gate.record_unprompted_reply(scope)
         # The OUTCOME, which is not the complement of "something reached the
@@ -857,18 +869,24 @@ class WhatsAppDispatcher:
             # steer forwards TEXT ONLY; a photo/document message must keep its
             # attachments through the queue path instead.
             and not inbound.attachments
+            # One steer per turn, and never past a question already waiting:
+            # a burst must preserve its order instead of folding every item
+            # into the same reply.
+            and scope not in self._steered
+            and not self._queued.get(scope)
             and live
             and getattr(provider, "supports_steer", False)
             and steer is not None
         )
         if can_steer and await steer(inbound.text):
+            self._steered.add(scope)
             await self._say(scope, "Folded into the current reply.")
             return
         if is_operator:
             # Keep it and replay it when the turn ends; never ask the operator
             # to send the same question again.
-            self._enqueue(inbound, session_key, inbound_route)
-            await self._say(scope, QUEUED_NOTE)
+            depth = self._enqueue(inbound, session_key, inbound_route)
+            await self._say(scope, _queued_note(depth))
             return
         await self._say(scope, BUSY_NOTE)
 
@@ -877,8 +895,9 @@ class WhatsAppDispatcher:
         inbound: InboundMessage,
         session_key: str,
         inbound_route: InboundRoute | None,
-    ) -> None:
+    ) -> int:
         """Hold one mid-turn message for the drain that follows the turn."""
+
         transport = self.transport
         assert transport is not None
         attachment_paths = list(inbound.attachments or [])
@@ -904,6 +923,7 @@ class WhatsAppDispatcher:
             session_key,
             len(queue),
         )
+        return len(queue)
 
     async def _drain_queued(self, scope: str) -> None:
         """Replay the messages held while a turn was running, in arrival order."""
