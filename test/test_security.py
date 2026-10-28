@@ -325,6 +325,34 @@ class TestRedactCredentials:
             "'was anything redacted' (e.g. the dashboard chat notice) can see them"
         )
 
+    def test_media_data_uri_payload_is_not_a_credential(self) -> None:
+        """A self-contained HTML page embeds images as base64; that is not a secret.
+
+        The WebP header makes the run clear the bare-secret heuristic, and the
+        encoded-credential pass decoded shapes that looked keyed. A 4 MB page
+        tripped 22 matches, all inside its own images, and file_send refused it.
+        """
+        payload = (
+            "UklGRqqNAABXRUJQVlA4IJ6NAAAw/AKdASoABVgCPlUmkUcjoawjIpC6UYAKiWdB"
+            "VcTht/n+q/+onp4VtDs2d/Alz0/KX4z/Hv3y"
+        )
+        text = f'<img src="data:image/webp;base64,{payload}">'
+
+        result, warnings = redact_credentials(text)
+
+        assert result == text
+        assert warnings == []
+
+    def test_non_media_data_uri_is_still_scanned(self) -> None:
+        """Only inline media is exempt: text a person can author stays scanned."""
+        blob = base64.b64encode(b"postgresql://user:pass@host:5432/db").decode()
+        text = f"data:text/plain;base64,{blob}"
+
+        result, warnings = redact_credentials(text)
+
+        assert result != text
+        assert warnings
+
     def test_pass_two_emits_a_registered_tag(self) -> None:
         """The base64 pass must substitute a tag consumers actually look for."""
         import base64
