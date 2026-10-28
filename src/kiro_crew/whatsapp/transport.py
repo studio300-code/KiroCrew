@@ -100,6 +100,21 @@ from kiro_crew.whatsapp.renderer import WHATSAPP_CHUNK_LIMIT
 
 logger = logging.getLogger(__name__)
 
+
+def _ogg_seconds(data: bytes) -> int:
+    """Duration of an OGG/Opus voice note, from its final granule position.
+
+    WhatsApp draws the duration on the bubble from ``AudioMessage.seconds``.
+    Reading the granule avoids spawning ffprobe on every voice note: the field
+    counts 48 kHz samples, which is the rate Opus always decodes at. A truncated
+    or non-OGG payload answers 0, the same "unknown" the client already handles.
+    """
+    pos = data.rfind(b"OggS")
+    if pos < 0 or len(data) < pos + 14:
+        return 0
+    granule = int.from_bytes(data[pos + 6 : pos + 14], "little")
+    return max(0, round(granule / 48000))
+
 #: seconds of pre-connection history still answered after (re)connect. Events
 #: older than ``connected_at - GRACE`` are reconnect replay, not live traffic.
 _REPLAY_GRACE_S = 60.0
@@ -479,9 +494,27 @@ class WhatsAppTransport(MessagingTransport):
         The name that travels is the BASENAME only (the client enforces it):
         the caller's path is a real path on the operator's machine and must not
         reach the recipient.
+
+        **An OGG/Opus upload becomes a push-to-talk voice note**, not a file
+        attachment. That is the container WhatsApp itself records voice in, and
+        the client's voice path is the only one that sets ``PTT``. The mime is
+        pinned to the codec spelling because a recipient's client may refuse to
+        play a PTT message in another container, and the duration is read from
+        the last OGG page so the bubble shows the real length.
         """
         jid = normalize_jid(conversation_id)
         name = Path(file.path).name
+        note = (caption or file.alt or "").strip()
+        if (file.mime or "").split(";", 1)[0].strip().lower() == "audio/ogg":
+            voice_id = await self._client.send_voice_bytes(
+                jid,
+                file.data,
+                mimetype="audio/ogg; codecs=opus",
+                seconds=_ogg_seconds(file.data),
+                on_sent=lambda message_id: self._remember_sent(jid, message_id),
+            )
+            self._archive_outbound(voice_id, jid, body=note or name, kind="voice")
+            return voice_id
         mid = await self._client.send_document_bytes(
             jid,
             file.data,
@@ -490,7 +523,6 @@ class WhatsAppTransport(MessagingTransport):
             caption=caption or file.alt,
             on_sent=lambda message_id: self._remember_sent(jid, message_id),
         )
-        note = (caption or file.alt or "").strip()
         self._archive_outbound(
             mid,
             jid,
