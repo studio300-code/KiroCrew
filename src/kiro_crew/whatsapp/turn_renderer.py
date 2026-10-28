@@ -154,6 +154,10 @@ class WhatsAppRenderer(Renderer):
         self._scratch_root = scratch_root
         self._last_tool = ""
         self._last_purpose = ""
+        #: How many tool calls this turn announced. The dispatcher reads it to
+        #: refuse a replay after a tool may already have run: re-sending the
+        #: prompt could run its side effects twice.
+        self.tools_called = 0
         self._buf: list[str] = []
         self._started = False
         self._finalized = False
@@ -468,6 +472,7 @@ class WhatsAppRenderer(Renderer):
         whichever tool call came last and a permission request not immediately
         preceded by its own titled call would otherwise name a different tool.
         """
+        self.tools_called += 1
         self._last_tool = title or self._last_tool
         self._last_purpose = tool_purpose or ""
         # A tool call is the agent working, so the indicator is honest again after

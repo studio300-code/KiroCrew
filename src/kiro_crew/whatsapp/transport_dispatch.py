@@ -10,15 +10,27 @@ Dependency direction is ``whatsapp -> messaging`` (allowed).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
-from kiro_crew.acp.transport_errors import AcpError
+from kiro_crew.acp.transport_errors import (
+    AcpAuthRequired,
+    AcpError,
+    AcpProcessDied,
+    AcpToolGateUnroutable,
+    PiGateExtensionTampered,
+)
 from kiro_crew.config import live
 from kiro_crew.config.sections import _normalize_threshold_pair
 from kiro_crew.history import mint_row_mid
+from kiro_crew.llm_helpers import (
+    acp_error_after_tool_activity,
+    acp_error_is_session_not_found,
+    acp_error_is_transient,
+)
 from kiro_crew.messaging.approval import (
     TextReplyApprovalDecider,
     deliver_verdict,
@@ -87,6 +99,61 @@ _DEFAULT_AGENT = "kirocrew"
 #: in that group. Colon-free by construction, so it is one more scope segment in
 #: the ``{channel}:{agent}:{chat_type}:{scope}`` key shape.
 GUEST_SCOPE_SEGMENT = "guest"
+
+#: One initial attempt plus at most three silent retries.
+_TURN_MAX_ATTEMPTS = 4
+#: Backoff before retries 1..3. A session reset is the recovery; the wait only
+#: needs to outlast a transient blip, not a full provider outage.
+_TURN_RETRY_BACKOFF_S: tuple[float, ...] = (1.0, 2.0, 4.0)
+
+
+def _retry_backoff_s(retry: int) -> float:
+    """Seconds before the *retry*-th (1-based) replay."""
+    return _TURN_RETRY_BACKOFF_S[min(retry, len(_TURN_RETRY_BACKOFF_S)) - 1]
+
+
+async def _retry_wait(seconds: float) -> None:
+    """Sleep before a replay; a seam so tests do not wait."""
+    if seconds > 0:
+        await asyncio.sleep(seconds)
+
+
+def _acp_retry_verdict(exc: AcpError) -> tuple[bool, bool]:
+    """``(retry, reconnect)`` for an ACP failure that delivered no text.
+
+    Reconnect means the session is evicted before the replay. A terminal error
+    (sign-in, allowance, unsupported request, missing CLI, rejected model) is
+    not retried, and neither is a turn in which a tool already ran: replaying
+    the prompt could run its side effects twice.
+    """
+    if acp_error_after_tool_activity(exc):
+        return False, False
+    if isinstance(exc, (AcpAuthRequired, AcpToolGateUnroutable, PiGateExtensionTampered)):
+        return False, False
+    if (
+        getattr(exc, "auth_required", False)
+        or getattr(exc, "usage_limit", False)
+        or getattr(exc, "structural_terminal", False)
+        or getattr(exc, "context_overflow", False)
+        or getattr(exc, "kiro_cli_missing", False)
+        or getattr(exc, "rejected_model", None)
+        or getattr(exc, "ambiguous_delivery", False)
+    ):
+        return False, False
+    if acp_error_is_session_not_found(exc) or isinstance(exc, AcpProcessDied):
+        return True, True
+    if getattr(exc, "credential_reload", False):
+        return True, True
+    if getattr(exc, "transient", None) is False:
+        # An explicit non-retryable verdict from the provider frame; only a
+        # different request can succeed, not the same prompt again.
+        return False, False
+    if acp_error_is_transient(exc):
+        # A provider/network blip: the session is healthy, so keep it.
+        return True, False
+    # An unclassified ACP failure: a fresh process is the only recovery left.
+    return True, True
+
 
 #: The receipt a sender gets while a reply is still streaming into their chat.
 BUSY_NOTE = "Still working on the last message; please resend shortly."
@@ -499,14 +566,13 @@ class WhatsAppDispatcher:
         if unprompted:
             user_text = build_silence_contract(verdict.rules) + "\n\n" + user_text
         await self._react(inbound, REACTION_WORKING, session_key=session_key)
-        # Which attempt is running, read by the persist closure below. A first
-        #: attempt that produced no answer is retried immediately, so recording
-        #: its prompt would duplicate the user's message in the conversation log
-        #: beside the retry's copy.
-        attempt_no = 0
 
         def _persist_retryable(u: str, r: str, n: bool) -> None:
-            if attempt_no == 0 and not r:
+            # A failed attempt whose notice was suppressed is about to be
+            # replayed; recording its prompt would put the user's question in
+            # the conversation log twice, once with no answer. The final
+            # attempt's own record (or its error) is the one that belongs.
+            if not r and renderer.suppressed:
                 return
             self._persist_turn(session_key, u, r, n)
 
@@ -566,49 +632,69 @@ class WhatsAppDispatcher:
             ),
             audit_caller=f"whatsapp:{inbound.user_id}",
         )
-        for attempt in range(2):
-            attempt_no = attempt
+        # At most three silent replays, with a short exponential backoff. A
+        # lost session (or a dead process) is reset before the replay; a
+        # transient provider/network error keeps the session. Only the FINAL
+        # attempt's renderer may post the failure notice, so the intermediate
+        # attempts stay invisible in the chat.
+        reconnect_next = False
+        for attempt in range(_TURN_MAX_ATTEMPTS):
+            final = attempt == _TURN_MAX_ATTEMPTS - 1
             if attempt:
-                # A plain reset is what recovers a channel session whose
-                # backend was reset between turns; the retry's renderer may send
-                # the notice if this too fails.
-                renderer = _make_renderer(suppress_error=False)
+                await _retry_wait(_retry_backoff_s(attempt))
+                if reconnect_next:
+                    try:
+                        await self.sessions.reset(session_key)
+                    except Exception:
+                        logger.warning(
+                            "whatsapp: session reset before retry failed session=%s",
+                            session_key,
+                            exc_info=True,
+                        )
+                renderer = _make_renderer(suppress_error=not final)
                 turn = replace(turn, renderer=renderer)
-                try:
-                    await self.sessions.reset(session_key)
-                except Exception:
-                    logger.warning(
-                        "whatsapp: session reset before retry failed session=%s",
-                        session_key,
-                        exc_info=True,
-                    )
             try:
                 await drive_turn(turn, sessions=self.sessions, ctx_builder=self.ctx_builder)
-            except AcpError:
-                if attempt == 0 and not renderer.delivered:
-                    logger.warning(
-                        "whatsapp: ACP/session error before any text session=%s; "
-                        "retrying on a fresh session",
-                        session_key,
-                        exc_info=True,
-                    )
-                    continue
-                await renderer.flush_suppressed_error()
-                raise
+            except AcpError as exc:
+                retry, reconnect = _acp_retry_verdict(exc)
+                if renderer.delivered or final or not retry:
+                    await renderer.flush_suppressed_error()
+                    raise
+                reconnect_next = reconnect
+                logger.warning(
+                    "whatsapp: ACP/session error before any text session=%s; "
+                    "retrying in %.0fs (%d/%d, reconnect=%s)",
+                    session_key,
+                    _retry_backoff_s(attempt + 1),
+                    attempt + 1,
+                    _TURN_MAX_ATTEMPTS - 1,
+                    reconnect,
+                    exc_info=True,
+                )
+                continue
             except Exception:
                 # A failure the retry cannot fix (shutdown, ceiling, a bug) is
                 # not replayed; flush_suppressed_error keeps the reader's one
-                # notice even though the first renderer was built in retry mode.
+                # notice even though the attempt's renderer was built in retry
+                # mode.
                 await renderer.flush_suppressed_error()
                 raise
             if not renderer.failed or renderer.delivered:
                 break
-            if attempt == 0:
-                logger.warning(
-                    "whatsapp: turn failed without text session=%s; retrying on a fresh session",
-                    session_key,
-                )
-                continue
+            if final or renderer.tools_called:
+                # Nothing is left to try, or a tool may already have run and a
+                # replay could run it twice. Deliver the one notice instead.
+                await renderer.flush_suppressed_error()
+                break
+            reconnect_next = True
+            logger.warning(
+                "whatsapp: turn failed without text session=%s; retrying in %.0fs "
+                "(%d/%d, reconnect=True)",
+                session_key,
+                _retry_backoff_s(attempt + 1),
+                attempt + 1,
+                _TURN_MAX_ATTEMPTS - 1,
+            )
         if unprompted and renderer.delivered:
             transport.group_gate.record_unprompted_reply(scope)
         # The OUTCOME, which is not the complement of "something reached the
