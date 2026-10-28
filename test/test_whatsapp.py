@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import pytest
 
+from kiro_crew.whatsapp.bot_sent import BotSentLog
 from kiro_crew.whatsapp.commands import parse_command
 from kiro_crew.whatsapp.echo import EchoTracker
 from kiro_crew.whatsapp.group_gate import (
@@ -73,6 +74,54 @@ class TestEchoTracker:
         t = EchoTracker()
         t.remember("jid@s.whatsapp.net", "")
         assert len(t) == 0
+
+
+class TestBotSentLog:
+    def test_untracked_id_is_not_a_bot_message(self):
+        log = BotSentLog()
+        assert not log.contains("jid@s.whatsapp.net", "ID1")
+
+    def test_remembered_id_is_a_bot_message(self):
+        log = BotSentLog()
+        log.remember("jid@s.whatsapp.net", "ID1")
+        assert log.contains("jid@s.whatsapp.net", "ID1")
+
+    def test_same_id_in_another_chat_is_not_a_bot_message(self):
+        log = BotSentLog()
+        log.remember("a@s.whatsapp.net", "ID1")
+        assert not log.contains("b@s.whatsapp.net", "ID1")
+
+    def test_entries_expire_after_ttl(self):
+        clock = FakeClock()
+        log = BotSentLog(ttl_s=60, clock=clock)
+        log.remember("jid@s.whatsapp.net", "ID1")
+        clock.now += 61
+        assert not log.contains("jid@s.whatsapp.net", "ID1")
+        assert len(log) == 0
+
+    def test_survives_a_restart(self, tmp_path):
+        path = tmp_path / "bot-sent.log"
+        first = BotSentLog(path)
+        first.remember("jid@s.whatsapp.net", "ID1")
+
+        second = BotSentLog(path)
+        assert second.contains("jid@s.whatsapp.net", "ID1")
+        assert not second.contains("jid@s.whatsapp.net", "ID2")
+
+    def test_expired_entries_are_dropped_on_load(self, tmp_path):
+        clock = FakeClock()
+        path = tmp_path / "bot-sent.log"
+        first = BotSentLog(path, ttl_s=60, clock=clock)
+        first.remember("jid@s.whatsapp.net", "ID1")
+
+        clock.now += 61
+        second = BotSentLog(path, ttl_s=60, clock=clock)
+        assert not second.contains("jid@s.whatsapp.net", "ID1")
+
+    def test_empty_message_id_is_ignored(self):
+        log = BotSentLog()
+        log.remember("jid@s.whatsapp.net", "")
+        assert len(log) == 0
 
 
 class TestGroupGate:
