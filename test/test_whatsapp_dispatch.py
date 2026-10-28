@@ -37,6 +37,17 @@ from kiro_crew.whatsapp.transport_dispatch import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _no_retry_wait(monkeypatch):
+    """Failure tests must not pay the real 1/2/4 s replay backoff."""
+    import kiro_crew.whatsapp.transport_dispatch as mod
+
+    async def _no_wait(seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(mod, "_retry_wait", _no_wait)
+
+
 # ── fakes ─────────────────────────────────────────────────────────────────────
 class FakeEvent:
     def __init__(self, kind: str, text: str = "") -> None:
@@ -576,8 +587,10 @@ def test_provider_exception_records_failure_and_releases():
 
     d, _client, sessions, transport = _make(provider=Boom())
     asyncio.run(d.handle_message(_msg("trigger failure")))
-    assert sessions.failures == 1
-    assert sessions.released == 1
+    # One initial attempt plus the three silent replays; each attempt releases
+    # its own lease, and only the last one's renderer posts the notice.
+    assert sessions.failures == 4
+    assert sessions.released == 4
     # close() still flushes an error bubble to the user.
     assert transport.sent and "went wrong" in transport.sent[-1][1].lower()
 
@@ -1344,13 +1357,30 @@ def test_say_reports_whether_the_message_landed():
 _ERROR_TEXT = "🤖 Something went wrong on my side. Please try again."
 
 
+def _record_retry_waits(monkeypatch, mod):
+    """Replace the backoff sleep with a recorder, so tests never wait."""
+    waits: list[float] = []
+
+    async def fake_wait(seconds: float) -> None:
+        waits.append(seconds)
+
+    monkeypatch.setattr(mod, "_retry_wait", fake_wait)
+    return waits
+
+
+def _group_inbound(transport):
+    inbound = _msg("quante camere ha glicine?", conv=_GROUP)
+    transport.pending_verdicts[id(inbound)] = GroupVerdict(respond=True)
+    return inbound
+
+
 def test_a_turn_that_fails_without_text_is_retried_before_any_error(monkeypatch):
     """The reader sees the answer, never the intermediate failure notice."""
     import kiro_crew.whatsapp.transport_dispatch as mod
 
     d, _client, sessions, transport = _make()
-    inbound = _msg("quante camere ha glicine?", conv=_GROUP)
-    transport.pending_verdicts[id(inbound)] = GroupVerdict(respond=True)
+    inbound = _group_inbound(transport)
+    waits = _record_retry_waits(monkeypatch, mod)
     attempts = []
 
     async def fake_drive_turn(turn, **kwargs):
@@ -1367,23 +1397,25 @@ def test_a_turn_that_fails_without_text_is_retried_before_any_error(monkeypatch)
 
     assert len(attempts) == 2, "a failed turn with no text must be replayed"
     assert sessions.resets == 1, "the replay must start from a fresh session"
+    assert waits == [1.0], "the first replay waits one second"
     assert [t for _, t in transport.sent] == ["🤖 6 camere da letto e 5 bagni"]
 
 
-def test_a_turn_that_raises_acp_error_is_retried_before_any_error(monkeypatch):
-    """A dead backend raises; the dispatcher resets and replays silently."""
+def test_a_lost_session_is_reconnected_and_retried_silently(monkeypatch):
+    """A session-not-found answer evicts the session; the reader sees nothing."""
     import kiro_crew.whatsapp.transport_dispatch as mod
     from kiro_crew.acp.transport_errors import AcpError
 
     d, _client, sessions, transport = _make()
-    inbound = _msg("quante camere ha glicine?", conv=_GROUP)
-    transport.pending_verdicts[id(inbound)] = GroupVerdict(respond=True)
+    inbound = _group_inbound(transport)
+    waits = _record_retry_waits(monkeypatch, mod)
     attempts = []
 
     async def fake_drive_turn(turn, **kwargs):
         attempts.append(turn)
         if len(attempts) == 1:
-            raise AcpError("session was reset")
+            await turn.renderer.on_done("error")
+            raise AcpError("session not found")
         await turn.renderer.on_text_chunk("6 camere")
         await turn.renderer.on_done("end_turn")
 
@@ -1392,16 +1424,44 @@ def test_a_turn_that_raises_acp_error_is_retried_before_any_error(monkeypatch):
 
     assert len(attempts) == 2
     assert sessions.resets == 1
+    assert waits == [1.0]
     assert [t for _, t in transport.sent] == ["🤖 6 camere"]
 
 
-def test_two_failed_attempts_post_the_error_exactly_once(monkeypatch):
-    """The retry is one shot: a second failure must still tell the reader."""
+def test_three_retries_are_attempted_with_exponential_backoff(monkeypatch):
+    """One initial attempt plus three replays, then the answer on the last."""
+    import kiro_crew.whatsapp.transport_dispatch as mod
+    from kiro_crew.acp.transport_errors import AcpError
+
+    d, _client, sessions, transport = _make()
+    inbound = _group_inbound(transport)
+    waits = _record_retry_waits(monkeypatch, mod)
+    attempts = []
+
+    async def fake_drive_turn(turn, **kwargs):
+        attempts.append(turn)
+        if len(attempts) < 4:
+            await turn.renderer.on_done("error")
+            raise AcpError("session not found")
+        await turn.renderer.on_text_chunk("6 camere")
+        await turn.renderer.on_done("end_turn")
+
+    monkeypatch.setattr(mod, "drive_turn", fake_drive_turn)
+    asyncio.run(d.handle_message(inbound))
+
+    assert len(attempts) == 4, "three retries after the first attempt"
+    assert sessions.resets == 3
+    assert waits == [1.0, 2.0, 4.0]
+    assert [t for _, t in transport.sent] == ["🤖 6 camere"]
+
+
+def test_all_four_attempts_failing_post_the_error_exactly_once(monkeypatch):
+    """The retry budget is finite: the last failure still tells the reader."""
     import kiro_crew.whatsapp.transport_dispatch as mod
 
     d, _client, sessions, transport = _make()
-    inbound = _msg("quante camere ha glicine?", conv=_GROUP)
-    transport.pending_verdicts[id(inbound)] = GroupVerdict(respond=True)
+    inbound = _group_inbound(transport)
+    waits = _record_retry_waits(monkeypatch, mod)
     attempts = []
 
     async def fake_drive_turn(turn, **kwargs):
@@ -1411,8 +1471,86 @@ def test_two_failed_attempts_post_the_error_exactly_once(monkeypatch):
     monkeypatch.setattr(mod, "drive_turn", fake_drive_turn)
     asyncio.run(d.handle_message(inbound))
 
-    assert len(attempts) == 2
-    assert sessions.resets == 1
+    assert len(attempts) == 4
+    assert sessions.resets == 3
+    assert waits == [1.0, 2.0, 4.0]
+    assert [t for _, t in transport.sent] == [_ERROR_TEXT]
+
+
+def test_a_transient_acp_error_keeps_the_session(monkeypatch):
+    """A provider/network blip is retried, but the healthy session is kept."""
+    import kiro_crew.whatsapp.transport_dispatch as mod
+    from kiro_crew.acp.transport_errors import AcpError
+
+    d, _client, sessions, transport = _make()
+    inbound = _group_inbound(transport)
+    waits = _record_retry_waits(monkeypatch, mod)
+    attempts = []
+
+    async def fake_drive_turn(turn, **kwargs):
+        attempts.append(turn)
+        await turn.renderer.on_done("error")
+        raise AcpError("provider 503", transient=True)
+
+    monkeypatch.setattr(mod, "drive_turn", fake_drive_turn)
+    try:
+        asyncio.run(d.handle_message(inbound))
+    except AcpError:
+        pass
+
+    assert len(attempts) == 4
+    assert sessions.resets == 0, "a transient backend error must not evict the session"
+    assert waits == [1.0, 2.0, 4.0]
+    assert [t for _, t in transport.sent] == [_ERROR_TEXT]
+
+
+def test_a_terminal_acp_error_is_not_retried(monkeypatch):
+    """A sign-in wall reproduces on every replay; stop at the first failure."""
+    import kiro_crew.whatsapp.transport_dispatch as mod
+    from kiro_crew.acp.transport_errors import AcpAuthRequired
+
+    d, _client, sessions, transport = _make()
+    inbound = _group_inbound(transport)
+    waits = _record_retry_waits(monkeypatch, mod)
+    attempts = []
+
+    async def fake_drive_turn(turn, **kwargs):
+        attempts.append(turn)
+        await turn.renderer.on_done("error")
+        raise AcpAuthRequired("sign in again")
+
+    monkeypatch.setattr(mod, "drive_turn", fake_drive_turn)
+    try:
+        asyncio.run(d.handle_message(inbound))
+    except AcpAuthRequired:
+        pass
+
+    assert len(attempts) == 1
+    assert sessions.resets == 0
+    assert waits == []
+    assert [t for _, t in transport.sent] == [_ERROR_TEXT]
+
+
+def test_a_turn_that_already_used_a_tool_is_not_replayed(monkeypatch):
+    """Replaying after a tool fired could run its side effects twice."""
+    import kiro_crew.whatsapp.transport_dispatch as mod
+
+    d, _client, sessions, transport = _make()
+    inbound = _group_inbound(transport)
+    waits = _record_retry_waits(monkeypatch, mod)
+    attempts = []
+
+    async def fake_drive_turn(turn, **kwargs):
+        attempts.append(turn)
+        await turn.renderer.on_tool_call("call-1", "write_file")
+        await turn.renderer.on_done("error")
+
+    monkeypatch.setattr(mod, "drive_turn", fake_drive_turn)
+    asyncio.run(d.handle_message(inbound))
+
+    assert len(attempts) == 1, "a turn with tool activity must not be replayed"
+    assert sessions.resets == 0
+    assert waits == []
     assert [t for _, t in transport.sent] == [_ERROR_TEXT]
 
 
@@ -1421,8 +1559,8 @@ def test_a_non_retryable_failure_still_posts_the_suppressed_error(monkeypatch):
     import kiro_crew.whatsapp.transport_dispatch as mod
 
     d, _client, sessions, transport = _make()
-    inbound = _msg("quante camere ha glicine?", conv=_GROUP)
-    transport.pending_verdicts[id(inbound)] = GroupVerdict(respond=True)
+    inbound = _group_inbound(transport)
+    waits = _record_retry_waits(monkeypatch, mod)
     attempts = []
 
     async def fake_drive_turn(turn, **kwargs):
@@ -1438,4 +1576,5 @@ def test_a_non_retryable_failure_still_posts_the_suppressed_error(monkeypatch):
 
     assert len(attempts) == 1, "a non-ACP failure must not be replayed"
     assert sessions.resets == 0
+    assert waits == []
     assert [t for _, t in transport.sent] == [_ERROR_TEXT]
