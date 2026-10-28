@@ -118,6 +118,13 @@ class WhatsAppRenderer(Renderer):
         capabilities: TransportCapabilities,
         *,
         unprompted: bool = False,
+        #: A dispatcher that plans to retry a failed turn on a fresh session
+        #: sets this on the FIRST renderer. If the turn dies without producing
+        #: text, ``on_done`` records the failure but sends nothing, so the
+        #: reader never sees the intermediate "Something went wrong" notice.
+        #: The retry's renderer is built with this off and sends the notice only
+        #: if the retry fails too.
+        suppress_error: bool = False,
         session_key: str = "",
         approval_session_key: str | None = None,
         upload_root: "Callable[[], str] | None" = None,
@@ -128,6 +135,7 @@ class WhatsAppRenderer(Renderer):
         self._client = client
         self._chat = chat_jid
         self._unprompted = unprompted
+        self._suppress_error = bool(suppress_error)
         self._session_key = session_key
         #: Set only when the dispatcher built a decider for this turn, i.e. the
         #: sender may approve. ``None`` keeps ``on_prompt_choice`` silent rather
@@ -549,6 +557,25 @@ class WhatsAppRenderer(Renderer):
     async def on_compaction(self, context_usage_pct: float) -> None:
         logger.debug("whatsapp: compaction status %.0f%%", context_usage_pct)
 
+    async def flush_suppressed_error(self) -> None:
+        """Deliver the failure notice a suppressed finalization withheld.
+
+        Called when the dispatcher will NOT retry after all: a failure it cannot
+        replay, or a shutdown. Idempotent (``delivered`` guards it) and
+        best-effort -- a notice that cannot be sent must not mask the turn's own
+        error.
+        """
+        self._suppress_error = False
+        if not self.suppressed or self.delivered:
+            return
+        try:
+            await self._send(_ERROR_TEXT)
+        except Exception:  # noqa: BLE001: the turn's own error is already unwinding
+            logger.warning(
+                "whatsapp: could not deliver the suppressed failure notice",
+                exc_info=True,
+            )
+
     async def on_done(self, stop_reason: str = "") -> None:
         if self._finalized:
             return
@@ -569,6 +596,16 @@ class WhatsAppRenderer(Renderer):
             logger.debug("whatsapp: unprompted group turn suppressed")
             return
         if not body:
+            # A dispatcher that is about to retry this turn on a fresh session
+            # suppresses the intermediate notice: the reader should see the
+            # answer, not an error followed by the answer. Only a FAILED turn is
+            # suppressed; a normal empty turn still gets the notice below.
+            if self._suppress_error and self.failed:
+                self.suppressed = True
+                logger.debug(
+                    "whatsapp: turn failed without text; error suppressed for an automatic retry"
+                )
+                return
             # A turn that produced no text has nothing to say. Three dots is not
             # an answer and leaves the reader waiting for a reply that will never
             # come; say so instead, so the operator retries.
