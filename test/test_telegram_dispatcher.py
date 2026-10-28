@@ -1820,13 +1820,13 @@ class TestABusyReplyCarriesItsContext:
         sess._busy = False  # turn ended; the session lease is free before the drain runs
         asyncio.run(d._drain_queue(self._KEY))
 
-        assert len(captured) == 1
-        combined = captured[0]
-        # Each entry's own parent is present, exactly once, and the replayed
-        # turn carries no leftover reply_context to double-frame.
-        assert "parent one" in combined and "parent two" in combined
-        assert combined.count(_markers._THREAD_FENCE_OPEN) == 2
-        assert combined.startswith("first")
+        # One turn per queued reply; each carries exactly its own parent and
+        # no leftover reply_context to double-frame.
+        assert len(captured) == 2
+        assert captured[0].startswith("first") and "parent one" in captured[0]
+        assert captured[1].startswith("second") and "parent two" in captured[1]
+        assert captured[0].count(_markers._THREAD_FENCE_OPEN) == 1
+        assert captured[1].count(_markers._THREAD_FENCE_OPEN) == 1
 
     def test_an_injection_reply_on_the_queue_path_audits_exactly_once(
         self, monkeypatch: Any
