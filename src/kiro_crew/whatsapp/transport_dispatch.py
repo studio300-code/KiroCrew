@@ -236,10 +236,6 @@ class WhatsAppDispatcher:
         #: released during a backoff, so without this a second question would
         #: start a concurrent turn while the first one is still waiting.
         self._retrying: set[str] = set()
-        #: Conversations that already had one question steered into the running
-        #: turn. A second follow-up queues instead, so a burst of questions is
-        #: answered in order rather than all folded into one reply.
-        self._steered: set[str] = set()
         # Held on self: the watcher holds the owner WEAKLY, so a subscription
         # dropped here would be collected and the applier would silently stop
         # firing.
@@ -760,7 +756,6 @@ class WhatsAppDispatcher:
                 )
         finally:
             self._retrying.discard(scope)
-            self._steered.discard(scope)
         if unprompted and renderer.delivered:
             transport.group_gate.record_unprompted_reply(scope)
         # The OUTCOME, which is not the complement of "something reached the
@@ -869,17 +864,11 @@ class WhatsAppDispatcher:
             # steer forwards TEXT ONLY; a photo/document message must keep its
             # attachments through the queue path instead.
             and not inbound.attachments
-            # One steer per turn, and never past a question already waiting:
-            # a burst must preserve its order instead of folding every item
-            # into the same reply.
-            and scope not in self._steered
-            and not self._queued.get(scope)
             and live
             and getattr(provider, "supports_steer", False)
             and steer is not None
         )
         if can_steer and await steer(inbound.text):
-            self._steered.add(scope)
             await self._say(scope, "Folded into the current reply.")
             return
         if is_operator:
