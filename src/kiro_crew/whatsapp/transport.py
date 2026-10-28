@@ -195,6 +195,10 @@ class WhatsAppTransport(MessagingTransport):
             else None
         )
         self.bot_sent = BotSentLog(bot_sent_path)
+        #: Attachment temp paths a queued turn still owns. ``receive`` must not
+        #: unlink these when its dispatch returns; the drain releases them after
+        #: replaying the message.
+        self._retained_temp_paths: set[str] = set()
         #: copy of every message into the local archive (wa.db), independent of
         #: dm_policy/groups: the archive is history, not admission. The worker
         #: also calls back once a voice note is transcribed, because a spoken
@@ -386,6 +390,26 @@ class WhatsAppTransport(MessagingTransport):
         """Track one outbound id for echo suppression and the reply gate."""
         self.echo.remember(conversation_jid, message_id)
         self.bot_sent.remember(conversation_jid, message_id)
+
+    def retain_temp_paths(self, paths: list[str] | None) -> None:
+        """Keep a queued message's attachments alive until its replay."""
+        for path in paths or []:
+            if path:
+                self._retained_temp_paths.add(path)
+
+    async def release_temp_paths(self, paths: list[str] | None) -> None:
+        """Drop retention and unlink the queued message's files."""
+        paths = [path for path in (paths or []) if path]
+        for path in paths:
+            self._retained_temp_paths.discard(path)
+        if not paths:
+            return
+        try:
+            await asyncio.to_thread(cleanup, paths)
+        except RuntimeError:
+            cleanup(paths)
+        except Exception:  # noqa: BLE001: cleanup must not fail a replay
+            logger.debug("whatsapp: queued attachment cleanup failed", exc_info=True)
 
     async def _send_tracked(self, jid: str, content: str) -> list[str]:
         return await self._client.send_text(
@@ -892,12 +916,21 @@ class WhatsAppTransport(MessagingTransport):
             # worker, last, so a cancel arriving during the await cannot skip the
             # side-table pops above: TMPDIR is not guaranteed to be local disk.
             if temp_paths:
-                try:
-                    await asyncio.to_thread(cleanup, temp_paths)
-                except RuntimeError:
-                    # The loop refused the work (executor already shut down), so no
-                    # worker owns it; deleting inline beats leaving decrypted media.
-                    cleanup(temp_paths)
+                # A message queued behind a running turn still owns its
+                # attachments; its drain releases them after the replay.
+                owned = [path for path in temp_paths if path in self._retained_temp_paths]
+                to_clean = [path for path in temp_paths if path not in self._retained_temp_paths]
+                if to_clean:
+                    try:
+                        await asyncio.to_thread(cleanup, to_clean)
+                    except RuntimeError:
+                        # The loop refused the work (executor already shut down), so no
+                        # worker owns it; deleting inline beats leaving decrypted media.
+                        cleanup(to_clean)
+                if owned:
+                    logger.debug(
+                        "whatsapp: retained %d attachment(s) for a queued turn", len(owned)
+                    )
 
     def _is_addressed(self, message: Any, chat: str) -> bool:
         """Mentioned (@-tag of the linked account) or replying to the agent's
