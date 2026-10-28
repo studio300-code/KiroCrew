@@ -98,6 +98,28 @@ class FakeProvider:
         return self.compact_result
 
 
+class SlowProvider(FakeProvider):
+    """A provider whose first stream stays open until the test releases it."""
+
+    def __init__(self) -> None:
+        super().__init__("first answer")
+        self.active = False
+        self.calls = 0
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def stream(self, message: str):
+        self.calls += 1
+        self.prompts.append(message)
+        if self.calls == 1:
+            self.active = True
+            self.started.set()
+            await self.release.wait()
+            self.active = False
+        yield FakeEvent(EVENT_TEXT_CHUNK, "first answer" if self.calls == 1 else "second answer")
+        yield FakeEvent(EVENT_COMPLETE)
+
+
 class FakeSessions:
     def __init__(
         self,
@@ -244,12 +266,15 @@ class FakeTransport:
     def __init__(self, fail: bool = False, is_operator: bool = True) -> None:
         self.sent: list[tuple[str, str]] = []
         self.pending_verdicts: dict[int, GroupVerdict] = {}
+        self.pending_operator: dict[int, bool] = {}
         self.group_gate = FakeGroupGate()
         self.pending_message_id: dict[int, str] = {}
         self.pending_original: dict[int, tuple[str, int]] = {}
         #: Phase reactions go through the TRANSPORT, not the client: it owns the
         #: echo tracker, because a reaction is a message and echoes back.
         self.reactions: list[tuple[str, str]] = []
+        self.retained: list[str] = []
+        self.released: list[str] = []
         self._fail = fail
         #: Mirrors the real operator-only predicate; a test flips it to stand in
         #: for a group member or a stranger, who must never resolve an approval.
@@ -260,6 +285,12 @@ class FakeTransport:
             raise RuntimeError("wa send timeout")
         self.sent.append((jid, text))
         return "mid-1"
+
+    def retain_temp_paths(self, paths) -> None:
+        self.retained.extend(paths or [])
+
+    async def release_temp_paths(self, paths) -> None:
+        self.released.extend(paths or [])
 
     async def react(self, jid: str, sender: str, message_id: str, emoji: str) -> bool:
         self.reactions.append((message_id, emoji))
@@ -437,12 +468,84 @@ def test_the_soft_nudge_is_suppressed_on_auto_managed_backend():
 
 
 # ── dispatcher: busy / steering ─────────────────────────────────────────────
-def test_busy_session_without_steer_asks_to_resend():
+def test_busy_session_queues_instead_of_asking_to_resend():
     provider = FakeProvider()
     d, _client, _sessions, transport = _make(provider=provider, busy=True)
     asyncio.run(d.handle_message(_msg("second message")))
     assert provider.prompts == []
-    assert any("resend" in t.lower() for _, t in transport.sent)
+    assert any("queued" in t.lower() for _, t in transport.sent)
+    assert not any("resend" in t.lower() for _, t in transport.sent)
+
+
+def test_a_second_question_is_answered_after_the_running_turn():
+    """The busy path keeps the message and replays it when the turn ends."""
+    provider = SlowProvider()
+    d, _client, sessions, transport = _make(provider=provider)
+    sessions.is_busy = lambda key: provider.active  # type: ignore[method-assign]
+
+    async def scenario():
+        first = asyncio.create_task(d.handle_message(_msg("first question")))
+        await provider.started.wait()
+        await d.handle_message(_msg("second question"))
+        assert not any("resend" in t.lower() for _, t in transport.sent)
+        provider.release.set()
+        await first
+
+    asyncio.run(scenario())
+    assert provider.calls == 2
+    assert provider.prompts == ["[ctx]first question", "[ctx]second question"]
+    assert any("first answer" in text for _, text in transport.sent)
+    assert any("second answer" in text for _, text in transport.sent)
+
+
+def test_a_message_arriving_during_retry_backoff_is_queued():
+    """The semaphore is free between retries; that gap must not start a second turn."""
+    provider = FakeProvider("second answer")
+    d, _client, _sessions, transport = _make(provider=provider)
+    d._retrying.add(_DM)
+
+    asyncio.run(d.handle_message(_msg("second question")))
+
+    assert provider.prompts == []
+    assert any("queued" in t.lower() for _, t in transport.sent)
+    assert len(d._queued[_DM]) == 1
+
+    d._retrying.discard(_DM)
+    asyncio.run(d._drain_queued(_DM))
+
+    assert provider.prompts == ["[ctx]second question"]
+    assert any("second answer" in t for _, t in transport.sent)
+
+
+def test_a_second_question_with_attachments_is_queued_not_steered():
+    class Steering(FakeProvider):
+        supports_steer = True
+
+        def __init__(self):
+            super().__init__()
+            self.steered: list[str] = []
+
+        def has_active_turn(self):
+            return True
+
+        async def steer(self, text):
+            self.steered.append(text)
+            return True
+
+    provider = Steering()
+    d, _client, sessions, transport = _make(provider=provider, busy=True)
+    inbound = _msg("look at this")
+    inbound.attachments = ["/tmp/kc-att/photo.jpg"]
+
+    asyncio.run(d.handle_message(inbound))
+
+    assert provider.steered == [], "a steer would drop the attachment"
+    assert any("queued" in t.lower() for _, t in transport.sent)
+    assert transport.retained == ["/tmp/kc-att/photo.jpg"]
+
+    sessions._busy = False
+    asyncio.run(d._drain_queued(_DM))
+    assert transport.released == ["/tmp/kc-att/photo.jpg"]
 
 
 def test_a_member_waits_while_the_operators_group_turn_streams():
@@ -459,7 +562,7 @@ def test_a_member_waits_while_the_operators_group_turn_streams():
     sessions.is_busy = lambda key: key == operator_key  # type: ignore[method-assign]
     asyncio.run(d.handle_message(_msg("me too", conv=_GROUP, user="447700900111")))
     assert provider.prompts == []
-    assert [t for _, t in transport.sent] == [BUSY_NOTE]
+    assert any(BUSY_NOTE in t for _, t in transport.sent)
 
 
 def test_stop_acts_on_the_members_bucket_when_that_is_the_live_one():
@@ -551,7 +654,7 @@ def test_busy_flips_free_reprocesses_the_message():
     transport = FakeTransport()
     d.transport = transport
     asyncio.run(d.handle_message(_msg("hello")))
-    assert [t for _, t in transport.sent] == ["late reply"]
+    assert any("late reply" in t for _, t in transport.sent)
 
 
 # ── dispatcher: governance + failures ───────────────────────────────────────
