@@ -248,7 +248,9 @@ class FakeCfg:
 
     def __init__(self) -> None:
         self.agent = SimpleNamespace(default_agent="kirocrew", approval_mode="auto")
-        self.messaging = SimpleNamespace(idle_reset_minutes=0, daily_reset_hour=-1, dm_scope="user")
+        self.messaging = SimpleNamespace(
+            idle_reset_minutes=0, daily_reset_hour=-1, dm_scope="user", queue_mode="steer"
+        )
         # The shipped defaults. WhatsAppConfig.__post_init__ guarantees
         # soft <= hard, so a test never has to reason about an inverted pair.
         self.whatsapp = SimpleNamespace(soft_threshold_pct=80, hard_threshold_pct=95)
@@ -551,6 +553,33 @@ def test_a_message_arriving_during_retry_backoff_is_queued():
 
     assert provider.prompts == ["[ctx]second question"]
     assert any("second answer" in t for _, t in transport.sent)
+
+
+def test_queue_mode_queue_skips_steer():
+    class Steering(FakeProvider):
+        supports_steer = True
+
+        def __init__(self):
+            super().__init__()
+            self.steered: list[str] = []
+
+        def has_active_turn(self):
+            return True
+
+        async def steer(self, text):
+            self.steered.append(text)
+            return True
+
+    provider = Steering()
+    d, _client, _sessions, transport = _make(provider=provider, busy=True)
+    d.cfg.messaging.queue_mode = "queue"
+    d._live_cfg = lambda: d.cfg  # type: ignore[method-assign]
+
+    asyncio.run(d.handle_message(_msg("later")))
+
+    assert provider.steered == [], "queue mode must never steer"
+    assert len(d._queued[_DM]) == 1
+    assert any("Queued" in text for _, text in transport.sent)
 
 
 def test_every_midturn_question_is_steered_when_supported():
