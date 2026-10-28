@@ -13,7 +13,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from dataclasses import replace
+from collections import deque
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
 from kiro_crew.acp.transport_errors import (
@@ -159,6 +160,10 @@ def _acp_retry_verdict(exc: AcpError) -> tuple[bool, bool]:
 #: The receipt a sender gets while a reply is still streaming into their chat.
 BUSY_NOTE = "Still working on the last message; please resend shortly."
 
+#: The receipt for a message the dispatcher KEEPS and replays after the running
+#: turn. It deliberately never asks the operator to send it again.
+QUEUED_NOTE = "⏳ Queued — I'll answer this after the current turn."
+
 #: Phase reactions placed on the OPERATOR'S OWN inbound message, which is the
 #: same affordance Slack draws with its status reactions. Reacting to their
 #: message rather than to ours is deliberate: whether a linked device may react
@@ -172,6 +177,19 @@ REACTION_DONE = "\N{WHITE HEAVY CHECK MARK}"
 REACTION_FAILED = "\N{WARNING SIGN}"
 #: Clearing is a reaction with an empty body, per the WhatsApp convention.
 REACTION_CLEAR = ""
+
+
+@dataclass(slots=True)
+class _QueuedTurn:
+    """One mid-turn message held until the running turn releases the session."""
+
+    inbound: InboundMessage
+    verdict: Any
+    is_operator: bool
+    message_id: str
+    original: tuple[str, int] | None
+    inbound_route: InboundRoute | None
+    attachment_paths: list[str]
 
 
 class WhatsAppDispatcher:
@@ -200,6 +218,17 @@ class WhatsAppDispatcher:
         # ``:gen1`` still on disk, resuming the conversation the operator
         # explicitly discarded.
         self._conv: ConversationState[str] = ConversationState(seed_fn=self._seed_gen)
+        #: Mid-turn messages that could not be steered, keyed by CONVERSATION
+        #: (not session bucket): a group has two buckets, and the drain must
+        #: wait for both before replaying the operator's next question.
+        self._queued: dict[str, deque[_QueuedTurn]] = {}
+        #: Conversations whose queue is being replayed. A new inbound while a
+        #: replay runs is queued behind it instead of racing the session.
+        self._draining: set[str] = set()
+        #: Conversations inside the turn-retry loop. The turn semaphore is
+        #: released during a backoff, so without this a second question would
+        #: start a concurrent turn while the first one is still waiting.
+        self._retrying: set[str] = set()
         # Held on self: the watcher holds the owner WEAKLY, so a subscription
         # dropped here would be collected and the applier would silently stop
         # firing.
@@ -283,7 +312,12 @@ class WhatsAppDispatcher:
             await self._handle_command(inbound, command)
             return
 
-        await self._drive(inbound, verdict, inbound_route=inbound_route)
+        try:
+            await self._drive(inbound, verdict, inbound_route=inbound_route)
+        finally:
+            # Whatever the turn's outcome, anything that arrived during it is
+            # answered now rather than left for the next user message.
+            await self._drain_queued(inbound.conversation_id)
 
     def _consume_approval_reply(self, inbound: InboundMessage) -> str:
         """The receipt for an approval answer, or ``""`` if this is not one.
@@ -485,6 +519,7 @@ class WhatsAppDispatcher:
         verdict: Any,
         *,
         inbound_route: InboundRoute | None,
+        from_queue: bool = False,
     ) -> None:
         assert self.transport is not None and self.client is not None
         transport = self.transport
@@ -496,15 +531,17 @@ class WhatsAppDispatcher:
         # sender, which is what the context decision below has to key on.
         group = is_group_jid(scope)
         session_key = self._session_key(scope, is_operator=is_operator)
-        if self.sessions.is_busy(session_key):
-            await self._handle_busy(inbound, session_key)
-            return
-        if group and self.sessions.is_busy(self._session_key(scope, is_operator=not is_operator)):
-            # Back-pressure is a property of the CONVERSATION: a group has two
-            # buckets (the operator's and the members'), and a reply streaming
-            # from either is a reply in this chat. The other bucket is never this
-            # sender's to steer, so only the receipt is sent.
-            await self._say(scope, BUSY_NOTE)
+        other_key = self._session_key(scope, is_operator=not is_operator) if group else ""
+        # A queued turn is replayed by _drain_queued, which has already waited
+        # for both group buckets; it must bypass this gate or it would queue
+        # itself again.
+        if not from_queue and (
+            scope in self._draining
+            or scope in self._retrying
+            or self.sessions.is_busy(session_key)
+            or bool(other_key and self.sessions.is_busy(other_key))
+        ):
+            await self._handle_busy(inbound, session_key, inbound_route)
             return
         m = self._live_cfg().messaging
         self._conv.maybe_rotate(
@@ -638,74 +675,80 @@ class WhatsAppDispatcher:
         # transient provider/network error keeps the session. Only the FINAL
         # attempt's renderer may post the failure notice, so the intermediate
         # attempts stay invisible in the chat.
-        reconnect_next = False
-        for attempt in range(_TURN_MAX_ATTEMPTS):
-            final = attempt == _TURN_MAX_ATTEMPTS - 1
-            if attempt:
-                await _retry_wait(_retry_backoff_s(attempt))
-                if self.sessions.is_busy(session_key):
-                    # A newer message claimed the session while this one waited.
-                    # That turn owns the conversation now; resetting would abort
-                    # it, so leave it alone and report this turn's failure.
-                    logger.info(
-                        "whatsapp: session busy before retry; leaving it to the newer turn session=%s",
-                        session_key,
-                    )
-                    await renderer.flush_suppressed_error()
-                    break
-                if reconnect_next:
-                    try:
-                        await self.sessions.reset(session_key)
-                    except Exception:
-                        logger.warning(
-                            "whatsapp: session reset before retry failed session=%s",
+        self._retrying.add(scope)
+        try:
+            reconnect_next = False
+            for attempt in range(_TURN_MAX_ATTEMPTS):
+                final = attempt == _TURN_MAX_ATTEMPTS - 1
+                if attempt:
+                    await _retry_wait(_retry_backoff_s(attempt))
+                    if self.sessions.is_busy(session_key):
+                        # A newer message claimed the session while this one waited.
+                        # That turn owns the conversation now; resetting would abort
+                        # it, so leave it alone and report this turn's failure.
+                        logger.info(
+                            "whatsapp: session busy before retry; leaving it to the newer turn session=%s",
                             session_key,
-                            exc_info=True,
                         )
-                renderer = _make_renderer(suppress_error=not final)
-                turn = replace(turn, renderer=renderer)
-            try:
-                await drive_turn(turn, sessions=self.sessions, ctx_builder=self.ctx_builder)
-            except AcpError as exc:
-                retry, reconnect = _acp_retry_verdict(exc)
-                if renderer.delivered or final or not retry:
+                        await renderer.flush_suppressed_error()
+                        break
+                    if reconnect_next:
+                        try:
+                            await self.sessions.reset(session_key)
+                        except Exception:
+                            logger.warning(
+                                "whatsapp: session reset before retry failed session=%s",
+                                session_key,
+                                exc_info=True,
+                            )
+                    renderer = _make_renderer(suppress_error=not final)
+                    turn = replace(turn, renderer=renderer)
+                try:
+                    await drive_turn(turn, sessions=self.sessions, ctx_builder=self.ctx_builder)
+                except AcpError as exc:
+                    retry, reconnect = _acp_retry_verdict(exc)
+                    if renderer.delivered or final or not retry:
+                        await renderer.flush_suppressed_error()
+                        raise
+                    self._retrying.add(scope)
+                    reconnect_next = reconnect
+                    logger.warning(
+                        "whatsapp: ACP/session error before any text session=%s; "
+                        "retrying in %.0fs (%d/%d, reconnect=%s)",
+                        session_key,
+                        _retry_backoff_s(attempt + 1),
+                        attempt + 1,
+                        _TURN_MAX_ATTEMPTS - 1,
+                        reconnect,
+                        exc_info=True,
+                    )
+                    continue
+                except Exception:
+                    # A failure the retry cannot fix (shutdown, ceiling, a bug) is
+                    # not replayed; flush_suppressed_error keeps the reader's one
+                    # notice even though the attempt's renderer was built in retry
+                    # mode.
                     await renderer.flush_suppressed_error()
                     raise
-                reconnect_next = reconnect
+                if not renderer.failed or renderer.delivered:
+                    break
+                if final or renderer.tools_called:
+                    # Nothing is left to try, or a tool may already have run and a
+                    # replay could run it twice. Deliver the one notice instead.
+                    await renderer.flush_suppressed_error()
+                    break
+                self._retrying.add(scope)
+                reconnect_next = True
                 logger.warning(
-                    "whatsapp: ACP/session error before any text session=%s; "
-                    "retrying in %.0fs (%d/%d, reconnect=%s)",
+                    "whatsapp: turn failed without text session=%s; retrying in %.0fs "
+                    "(%d/%d, reconnect=True)",
                     session_key,
                     _retry_backoff_s(attempt + 1),
                     attempt + 1,
                     _TURN_MAX_ATTEMPTS - 1,
-                    reconnect,
-                    exc_info=True,
                 )
-                continue
-            except Exception:
-                # A failure the retry cannot fix (shutdown, ceiling, a bug) is
-                # not replayed; flush_suppressed_error keeps the reader's one
-                # notice even though the attempt's renderer was built in retry
-                # mode.
-                await renderer.flush_suppressed_error()
-                raise
-            if not renderer.failed or renderer.delivered:
-                break
-            if final or renderer.tools_called:
-                # Nothing is left to try, or a tool may already have run and a
-                # replay could run it twice. Deliver the one notice instead.
-                await renderer.flush_suppressed_error()
-                break
-            reconnect_next = True
-            logger.warning(
-                "whatsapp: turn failed without text session=%s; retrying in %.0fs "
-                "(%d/%d, reconnect=True)",
-                session_key,
-                _retry_backoff_s(attempt + 1),
-                attempt + 1,
-                _TURN_MAX_ATTEMPTS - 1,
-            )
+        finally:
+            self._retrying.discard(scope)
         if unprompted and renderer.delivered:
             transport.group_gate.record_unprompted_reply(scope)
         # The OUTCOME, which is not the complement of "something reached the
@@ -776,8 +819,27 @@ class WhatsAppDispatcher:
             return ""
         return str(getattr(provider, "work_scratch_dir", None) or "")
 
-    async def _handle_busy(self, inbound: InboundMessage, session_key: str) -> None:
-        if not self.sessions.is_busy(session_key):
+    async def _handle_busy(
+        self,
+        inbound: InboundMessage,
+        session_key: str,
+        inbound_route: InboundRoute | None,
+    ) -> None:
+        transport = self.transport
+        assert transport is not None
+        scope = inbound.conversation_id
+        is_operator = transport.is_operator(inbound)
+        group = is_group_jid(scope)
+        other_key = self._session_key(scope, is_operator=not is_operator) if group else ""
+        own_busy = self.sessions.is_busy(session_key)
+        other_busy = bool(other_key and self.sessions.is_busy(other_key))
+        if (
+            not own_busy
+            and not other_busy
+            and scope not in self._draining
+            and scope not in self._retrying
+        ):
+            # The session freed between the caller's check and this one.
             await self.handle_message(inbound)
             return
         # Steering injects this text into a turn that is ALREADY RUNNING. With
@@ -785,21 +847,114 @@ class WhatsAppDispatcher:
         # admitted non-operator could otherwise redirect the turn the operator is
         # waiting on. They still get the busy receipt below; they just cannot
         # change what is running.
-        may_steer_session = self.transport is not None and self.transport.is_operator(inbound)
         provider = self.sessions.get_provider(session_key)
         steer = getattr(provider, "steer", None)
         has_active = getattr(provider, "has_active_turn", None)
         live = has_active is None or bool(has_active())
-        ok = bool(
-            may_steer_session
+        can_steer = bool(
+            is_operator
+            and not other_busy
+            # steer forwards TEXT ONLY; a photo/document message must keep its
+            # attachments through the queue path instead.
+            and not inbound.attachments
             and live
             and getattr(provider, "supports_steer", False)
             and steer is not None
-            and await steer(inbound.text)
         )
-        await self._say(
-            inbound.conversation_id, "Folded into the current reply." if ok else BUSY_NOTE
+        if can_steer and await steer(inbound.text):
+            await self._say(scope, "Folded into the current reply.")
+            return
+        if is_operator:
+            # Keep it and replay it when the turn ends; never ask the operator
+            # to send the same question again.
+            self._enqueue(inbound, session_key, inbound_route)
+            await self._say(scope, QUEUED_NOTE)
+            return
+        await self._say(scope, BUSY_NOTE)
+
+    def _enqueue(
+        self,
+        inbound: InboundMessage,
+        session_key: str,
+        inbound_route: InboundRoute | None,
+    ) -> None:
+        """Hold one mid-turn message for the drain that follows the turn."""
+        transport = self.transport
+        assert transport is not None
+        attachment_paths = list(inbound.attachments or [])
+        transport.retain_temp_paths(attachment_paths)
+        # A COPY, because the original receive() pops its side tables by id
+        # when its dispatch returns. The copy owns a different id, so restoring
+        # the tables for the replay cannot be raced by that cleanup.
+        queued = replace(inbound)
+        item = _QueuedTurn(
+            inbound=queued,
+            verdict=transport.pending_verdicts.get(id(inbound)),
+            is_operator=transport.is_operator(inbound),
+            message_id=transport.pending_message_id.get(id(inbound), ""),
+            original=transport.pending_original.get(id(inbound)),
+            inbound_route=inbound_route,
+            attachment_paths=attachment_paths,
         )
+        queue = self._queued.setdefault(inbound.conversation_id, deque())
+        queue.append(item)
+        logger.info(
+            "whatsapp: queued a mid-turn message chat=%s session=%s depth=%d",
+            inbound.conversation_id,
+            session_key,
+            len(queue),
+        )
+
+    async def _drain_queued(self, scope: str) -> None:
+        """Replay the messages held while a turn was running, in arrival order."""
+        if scope in self._draining:
+            return
+        queue = self._queued.get(scope)
+        if not queue:
+            return
+        transport = self.transport
+        if transport is None:
+            return
+        self._draining.add(scope)
+        try:
+            while queue:
+                item = queue.popleft()
+                item_key = self._session_key(scope, is_operator=item.is_operator)
+                if scope in self._retrying or self.sessions.is_busy(item_key):
+                    queue.appendleft(item)
+                    return
+                if is_group_jid(scope):
+                    other_key = self._session_key(scope, is_operator=not item.is_operator)
+                    if self.sessions.is_busy(other_key):
+                        queue.appendleft(item)
+                        return
+                # The transport popped these side tables when the original
+                # receive() returned; put them back for this replay and drop
+                # them again afterwards.
+                transport.pending_verdicts[id(item.inbound)] = item.verdict
+                transport.pending_operator[id(item.inbound)] = item.is_operator
+                transport.pending_message_id[id(item.inbound)] = item.message_id
+                if item.original is not None:
+                    transport.pending_original[id(item.inbound)] = item.original
+                try:
+                    await self._drive(
+                        item.inbound,
+                        item.verdict,
+                        inbound_route=item.inbound_route,
+                        from_queue=True,
+                    )
+                except Exception:  # noqa: BLE001: one queued message must not strand the rest
+                    logger.exception("whatsapp: queued turn failed chat=%s", scope)
+                finally:
+                    transport.pending_verdicts.pop(id(item.inbound), None)
+                    transport.pending_operator.pop(id(item.inbound), None)
+                    transport.pending_message_id.pop(id(item.inbound), None)
+                    transport.pending_original.pop(id(item.inbound), None)
+                    await transport.release_temp_paths(item.attachment_paths)
+        finally:
+            self._draining.discard(scope)
+            if not queue:
+                self._queued.pop(scope, None)
 
     async def _maybe_notice(
         self, scope: str, session_key: str, provider: Any, *, unprompted: bool
