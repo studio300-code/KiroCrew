@@ -282,6 +282,32 @@ class TestGroups:
         )
         assert len(h.dispatched) == 1
 
+    async def test_reply_to_the_operators_own_message_is_not_addressed(self, monkeypatch):
+        """Both sides are the linked account; only an AGENT send is a summons."""
+        monkeypatch.setattr(
+            "kiro_crew.whatsapp.transport.quoted_message_context",
+            lambda chat, msg_id: "",
+        )
+        h = Harness(groups=self.cfg(), allowed_wa_ids=["447700900000"])
+
+        await h.transport.receive(
+            event(
+                chat=GROUP,
+                sender=OWN_LID,
+                from_me=True,
+                is_group=True,
+                quoted_participant=OWN_LID,
+                quoted_stanza="TYPED1",
+            )
+        )
+        assert h.dispatched == []
+
+        # Control: the same sender IS admitted, and a wake word still summons.
+        await h.transport.receive(
+            event(chat=GROUP, sender=OWN_LID, from_me=True, is_group=True, text="musone ci sei?")
+        )
+        assert len(h.dispatched) == 1
+
     async def test_rules_mode_unprompted_dispatches_with_verdict(self):
         h = Harness(
             groups=self.cfg(mode="rules", rules="Answer python questions."),
