@@ -1397,7 +1397,7 @@ def test_a_turn_that_fails_without_text_is_retried_before_any_error(monkeypatch)
 
     assert len(attempts) == 2, "a failed turn with no text must be replayed"
     assert sessions.resets == 1, "the replay must start from a fresh session"
-    assert waits == [1.0], "the first replay waits one second"
+    assert waits == [30.0], "the first replay waits thirty seconds"
     assert [t for _, t in transport.sent] == ["🤖 6 camere da letto e 5 bagni"]
 
 
@@ -1424,7 +1424,7 @@ def test_a_lost_session_is_reconnected_and_retried_silently(monkeypatch):
 
     assert len(attempts) == 2
     assert sessions.resets == 1
-    assert waits == [1.0]
+    assert waits == [30.0]
     assert [t for _, t in transport.sent] == ["🤖 6 camere"]
 
 
@@ -1451,7 +1451,7 @@ def test_three_retries_are_attempted_with_exponential_backoff(monkeypatch):
 
     assert len(attempts) == 4, "three retries after the first attempt"
     assert sessions.resets == 3
-    assert waits == [1.0, 2.0, 4.0]
+    assert waits == [30.0, 120.0, 300.0]
     assert [t for _, t in transport.sent] == ["🤖 6 camere"]
 
 
@@ -1473,7 +1473,7 @@ def test_all_four_attempts_failing_post_the_error_exactly_once(monkeypatch):
 
     assert len(attempts) == 4
     assert sessions.resets == 3
-    assert waits == [1.0, 2.0, 4.0]
+    assert waits == [30.0, 120.0, 300.0]
     assert [t for _, t in transport.sent] == [_ERROR_TEXT]
 
 
@@ -1500,7 +1500,7 @@ def test_a_transient_acp_error_keeps_the_session(monkeypatch):
 
     assert len(attempts) == 4
     assert sessions.resets == 0, "a transient backend error must not evict the session"
-    assert waits == [1.0, 2.0, 4.0]
+    assert waits == [30.0, 120.0, 300.0]
     assert [t for _, t in transport.sent] == [_ERROR_TEXT]
 
 

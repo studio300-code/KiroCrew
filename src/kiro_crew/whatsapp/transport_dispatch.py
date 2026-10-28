@@ -102,9 +102,10 @@ GUEST_SCOPE_SEGMENT = "guest"
 
 #: One initial attempt plus at most three silent retries.
 _TURN_MAX_ATTEMPTS = 4
-#: Backoff before retries 1..3. A session reset is the recovery; the wait only
-#: needs to outlast a transient blip, not a full provider outage.
-_TURN_RETRY_BACKOFF_S: tuple[float, ...] = (1.0, 2.0, 4.0)
+#: Backoff before retries 1..3: 30 s, 2 min, 5 min. The last value is the cap,
+#: long enough to outlast a laptop sleep or a WhatsApp reconnect without
+#: hammering a backend that is still down.
+_TURN_RETRY_BACKOFF_S: tuple[float, ...] = (30.0, 120.0, 300.0)
 
 
 def _retry_backoff_s(retry: int) -> float:
