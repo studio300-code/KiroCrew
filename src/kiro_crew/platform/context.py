@@ -1117,6 +1117,37 @@ def wide_content_is_flagged(raw: bytes) -> bool:
     return redact_via_context(wide) != wide
 
 
+def _pdf_text_is_flagged(raw: bytes) -> bool | None:
+    """Scan a PDF's EXTRACTED TEXT, or return None when extraction is unavailable.
+
+    A PDF is a binary container: its compressed content streams and embedded
+    image Huffman tables are random bytes, so the raw latin-1/UTF-8 projection
+    trips the bare-secret and encoded-credential passes on almost any real
+    report. The text a reader actually sees is the leak surface that matters,
+    and ``pdftotext`` extracts it quickly. A missing/failed extraction returns
+    None and the caller keeps the old raw scan.
+    """
+    if not raw.startswith(b"%PDF-"):
+        return None
+    try:
+        import subprocess
+
+        proc = subprocess.run(
+            ["pdftotext", "-q", "-layout", "-enc", "UTF-8", "-", "-"],
+            input=raw,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0 or not proc.stdout:
+        return None
+    text = proc.stdout[: 8 * 1024 * 1024].decode("utf-8", "replace")
+    return redact_via_context(text) != text
+
+
 @_kept_and_serialized("binary")
 def binary_content_is_flagged(raw: bytes) -> bool:
     """Whether non-UTF-8 *raw* carries credential material the scanner finds.
@@ -1176,6 +1207,9 @@ def binary_content_is_flagged(raw: bytes) -> bool:
     off the GIL, which the regex engine holds for a whole match call; that is why
     scans run one at a time and a verdict is kept (:func:`_scan_verdict`).
     """
+    pdf_verdict = _pdf_text_is_flagged(raw)
+    if pdf_verdict is not None:
+        return pdf_verdict
     text = raw.decode("latin-1") + "\n" + raw.decode("utf-8", errors="replace")
     if redact_via_context(text) != text:
         masked = _baseline_symbol_tables_masked(text)

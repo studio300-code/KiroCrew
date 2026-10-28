@@ -634,12 +634,18 @@ def _key_shaped(seed: int, length: int = 40) -> str:
     return "".join(rng.choice(alphabet) for _ in range(length))
 
 
-def _inline_png_html() -> bytes:
-    """A self-contained HTML page with a base64 PNG, the reported file shape."""
+def _inline_png_html(*, with_key: bool = False) -> bytes:
+    """A self-contained HTML page with a base64 PNG, the reported file shape.
+
+    *with_key* adds a real visible credential, for the owner-grant tests: the
+    PNG payload itself is no longer a false positive (media data URIs are
+    exempt), so a flagged file needs content the scanner should catch.
+    """
     rng = random.Random(17404)
     pixels = b"\x89PNG\r\n\x1a\n" + bytes(rng.randrange(256) for _ in range(900))
     b64 = base64.b64encode(pixels).decode("ascii")
-    return f'<html><body><img src="data:image/png;base64,{b64}"></body></html>'.encode()
+    key = "AKIAIOSFODNN7EXAMPLE" if with_key else ""
+    return f'<html><body>{key}<img src="data:image/png;base64,{b64}"></body></html>'.encode()
 
 
 def _grant() -> None:
@@ -670,17 +676,27 @@ class TestFlaggedDownloadHonoursOwnerGrant:
     @pytest.mark.asyncio
     async def test_inline_png_html_is_refused_without_a_grant(self, tmp_path, mock_sel):
         f = tmp_path / "report.html"
-        f.write_bytes(_inline_png_html())
+        f.write_bytes(_inline_png_html(with_key=True))
         resp = await _download(f)
         assert resp.status == 400
         assert json.loads(resp.text)["code"] == "content_redacted"
+
+    @pytest.mark.asyncio
+    async def test_clean_inline_png_html_needs_no_grant(self, tmp_path):
+        """A self-contained image page is not a credential; it must not be blocked."""
+        f = tmp_path / "report.html"
+        raw = _inline_png_html()
+        f.write_bytes(raw)
+        resp = await _download(f)
+        assert resp.status == 200
+        assert resp.body == raw
 
     @pytest.mark.asyncio
     async def test_inline_png_html_is_delivered_to_the_owner_under_a_grant(
         self, tmp_path, mock_sel
     ):
         f = tmp_path / "report.html"
-        raw = _inline_png_html()
+        raw = _inline_png_html(with_key=True)
         f.write_bytes(raw)
         _grant()
         with patch.object(file_delivery_consent, "audit_decision") as audit:
@@ -697,7 +713,7 @@ class TestFlaggedDownloadHonoursOwnerGrant:
     async def test_grant_does_not_release_to_a_non_owner(self, tmp_path, mock_sel):
         """The grant's own owner conjunct refuses, even past an admitting front gate."""
         f = tmp_path / "report.html"
-        f.write_bytes(_inline_png_html())
+        f.write_bytes(_inline_png_html(with_key=True))
         _grant()
         with patch(
             "kiro_crew.dashboard.handlers.files.require_owner_dashboard_request",
@@ -712,7 +728,7 @@ class TestFlaggedDownloadHonoursOwnerGrant:
     @pytest.mark.asyncio
     async def test_non_owner_is_still_stopped_at_the_front_gate(self, tmp_path, mock_sel):
         f = tmp_path / "report.html"
-        f.write_bytes(_inline_png_html())
+        f.write_bytes(_inline_png_html(with_key=True))
         _grant()
         resp = await _download(f, user="slack-user-7")
         assert resp.status == 403
