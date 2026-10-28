@@ -198,6 +198,36 @@ def _inside_arn_resource(spans: list[tuple[int, int]], start: int, end: int) -> 
     return i >= 0 and spans[i][0] <= start and end <= spans[i][1]
 
 
+# ── Inline media data URIs ──
+# A self-contained HTML page embeds its images/fonts/audio/video as
+# ``data:image/webp;base64,…``. The payload is random binary data, so its base64
+# run clears every gate of the bare-secret heuristic and the encoded-credential
+# pass can decode a shape that looks like one; a real 4 MB page tripped 22
+# credential matches, all inside its own images, and file_send refused it. An
+# inline IMAGE is not a credential, so its payload is exempt. Deliberately
+# media-only and deliberately not SVG: ``data:text/plain`` and
+# ``data:image/svg+xml`` can carry authored text, and a secret hidden there is
+# still scanned.
+_MEDIA_DATA_URI_RE = re.compile(
+    r"data:(?:image/(?!svg\+xml)[A-Za-z0-9.+-]+|audio/[A-Za-z0-9.+-]+"
+    r"|video/[A-Za-z0-9.+-]+|font/[A-Za-z0-9.+-]+)"
+    r"(?:;[A-Za-z0-9.+-]+=[^,;]*)*;base64,[A-Za-z0-9+/=]+",
+    re.IGNORECASE,
+)
+
+
+def _media_data_uri_spans(text: str) -> list[tuple[int, int]]:
+    """Spans of inline media base64 payloads, which the credential passes skip."""
+    if "data:" not in text:
+        return []
+    return [m.span() for m in _MEDIA_DATA_URI_RE.finditer(text)]
+
+
+def _inside_any(start: int, end: int, spans: list[tuple[int, int]]) -> bool:
+    """Whether ``[start, end)`` lies wholly inside one of *spans*."""
+    return any(span_start <= start and end <= span_end for span_start, span_end in spans)
+
+
 #: Code-point ranges of the printable-ASCII tail of the standard baseline JPEG AC
 #: Huffman symbol table -- the ``HUFFVAL`` list of ITU-T T.81 Annex K, Table K.5 --
 #: in the order the table writes them. Everything before and after this tail is
@@ -1071,8 +1101,13 @@ def _credential_redaction_plan(
     # `taken` is every span an earlier pass has claimed, kept sorted and
     # disjoint; it is what the later passes subtract from.
     taken: list[_RedactionSpan] = []
+    media_uri_spans = _media_data_uri_spans(text)
     if _might_contain_credential(text):
         for m in _credential_matches(text):
+            # An inline image/font/audio/video is not a credential. Its base64
+            # payload can contain any shape, including a key-looking run.
+            if _inside_any(m.start(), m.end(), media_uri_spans):
+                continue
             # Emit ONLY non-sensitive metadata (length). Do NOT slice any part of
             # the match into the warning: `_CREDENTIAL_PATTERNS` matches the raw
             # secret value itself (e.g. `ghp_…`, `sk-ant-…`), so even a short prefix
@@ -1097,7 +1132,11 @@ def _credential_redaction_plan(
     # The two loops stay SEPARATE and in their original order: `warnings` is a
     # contract (all pass-2 warnings precede all pass-3 warnings), and pass 3
     # subtracts every pass-2 claim, so pass 2 must have finished first.
-    b64_matches = list(_B64_CHUNK_RE.finditer(text))
+    b64_matches = [
+        m
+        for m in _B64_CHUNK_RE.finditer(text)
+        if not _inside_any(m.start(), m.end(), media_uri_spans)
+    ]
 
     # 2. Base64-encoded credentials.
     #
@@ -1282,6 +1321,8 @@ def _credential_redaction_plan(
     exempt_scan = _TokenParamExemptScan(text)
     for m in _TOKEN_PARAM_RE.finditer(text):
         value_start, value_end = m.start(1), m.end(1)
+        if _inside_any(m.start(), m.end(), media_uri_spans):
+            continue
         if any(text.startswith(tag, value_start) for tag in CREDENTIAL_REDACTION_TAGS):
             continue
         gaps = _uncovered(value_start, value_end, taken)
