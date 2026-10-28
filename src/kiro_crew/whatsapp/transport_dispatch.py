@@ -887,8 +887,10 @@ class WhatsAppDispatcher:
         steer = getattr(provider, "steer", None)
         has_active = getattr(provider, "has_active_turn", None)
         live = has_active is None or bool(has_active())
+        queue_mode = str(getattr(self._live_cfg().messaging, "queue_mode", "steer"))
         can_steer = bool(
-            is_operator
+            queue_mode != "queue"
+            and is_operator
             and not other_busy
             # steer forwards TEXT ONLY; a photo/document message must keep its
             # attachments through the queue path instead.
