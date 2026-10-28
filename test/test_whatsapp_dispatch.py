@@ -517,6 +517,63 @@ def test_a_message_arriving_during_retry_backoff_is_queued():
     assert any("second answer" in t for _, t in transport.sent)
 
 
+def test_the_whole_queue_is_answered_and_new_arrivals_join_it():
+    """A queue of questions is drained completely, in order, including arrivals
+    that land while a queued turn is already running."""
+
+    class QueueProvider(FakeProvider):
+        def __init__(self):
+            super().__init__()
+            self.active = False
+            self.calls = 0
+            self.started = asyncio.Event()
+            self.release_first = asyncio.Event()
+            self.second_started = asyncio.Event()
+            self.release_second = asyncio.Event()
+
+        async def stream(self, message: str):
+            self.calls += 1
+            index = self.calls
+            self.prompts.append(message)
+            if index == 1:
+                self.active = True
+                self.started.set()
+                await self.release_first.wait()
+                self.active = False
+            elif index == 2:
+                self.active = True
+                self.second_started.set()
+                await self.release_second.wait()
+                self.active = False
+            yield FakeEvent(EVENT_TEXT_CHUNK, f"answer {index}")
+            yield FakeEvent(EVENT_COMPLETE)
+
+    provider = QueueProvider()
+    d, _client, sessions, transport = _make(provider=provider)
+    sessions.is_busy = lambda key: provider.active  # type: ignore[method-assign]
+
+    async def scenario():
+        first = asyncio.create_task(d.handle_message(_msg("q1")))
+        await provider.started.wait()
+        for number in range(2, 6):
+            await d.handle_message(_msg(f"q{number}"))
+        assert len(d._queued[_DM]) == 4, "messages two through five are queued"
+
+        provider.release_first.set()
+        await provider.second_started.wait()
+        await d.handle_message(_msg("q6"))  # arrives during the queue drain
+        provider.release_second.set()
+        await first
+
+    asyncio.run(scenario())
+
+    assert provider.calls == 6, "the drain must answer every queued question"
+    assert provider.prompts == [f"[ctx]q{number}" for number in range(1, 7)]
+    sent = " ".join(text for _, text in transport.sent)
+    assert all(f"answer {number}" in sent for number in range(1, 7))
+    assert not d._queued, "the queue is empty once every entry ran"
+
+
 def test_a_second_question_with_attachments_is_queued_not_steered():
     class Steering(FakeProvider):
         supports_steer = True
