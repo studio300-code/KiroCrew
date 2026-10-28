@@ -517,6 +517,63 @@ def test_a_message_arriving_during_retry_backoff_is_queued():
     assert any("second answer" in t for _, t in transport.sent)
 
 
+def test_only_one_midturn_question_is_steered_and_the_rest_queue():
+    """A burst keeps its order: one steer, then every other question queued."""
+
+    class SteeringQueueProvider(FakeProvider):
+        supports_steer = True
+
+        def __init__(self):
+            super().__init__()
+            self.active = False
+            self.calls = 0
+            self.steered: list[str] = []
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+
+        def has_active_turn(self):
+            return self.active
+
+        async def steer(self, text):
+            self.steered.append(text)
+            return True
+
+        async def stream(self, message: str):
+            self.calls += 1
+            index = self.calls
+            self.prompts.append(message)
+            if index == 1:
+                self.active = True
+                self.started.set()
+                await self.release.wait()
+                self.active = False
+            yield FakeEvent(EVENT_TEXT_CHUNK, f"answer {index}")
+            yield FakeEvent(EVENT_COMPLETE)
+
+    provider = SteeringQueueProvider()
+    d, _client, sessions, transport = _make(provider=provider)
+    sessions.is_busy = lambda key: provider.active  # type: ignore[method-assign]
+
+    async def scenario():
+        first = asyncio.create_task(d.handle_message(_msg("q1")))
+        await provider.started.wait()
+        await d.handle_message(_msg("q2"))
+        await d.handle_message(_msg("q3"))
+        await d.handle_message(_msg("q4"))
+        assert len(d._queued[_DM]) == 2, "only the questions after the steer queue"
+        provider.release.set()
+        await first
+
+    asyncio.run(scenario())
+
+    assert provider.steered == ["q2"], "one steer per turn"
+    assert provider.calls == 3, "q1 plus the two queued questions"
+    assert provider.prompts == ["[ctx]q1", "[ctx]q3", "[ctx]q4"]
+    sent = " ".join(text for _, text in transport.sent)
+    assert all(f"answer {number}" in sent for number in (1, 2, 3))
+    assert not d._queued
+
+
 def test_the_whole_queue_is_answered_and_new_arrivals_join_it():
     """A queue of questions is drained completely, in order, including arrivals
     that land while a queued turn is already running."""
