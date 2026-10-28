@@ -642,6 +642,16 @@ class WhatsAppDispatcher:
             final = attempt == _TURN_MAX_ATTEMPTS - 1
             if attempt:
                 await _retry_wait(_retry_backoff_s(attempt))
+                if self.sessions.is_busy(session_key):
+                    # A newer message claimed the session while this one waited.
+                    # That turn owns the conversation now; resetting would abort
+                    # it, so leave it alone and report this turn's failure.
+                    logger.info(
+                        "whatsapp: session busy before retry; leaving it to the newer turn session=%s",
+                        session_key,
+                    )
+                    await renderer.flush_suppressed_error()
+                    break
                 if reconnect_next:
                     try:
                         await self.sessions.reset(session_key)
