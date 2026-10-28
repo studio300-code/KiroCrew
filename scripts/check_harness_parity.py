@@ -401,6 +401,7 @@ X_FEATURE_SETS: dict[str, frozenset[str] | None] = {
     # pi's membership rides its gate extension's confirm dialog, not a mirror.
     "ACP_BACKENDS_HONOR_ZERO_TOOL_BAN": frozenset({"pi"}),
     "ACP_BACKENDS_MATE_WORKER_KIT": None,
+    "ACP_BACKENDS_SPEC_FILE_GRANTS": "off the wire: whether a start on an unowned spec is refused",
 }
 
 # ``initialize.agentInfo.name`` (or the ``_meta.agent_name`` header) a capture
