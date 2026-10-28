@@ -132,7 +132,7 @@ class TestDrainSenderIdentity:
 
     def test_a_senders_own_surplus_is_still_counted(self) -> None:
         """The guard against fixing the count by always reporting zero."""
-        from kiro_crew.telegram.transport_dispatch import _MAX_COLLAPSE
+        from kiro_crew.telegram.dispatch.turn_queue import _TURN_COLLAPSE
 
         d, _cli, sess = _dispatcher({7}, dm_scope="unified")
         deferred: list[int] = []
@@ -146,7 +146,7 @@ class TestDrainSenderIdentity:
         self._queue(
             d,
             sess,
-            *(self._msg(7, 70, f"m{i}", message_id=i) for i in range(_MAX_COLLAPSE + 2)),
+            *(self._msg(7, 70, f"m{i}", message_id=i) for i in range(_TURN_COLLAPSE + 2)),
         )
 
         self._drain(d, self._KEY)
@@ -170,14 +170,8 @@ class TestDrainSenderIdentity:
         assert [m.conversation_id for m in seen] == ["70", "80"], "and answer in their own chat"
         assert sess.queued == [], "the pump must drain the deferred entry too, not strand it"
 
-    def test_one_senders_burst_with_distinct_message_ids_still_collapses(self) -> None:
-        """The ordinary case is unchanged: one person's burst is ONE turn.
-
-        The two messages carry DISTINCT ``message_id`` values, because Telegram mints
-        one per message and two real messages never share one. Grouping on a
-        per-message identifier is the trap: it makes one person's own burst compare
-        unequal, so the collapse stops firing and every burst drains as N turns.
-        """
+    def test_one_senders_burst_answers_each_message_separately(self) -> None:
+        """A burst is N questions, so it is answered as N turns, in order."""
         d, cli, sess = _dispatcher({7}, dm_scope="unified")
         first = self._msg(7, 70, "first", message_id=11)
         second = self._msg(7, 70, "second", message_id=12)
@@ -186,17 +180,12 @@ class TestDrainSenderIdentity:
 
         seen = self._drain(d, self._KEY)
 
-        assert [m.text for m in seen] == ["first\n\nsecond"], "the burst must still collapse"
-        assert [m.user_id for m in seen] == ["7"]
-        assert [m.conversation_id for m in seen] == ["70"]
+        assert [m.text for m in seen] == ["first", "second"]
+        assert [m.user_id for m in seen] == ["7", "7"]
+        assert [m.conversation_id for m in seen] == ["70", "70"]
 
-    def test_a_changed_handle_mid_burst_does_not_split_the_turn(self) -> None:
-        """``username`` is a mutable label for a sender ``user_id`` already pins.
-
-        It rides on the origin so the replay is faithful, and stays OUT of the collapse
-        key: a handle changed between two messages would otherwise split one person's
-        burst into two turns.
-        """
+    def test_a_changed_handle_mid_burst_keeps_each_envelope(self) -> None:
+        """The handle rides on each entry, so each replay keeps its own."""
         d, cli, sess = _dispatcher({7}, dm_scope="unified")
         before = self._msg(7, 70, "first", message_id=11)
         before.username = "ray"
@@ -206,10 +195,8 @@ class TestDrainSenderIdentity:
 
         seen = self._drain(d, self._KEY)
 
-        assert [m.text for m in seen] == ["first\n\nsecond"], "a renamed sender is still one sender"
-        # The replay carries the FIRST entry's handle, which is the envelope it runs
-        # under -- not a merge of the two.
-        assert seen[0].username == "ray"
+        assert [m.text for m in seen] == ["first", "second"]
+        assert [m.username for m in seen] == ["ray", "raymond"]
 
     def test_a_third_sender_behind_two_does_not_jump_the_queue(self) -> None:
         """A differing sender defers itself AND everything behind it, so FIFO is exact."""
@@ -637,7 +624,7 @@ class TestDrainReplayContract:
         assert msg.message_id == 0 and msg.attachments == []
         assert msg.from_widget is False
 
-    def test_the_strictest_request_of_one_senders_burst_rides_the_replay(self) -> None:
+    def test_each_queued_message_carries_its_own_privacy_request(self) -> None:
         d, _cli, sess = _dispatcher({7})
         sess.queued = [
             ("1", "a", _origin()),
@@ -647,7 +634,11 @@ class TestDrainReplayContract:
 
         seen = self._replays(d, self._KEY)
 
-        assert [(m.text, kw["privacy_request"]) for m, kw in seen] == [("a\n\nb\n\nc", "temporary")]
+        assert [(m.text, kw["privacy_request"]) for m, kw in seen] == [
+            ("a", ""),
+            ("b", "incognito"),
+            ("c", "temporary"),
+        ]
 
     def test_one_senders_request_never_reaches_another_senders_turn(self) -> None:
         d, _cli, sess = _dispatcher({7, 8}, dm_scope="unified")

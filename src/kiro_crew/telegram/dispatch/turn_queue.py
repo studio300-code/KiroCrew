@@ -3,8 +3,8 @@
 ``_enqueue_with_receipt`` queues a mid-turn message (the queue path of
 ``dispatch/midturn.py``) together with its collapsing "⏳ Queued (N): …" receipt, under
 ``self._queue.lock``. When the turn ends, ``_drain_queue`` runs the pump through
-``messaging.queue_drain.drain_until_quiet``: ``_pump_queue`` collapses one sender's
-messages into one replayed turn, re-enqueues the rest in order, flips the receipt with
+``messaging.queue_drain.drain_until_quiet``: ``_pump_queue`` answers one message per
+replayed turn, in order, re-enqueues the rest, flips the receipt with
 ``_receipt_flip_locked`` and leaves a peer channel's entries for that channel's drain.
 ``_receipt_surface`` binds this conversation's address to the receipt, and ``/stop``
 in ``transport_dispatch.py`` finalizes the same receipt through it.
@@ -30,7 +30,6 @@ from kiro_crew.messaging.queue_drain import (
     entry_person_origin,
     person_tag,
 )
-from kiro_crew.messaging.queue_receipt import MAX_COLLAPSE as _MAX_COLLAPSE
 from kiro_crew.messaging.queue_receipt import ReceiptSurface, receipt_address_key
 from kiro_crew.telegram.client import frame_reply_context
 from kiro_crew.telegram.dispatch import origin as _origin
@@ -44,17 +43,20 @@ if TYPE_CHECKING:
 #: The dispatcher's one logger, named for the facade module operators filter on.
 logger = logging.getLogger("kiro_crew.telegram.transport_dispatch")
 
-# Keep queue collapse within the shared ingestion layer's per-turn file cap.
-# Without this, two queued 10-photo albums would concatenate to 20 attachments
-# in one turn and ingest_attachments would silently process only the first 10,
-# losing the second album entirely. Mirrors discord/transport_dispatch.py.
+#: One queued message per turn. Telegram presents the same queue shape as
+#: WhatsApp: every question gets its own answer, in order, instead of folding a
+#: whole burst into one combined reply.
+_TURN_COLLAPSE = 1
+
+#: The queue's per-turn attachment ceiling. With one message per turn this only
+#: guards a single over-large upload; kept for the shared ingestion contract.
 _MAX_COLLAPSED_ATTACHMENTS = IngestLimits().max_attachments
 
 
 async def _drain_queue(self: TelegramDispatcher, session_key: str) -> None:
-    """Collapse every message ONE SENDER queued during the just-finished turn
-    into ONE combined turn (order preserved, blank-line joined) and answer them
-    together, rather than replaying each as a separate turn.
+    """Answer the messages ONE SENDER queued during the just-finished turn,
+    one message per turn and in order, rather than folding the burst into one
+    combined reply.
 
     The dequeue + receipt flip run together under ``self._queue.lock`` so a
     concurrent mid-turn ``_enqueue_with_receipt`` (which takes the same lock)
@@ -102,7 +104,7 @@ async def _drain_queue(self: TelegramDispatcher, session_key: str) -> None:
 async def _pump_queue(
     self: TelegramDispatcher, session_key: str, foreign_channels: set[str]
 ) -> None:
-    """The collapse-and-answer loop itself. See :meth:`_drain_queue`.
+    """The answer-loop itself. See :meth:`_drain_queue`.
 
     Split out so the wake has one exit point to run after: the loop returns from
     several places, and a wake that some of them skipped is the defect it exists
@@ -120,9 +122,9 @@ async def _pump_queue(
         privacy_requests: list[str] = []
         defer_rest = False
         # The origin this iteration answers, taken from the FIRST entry it
-        # collapses. None until that entry is read.
+        # takes. None until that entry is read.
         origin: _QueuedOrigin | None = None
-        # Whether a person sent any entry this turn collapses.
+        # Whether a person sent the entry this turn answers.
         person = False
         async with self._queue.lock:
             # Something else holds this session's lease: a dashboard, cron or
@@ -147,12 +149,10 @@ async def _pump_queue(
                     session_key,
                 )
                 return
-            # Drain the ENTIRE queue under the lock, then split: the first
-            # _MAX_COLLAPSE messages FROM ONE SENDER collapse into this turn;
-            # the rest are re-enqueued IN ORIGINAL ORDER (the queue is now
-            # empty, so re-adding preserves FIFO) to drain after the next turn.
-            # This bounds the combined prompt without dropping or reordering
-            # surplus.
+            # Drain the ENTIRE queue under the lock, then split: one message
+            # from this sender answers now; the rest are re-enqueued IN ORIGINAL
+            # ORDER (the queue is now empty, so re-adding preserves FIFO) to
+            # drain as their own turns. One question, one answer.
             while True:
                 item = self.sessions.dequeue(session_key)
                 if item is None:
@@ -174,9 +174,10 @@ async def _pump_queue(
                     continue
                 if origin is None:
                     origin = item_origin
-                # Never collapse past the shared ingestion cap: the extra files
-                # would be dropped inside ingest_attachments with the user given
-                # no indication, so defer instead. Mirrors the Discord drain.
+                # With more than one message per turn this would also have to
+                # stay under the shared ingestion cap; the check is kept so a
+                # future batch size cannot silently drop files inside
+                # ingest_attachments. Mirrors the Discord drain.
                 exceeds_attachment_cap = bool(
                     texts
                     and item_attachments
@@ -184,20 +185,20 @@ async def _pump_queue(
                 )
                 fits = (
                     not defer_rest
-                    and len(texts) < _MAX_COLLAPSE
+                    and len(texts) < _TURN_COLLAPSE
                     and not exceeds_attachment_cap
                     # sender_key, NOT the whole origin: the origin also carries
-                    # the sender's @handle, which they can change between two
-                    # messages, so comparing all of it would make one person's
-                    # own burst compare unequal and drain as N turns.
+                    # the sender's @handle, which is a mutable label rather than
+                    # identity. With one message per turn this still keeps the
+                    # FIFO scoped to the sender the turn belongs to.
                     and item_origin.sender_key == origin.sender_key
                 )
                 if fits:
                     # Frame THIS entry's own reply context onto its own text
-                    # before it joins the collapsed burst, so each queued reply
+                    # before it becomes the turn's text, so each queued reply
                     # carries exactly its own parent — never another entry's and
                     # never duplicated. Screened/fenced inside frame_reply_context;
-                    # the combined turn is then replayed with no reply_context, so
+                    # the replayed turn then carries no reply_context, so
                     # _run_turn does not frame it a second time.
                     entry_reply_context = item[2].get("reply_context") or ""
                     entry_text = item[1]
@@ -245,7 +246,7 @@ async def _pump_queue(
                     # Re-enqueued VERBATIM: its attachments, its privacy modifier
                     # (a deferred message drains in a LATER iteration of this pump,
                     # and dropping the request here would unprotect exactly the
-                    # messages the collapse cap pushed back), and its origin -- an
+                    # messages the per-turn cap pushed back), and its origin -- an
                     # entry deferred because it came from SOMEONE ELSE would
                     # otherwise inherit the next first entry's identity, the bug
                     # one iteration later. Passing the payload through rather than
@@ -272,10 +273,10 @@ async def _pump_queue(
                 len(remainder),
                 session_key,
                 own_deferred,
-                _MAX_COLLAPSE,
+                _TURN_COLLAPSE,
                 _MAX_COLLAPSED_ATTACHMENTS,
             )
-        combined = "\n\n".join(texts)
+        body = "\n\n".join(texts)
         await self.handle_message(
             TelegramInboundMessage(
                 channel_type="telegram",
@@ -284,7 +285,7 @@ async def _pump_queue(
                 # the sender's identity even when someone else opened the queue.
                 user_id=origin.user_id,
                 conversation_id=origin.chat_id,
-                text=combined,
+                text=body,
                 # Carry the QUEUED message's ORIGINAL route so the drained turn
                 # resolves to the SAME forum session key -- a plain DM-shaped
                 # InboundMessage would drain a queued forum message under the DM
@@ -303,12 +304,11 @@ async def _pump_queue(
             interpret_commands=False,
             # The one exception, and it is not a command being executed: a privacy
             # modifier was already parsed and stripped before this text was
-            # queued, so it travels as state rather than as text. The STRICTEST of
-            # the collapsed messages wins, because they answer as one turn under
-            # one key -- honouring only the first would let a later `/incognito`
-            # in the same burst be silently downgraded to whatever led it. It is
-            # scoped to ONE sender's messages, so one person's modifier never
-            # restricts a turn answering someone else.
+            # queued, so it travels as state rather than as text. One message per
+            # turn means this is that message's own request; strictest() keeps
+            # the batch safe if the cap ever rises above one. It is scoped to
+            # ONE sender's messages, so one person's modifier never restricts a
+            # turn answering someone else.
             privacy_request=privacy_mode.strictest(privacy_requests),
         )
 
@@ -419,7 +419,7 @@ async def _receipt_flip_locked(
     hold ``self._queue.lock`` (the drain holds it across dequeue + flip).
 
     ``answered`` is the subset actually answered by this turn (capped at
-    ``_MAX_COLLAPSE``); the count reflects it -- not the full queued list --
+    ``_TURN_COLLAPSE``); the count reflects it -- not the full queued list --
     so a >cap burst doesn't overstate what this turn answers. ``deferred``
     (>0 only past the cap) is noted so the remainder isn't silently implied.
 

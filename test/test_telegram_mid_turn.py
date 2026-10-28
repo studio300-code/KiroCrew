@@ -481,7 +481,7 @@ class TestTelegramMidTurn:
         assert sess.successes == ["telegram:kirocrew:direct:7"]
         assert sess._gp.steered == []
 
-    def test_drain_collapses_queued_into_one_turn(self) -> None:
+    def test_drain_answers_queued_messages_in_separate_turns(self) -> None:
         d, cli, sess = _dispatcher({7})
         sess.queued = [("t1", "first", _origin()), ("t2", "second", _origin())]
 
@@ -489,9 +489,12 @@ class TestTelegramMidTurn:
             await d._drain_queue("telegram:kirocrew:direct:7")
 
         asyncio.run(_go())
-        # All queued messages collapse into ONE combined turn (drain=False ->
-        # no recursion), and the queue is emptied.
-        assert sess.successes == ["telegram:kirocrew:direct:7"]
+        # Each queued question is its own turn, in order, and the queue is
+        # emptied. This is the same shape WhatsApp uses.
+        assert sess.successes == [
+            "telegram:kirocrew:direct:7",
+            "telegram:kirocrew:direct:7",
+        ]
         assert sess.queued == []
 
     def test_queue_receipt_collapses_into_single_bubble(self) -> None:
@@ -574,13 +577,10 @@ class TestTelegramMidTurn:
         assert len(sends) == 1
         assert len(grows) == 3
 
-    def test_drain_caps_collapse_and_drains_remainder_in_order(self) -> None:
+    def test_drain_answers_every_queued_message_in_order(self) -> None:
         d, cli, sess = _dispatcher({7})
-        # 52 queued -> the collapse cap (50) puts 50 into the first turn and
-        # defers the 2-message remainder. The drain then keeps pumping, so the
-        # remainder runs in a SECOND turn of the same drain rather than waiting
-        # for unrelated future input. A 2+ item remainder is what exposes any
-        # FIFO reordering of the surplus.
+        # Every queued message is its own turn. A long FIFO must drain
+        # completely, in order, without dropping or reordering any entry.
         sess.queued = [(f"t{i}", f"m{i}", _origin()) for i in range(52)]
         seen: list[str] = []
         original = d.handle_message
@@ -598,11 +598,7 @@ class TestTelegramMidTurn:
 
         asyncio.run(_go())
 
-        assert len(seen) == 2, "cap-deferred surplus must drain in a second turn"
-        # First turn takes exactly the cap, in order.
-        assert seen[0].split("\n\n") == [f"m{i}" for i in range(50)]
-        # Surplus drains next, IN ORIGINAL ORDER -- not dropped, not reordered.
-        assert seen[1].split("\n\n") == ["m50", "m51"]
+        assert seen == [f"m{i}" for i in range(52)]
         assert not sess.queued, "the queue must be empty once the pump finishes"
 
     def test_flip_count_reflects_answered_not_full_queue(self) -> None:
@@ -622,9 +618,9 @@ class TestTelegramMidTurn:
         asyncio.run(_go())
         flips = [txt for _mid, txt, _ in cli.edits if "Now answering" in txt]
         assert flips, "receipt should flip to answering"
-        # Count reflects what THIS turn answers (50), not the full 52 queued,
-        # and the 2-message remainder is called out rather than silently implied.
-        assert "(50)" in flips[-1] and "+2 deferred" in flips[-1]
+        # Count reflects what THIS turn answers (one), and the rest is called
+        # out rather than silently implied.
+        assert "(1)" in flips[-1] and "+51 deferred" in flips[-1]
 
     def test_no_receipt_when_turn_finished_before_enqueue(self) -> None:
         d, cli, sess = _dispatcher({7})
