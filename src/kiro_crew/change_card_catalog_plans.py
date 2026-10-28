@@ -49,6 +49,7 @@ from kiro_crew.change_card_catalog_kinds import (
     KIND_SCHEDULE_UPDATE,
     KIND_SECRET_SAVE,
     KIND_SETTING_CHANGE,
+    KIND_TEMPLATE_MCP_SERVER,
     KIND_TEMPLATE_UPDATE,
     KIND_TRUST_APP,
     LIST_OP_ADD,
@@ -799,6 +800,8 @@ def build_preview(
         elif tighten:
             out["risk"] = RISK_TIGHTEN
         out["apply"] = [step("PATCH", f"/api/agents/detail/{_q(p['template'])}", changed)]
+    elif kind == KIND_TEMPLATE_MCP_SERVER:
+        _template_server_preview(p, snapshot, context, out)
     elif kind == KIND_MCP_INSTALL:
         if snapshot.get("exists"):
             raise _fail("already_exists", f"an MCP server '{snapshot.get('name')}' already exists")
@@ -952,6 +955,121 @@ def build_preview(
     if offers_no_undo(kind, p):
         out["undo_unavailable_reason"] = UNDO_NO_IDENTITY_CHECK
     return out
+
+
+def template_additions_path(template: str, server: str | None = None) -> str:
+    """The owner route a ``template.mcp_server`` card writes (and its Undo deletes)."""
+    base = f"/api/agents/detail/{_q(template)}/mcp-additions"
+    return base if server is None else f"{base}/{_q(server)}"
+
+
+#: What a ``template.mcp_server`` card says about its tools' approvals. It claims
+#: no prompt: an existing permission on the agent still applies.
+TEMPLATE_SERVER_TOOLS_NOTE = "adds no approval; existing permissions on this agent still apply"
+#: The ``Open chats`` row when the change cannot apply live: the session reset is
+#: the MCP page's, which restarts every open chat, not only the listed agents'.
+TEMPLATE_SERVER_RESTART_NOTE = (
+    "every open chat restarts to pick it up, including chats on other agents"
+)
+#: Tool names a ``template.mcp_server`` card shows before "and N more".
+_TOOLS_SHOWN = 12
+
+
+def _template_server_preview(
+    p: dict[str, Any],
+    snapshot: dict[str, Any],
+    context: dict[str, Any],
+    out: dict[str, Any],
+) -> None:
+    """The ``template.mcp_server`` card: one server, where it comes from, and its reach.
+
+    The card adds a server and nothing else: no row grants a tool, and the
+    ``Each tool`` row says it adds no approval and that existing permissions
+    still apply; an ``allowedTools`` grant it can read is named in ``Already
+    approved``. ``Its tools`` names what the
+    server can do. Every template the addition reaches is listed (an alias marked
+    as the old name it is), and the open sessions it reaches are the card's
+    scope, which the card shows once as its "Affects" line. A registry server runs code new to this gateway
+    (``code_exec``); one this gateway already runs does not.
+    """
+    if snapshot.get("present"):
+        raise _fail(
+            "already_exists",
+            f"'{p['server']}' is already added to '{p['template']}'",
+        )
+    if snapshot.get("template_has"):
+        raise _fail(
+            "already_exists",
+            f"the '{p['template']}' agent already has a server named '{p['server']}'",
+        )
+    origin = p["origin"]
+    registry = origin.get("source") == "registry"
+    where = (
+        f"the MCP registry ({origin.get('registry_id')}), new to this machine"
+        if registry
+        else "a server already installed here"
+    )
+    reach = context.get("reach") or {}
+    templates = [str(t) for t in reach.get("templates") or [p["template"]]]
+    aliases = {str(k): str(v) for k, v in (reach.get("aliases") or {}).items()}
+    sessions = [str(s) for s in reach.get("sessions") or []]
+    members = [str(m) for m in reach.get("members") or []]
+    tools = [str(t) for t in context.get("tools") or []]
+    # What the server can do: the tool names this gateway saw it advertise. A
+    # server not yet probed (or new from the registry) says so instead.
+    if tools:
+        shown = ", ".join(tools[:_TOOLS_SHOWN])
+        more = len(tools) - _TOOLS_SHOWN
+        can_do = shown + (f" and {more} more" if more > 0 else "")
+    elif registry:
+        can_do = "shown once it first runs; see its registry page"
+    else:
+        can_do = "shown once it first runs"
+    rows: list[dict[str, Any]] = [
+        {"label": "Adds", "after": _display(f"{p['server']}, from {where}")},
+        {"label": "Its tools", "after": _display(can_do)},
+        {
+            "label": "Agents",
+            "add": [f"{t} (old name of {aliases[t]})" if t in aliases else t for t in templates],
+        },
+    ]
+    if members:
+        rows.append({"label": "Crew members", "add": members})
+    rows.append(
+        {
+            "label": "Open chats",
+            "after": (
+                "pick it up at their next turn"
+                if context.get("live")
+                else TEMPLATE_SERVER_RESTART_NOTE
+            ),
+        }
+    )
+    # The card grants nothing, and it makes no promise about prompts: an approval
+    # the agent already holds (an ``allowedTools`` grant, or a harness's own allow
+    # rule) still applies once the server is mounted.
+    grants = [str(g) for g in context.get("grants") or []]
+    if grants:
+        rows.append({"label": "Already approved", "after": _display(", ".join(grants))})
+    rows.append({"label": "Each tool", "after": TEMPLATE_SERVER_TOOLS_NOTE})
+    rows += [{**row, "detail": True} for row in _server_spec_rows(p["server"], p["entry"])]
+    out["title"] = (
+        f"Add MCP server “{p['server']}” to “{p['template']}”"
+        if len(templates) <= 1
+        else f"Add MCP server “{p['server']}” to {len(templates)} agents"
+    )
+    out["changes"] = rows
+    reached = sessions + members
+    out["scope"] = {"members": reached, "count": len(reached), "templates": templates}
+    if registry:
+        out["risk"] = RISK_CODE_EXEC
+    out["apply"] = [
+        step(
+            "POST",
+            template_additions_path(p["template"]),
+            {"server": p["server"], "entry": p["entry"]},
+        )
+    ]
 
 
 #: Undo reason for kinds whose reverse is a delete their store cannot bind to the

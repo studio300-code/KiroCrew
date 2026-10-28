@@ -170,13 +170,17 @@ def add_addition(
     approved_by: str,
     card_id: str,
     approved_at: str | None = None,
-) -> McpAddition:
+    only_if_absent: bool = False,
+) -> McpAddition | None:
     """Record *server* on *template* and return the stored addition.
 
     *entry* must be the gateway-resolved server entry (never an agent-supplied
     launch line) and carry only :data:`ENTRY_KEYS`; a trust key is refused with
     ``AdditionError("trust_key:<key>")``. Recording a server the template already
-    has an addition for replaces that addition (the newer approval wins).
+    has an addition for replaces that addition (the newer approval wins), unless
+    *only_if_absent*: then an existing addition is left as it is and ``None`` is
+    returned, decided under the same lock as the write (a rollback restoring an
+    older record never overwrites a newer approval).
     Raises :class:`AdditionError` on a refused input and ``OSError`` /
     ``ValueError`` when an existing record cannot be read (it is never overwritten
     blind).
@@ -206,6 +210,8 @@ def add_addition(
         bucket = templates.setdefault(template, {})
         if not isinstance(bucket, dict):
             raise ValueError("template_mcp_additions_invalid")
+        if only_if_absent and server in bucket:
+            return None
         bucket[server] = addition.to_record()
         _write(data)
     return addition
