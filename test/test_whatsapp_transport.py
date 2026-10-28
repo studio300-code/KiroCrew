@@ -9,13 +9,15 @@ unconfigured group must be dropped before it can produce an audit row.
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
 
+from kiro_crew.messaging.outbound_files import OutboundFile
 from kiro_crew.messaging.transport import InboundMessage
 from kiro_crew.whatsapp.jids import OwnIdentity
-from kiro_crew.whatsapp.transport import WhatsAppTransport
+from kiro_crew.whatsapp.transport import WhatsAppTransport, _ogg_seconds
 
 OWN_JID = "447700900000@s.whatsapp.net"
 OWN_LID = "111222333@lid"
@@ -38,6 +40,29 @@ class FakeClient:
         self.lid_map: dict[str, str] = {}
         #: every alias lookup, so a test can assert the result is cached.
         self.lid_lookups: list[str] = []
+        #: outbound uploads, split by the verb the transport chose.
+        self.documents: list[tuple[str, bytes, str, str]] = []
+        self.voices: list[tuple[str, bytes, str, int]] = []
+
+    async def send_document_bytes(
+        self, jid: str, data: bytes, filename: str, *, mimetype: str = "",
+        caption: str = "", on_sent=None,
+    ) -> str:
+        mid = next(self._next_ids)
+        self.documents.append((jid, data, filename, mimetype))
+        if on_sent is not None:
+            on_sent(mid)
+        return mid
+
+    async def send_voice_bytes(
+        self, jid: str, data: bytes, *, mimetype: str, seconds: int = 0,
+        on_sent=None,
+    ) -> str:
+        mid = next(self._next_ids)
+        self.voices.append((jid, data, mimetype, seconds))
+        if on_sent is not None:
+            on_sent(mid)
+        return mid
 
     async def send_text(self, jid: str, text: str, on_sent=None) -> list[str]:
         """Chunks on blank lines, and invokes ``on_sent`` per chunk.
@@ -577,6 +602,60 @@ class TestOutboundAndTargets:
         message_id = await harness.transport.send_message(FRIEND, "hi there")
         assert message_id == "SENT1"
         assert harness.transport.echo.is_own_echo(FRIEND, "SENT1")
+
+    def test_ogg_seconds_reads_the_last_granule(self):
+        granule = 48000 * 17
+        page = (
+            b"OggS"
+            + b"\x00"
+            + b"\x00"
+            + granule.to_bytes(8, "little")
+            + b"\x00" * 4
+            + b"\x00" * 4
+            + b"\x00" * 4
+            + b"\x00"
+            + b"\x00"
+        )
+
+        assert _ogg_seconds(page) == 17
+
+    async def test_ogg_document_is_sent_as_a_voice_note(self):
+        h = Harness()
+        granule = 48000 * 17
+        page = (
+            b"OggS"
+            + b"\x00"
+            + b"\x00"
+            + granule.to_bytes(8, "little")
+            + b"\x00" * 4
+            + b"\x00" * 4
+            + b"\x00" * 4
+            + b"\x00"
+            + b"\x00"
+        )
+        out = OutboundFile(path="/tmp/vocale.ogg", data=page, alt="", mime="audio/ogg")
+
+        await h.transport.send_document(FRIEND, out, caption="vocale")
+
+        assert not h.client.documents, "an OGG voice must not go as a file"
+        jid, data, mimetype, seconds = h.client.voices[0]
+        assert (jid, data, mimetype, seconds) == (
+            FRIEND,
+            page,
+            "audio/ogg; codecs=opus",
+            17,
+        )
+
+    async def test_a_pdf_document_stays_a_document(self):
+        h = Harness()
+        out = OutboundFile(
+            path="/tmp/report.pdf", data=b"%PDF-1.7\n%%EOF\n", alt="", mime="application/pdf"
+        )
+
+        await h.transport.send_document(FRIEND, out, caption="report")
+
+        assert not h.client.voices
+        assert h.client.documents and h.client.documents[0][2] == "report.pdf"
 
     async def test_configured_targets_offline_reason(self, harness):
         harness.client.is_connected = False
