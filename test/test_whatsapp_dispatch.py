@@ -517,8 +517,8 @@ def test_a_message_arriving_during_retry_backoff_is_queued():
     assert any("second answer" in t for _, t in transport.sent)
 
 
-def test_only_one_midturn_question_is_steered_and_the_rest_queue():
-    """A burst keeps its order: one steer, then every other question queued."""
+def test_every_midturn_question_is_steered_when_supported():
+    """The steer policy matches Telegram: every follow-up can fold into the turn."""
 
     class SteeringQueueProvider(FakeProvider):
         supports_steer = True
@@ -560,18 +560,15 @@ def test_only_one_midturn_question_is_steered_and_the_rest_queue():
         await d.handle_message(_msg("q2"))
         await d.handle_message(_msg("q3"))
         await d.handle_message(_msg("q4"))
-        assert len(d._queued[_DM]) == 2, "only the questions after the steer queue"
+        assert not d._queued, "steerable follow-ups fold in, as on Telegram"
         provider.release.set()
         await first
 
     asyncio.run(scenario())
 
-    assert provider.steered == ["q2"], "one steer per turn"
-    assert provider.calls == 3, "q1 plus the two queued questions"
-    assert provider.prompts == ["[ctx]q1", "[ctx]q3", "[ctx]q4"]
-    sent = " ".join(text for _, text in transport.sent)
-    assert all(f"answer {number}" in sent for number in (1, 2, 3))
-    assert not d._queued
+    assert provider.steered == ["q2", "q3", "q4"]
+    assert provider.calls == 1
+    assert provider.prompts == ["[ctx]q1"]
 
 
 def test_the_whole_queue_is_answered_and_new_arrivals_join_it():
