@@ -646,6 +646,43 @@ class TestOutboundAndTargets:
             17,
         )
 
+    async def test_mp3_document_is_transcoded_to_a_voice_note(self, monkeypatch):
+        import kiro_crew.whatsapp.transport as mod
+
+        granule = 48000 * 17
+        page = (
+            b"OggS"
+            + b"\x00"
+            + b"\x00"
+            + granule.to_bytes(8, "little")
+            + b"\x00" * 4
+            + b"\x00" * 4
+            + b"\x00" * 4
+            + b"\x00"
+            + b"\x00"
+        )
+        monkeypatch.setattr(mod, "_transcode_to_ogg_opus", lambda data: page)
+        h = Harness()
+        out = OutboundFile(path="/tmp/vocale.mp3", data=b"mp3", alt="", mime="audio/mpeg")
+
+        await h.transport.send_document(FRIEND, out, caption="vocale")
+
+        assert not h.client.documents
+        _jid, data, mimetype, seconds = h.client.voices[0]
+        assert (data, mimetype, seconds) == (page, "audio/ogg; codecs=opus", 17)
+
+    async def test_a_failed_audio_transcode_falls_back_to_a_document(self, monkeypatch):
+        import kiro_crew.whatsapp.transport as mod
+
+        monkeypatch.setattr(mod, "_transcode_to_ogg_opus", lambda data: b"")
+        h = Harness()
+        out = OutboundFile(path="/tmp/vocale.mp3", data=b"mp3", alt="", mime="audio/mpeg")
+
+        await h.transport.send_document(FRIEND, out, caption="vocale")
+
+        assert not h.client.voices
+        assert h.client.documents and h.client.documents[0][2] == "vocale.mp3"
+
     async def test_a_pdf_document_stays_a_document(self):
         h = Harness()
         out = OutboundFile(

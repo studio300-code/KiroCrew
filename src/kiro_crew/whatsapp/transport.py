@@ -115,6 +115,50 @@ def _ogg_seconds(data: bytes) -> int:
     granule = int.from_bytes(data[pos + 6 : pos + 14], "little")
     return max(0, round(granule / 48000))
 
+
+def _transcode_to_ogg_opus(data: bytes) -> bytes:
+    """Transcode any audio input to OGG/Opus, or return b"" when unavailable.
+
+    WhatsApp's push-to-talk bubble is OGG/Opus; an MP3 or WAV upload sent as a
+    voice note would be a file the recipient's client may refuse to play. The
+    bundled speech synthesis emits MP3/WAV, so every audio upload is normalized
+    here. A missing ffmpeg or a failed transcode returns empty and the caller
+    keeps the document path, so the file is never lost.
+    """
+    try:
+        import subprocess
+
+        proc = subprocess.run(
+            [
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-i",
+                "pipe:0",
+                "-vn",
+                "-c:a",
+                "libopus",
+                "-b:a",
+                "32k",
+                "-application",
+                "voip",
+                "-f",
+                "ogg",
+                "pipe:1",
+            ],
+            input=data,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return b""
+    if proc.returncode != 0 or not proc.stdout.startswith(b"OggS"):
+        return b""
+    return proc.stdout
+
 #: seconds of pre-connection history still answered after (re)connect. Events
 #: older than ``connected_at - GRACE`` are reconnect replay, not live traffic.
 _REPLAY_GRACE_S = 60.0
@@ -505,12 +549,22 @@ class WhatsAppTransport(MessagingTransport):
         jid = normalize_jid(conversation_id)
         name = Path(file.path).name
         note = (caption or file.alt or "").strip()
-        if (file.mime or "").split(";", 1)[0].strip().lower() == "audio/ogg":
+        mime = (file.mime or "").split(";", 1)[0].strip().lower()
+        voice_data = b""
+        if mime == "audio/ogg":
+            # The channel's own voice container. Assume its codec is Opus; the
+            # client pins the PTT mime to the codec spelling.
+            voice_data = file.data
+        elif mime.startswith("audio/"):
+            # MP3/WAV/M4A/WebM from the speech synthesis or the agent: PTT
+            # requires OGG/Opus, so normalize before sending.
+            voice_data = await asyncio.to_thread(_transcode_to_ogg_opus, file.data)
+        if voice_data:
             voice_id = await self._client.send_voice_bytes(
                 jid,
-                file.data,
+                voice_data,
                 mimetype="audio/ogg; codecs=opus",
-                seconds=_ogg_seconds(file.data),
+                seconds=_ogg_seconds(voice_data),
                 on_sent=lambda message_id: self._remember_sent(jid, message_id),
             )
             self._archive_outbound(voice_id, jid, body=note or name, kind="voice")
