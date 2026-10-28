@@ -60,6 +60,12 @@ from kiro_crew.messaging.dispatch import (
 from kiro_crew.messaging.driver import APPROVAL_INTERACTIVE
 from kiro_crew.messaging.inbound_spool import InboundRoute
 from kiro_crew.messaging.link import build_dm_session_key, seed_generation
+from kiro_crew.messaging.queue_drain import owner_token
+from kiro_crew.messaging.queue_receipt import (
+    ATTACHMENT_PLACEHOLDER,
+    ReceiptQueue,
+    receipt_address_key,
+)
 from kiro_crew.messaging.transport import InboundMessage
 from kiro_crew.session_lifecycle import (
     STOP_DECLINED_COMPACTING_TEXT,
@@ -160,16 +166,10 @@ def _acp_retry_verdict(exc: AcpError) -> tuple[bool, bool]:
 #: The receipt a sender gets while a reply is still streaming into their chat.
 BUSY_NOTE = "Still working on the last message; please resend shortly."
 
-#: The receipt for a message the dispatcher KEEPS and replays after the running
-#: turn. It deliberately never asks the operator to send it again.
-QUEUED_NOTE = "⏳ Queued — I'll answer this after the current turn."
 
-
-def _queued_note(depth: int) -> str:
-    """The receipt for the *depth*-th question waiting behind the current turn."""
-    if depth <= 1:
-        return QUEUED_NOTE
-    return f"⏳ Queued ({depth}) — I'll answer these after the current turn."
+def _receipt_owner(scope: str) -> str:
+    """The principal whose lines the receipt may withdraw on /stop."""
+    return owner_token("whatsapp", [scope])
 
 #: Phase reactions placed on the OPERATOR'S OWN inbound message, which is the
 #: same affordance Slack draws with its status reactions. Reacting to their
@@ -197,6 +197,30 @@ class _QueuedTurn:
     original: tuple[str, int] | None
     inbound_route: InboundRoute | None
     attachment_paths: list[str]
+    receipt_text: str
+
+
+class _WhatsAppReceiptSurface:
+    """One conversation's collapsing queue-receipt bubble."""
+
+    label = "whatsapp"
+
+    def __init__(self, dispatcher: "WhatsAppDispatcher", chat_jid: str) -> None:
+        self._dispatcher = dispatcher
+        self._chat = chat_jid
+        self.address_key = receipt_address_key("whatsapp", chat_jid)
+
+    async def send_receipt(self, body: str) -> Any:
+        transport = self._dispatcher.transport
+        if transport is None:
+            return None
+        return await transport.send_message(self._chat, body)
+
+    async def edit_receipt(self, msg_id: Any, body: str) -> bool:
+        client = self._dispatcher.client
+        if client is None:
+            return False
+        return await client.edit_text(self._chat, msg_id, body)
 
 
 class WhatsAppDispatcher:
@@ -236,6 +260,9 @@ class WhatsAppDispatcher:
         #: released during a backoff, so without this a second question would
         #: start a concurrent turn while the first one is still waiting.
         self._retrying: set[str] = set()
+        #: The same collapsing "⏳ Queued (N)" bubble Telegram uses: one message,
+        #: edited in place as the burst grows and flipped when the drain starts.
+        self._receipts = ReceiptQueue()
         # Held on self: the watcher holds the owner WEAKLY, so a subscription
         # dropped here would be collected and the applier would silently stop
         # firing.
@@ -425,7 +452,8 @@ class WhatsAppDispatcher:
             # ``preserve_queue`` on the force: the hard reset pops the session
             # and its queue, and under a unified ``dm_scope`` that queue holds
             # other channels' messages; ``stop_turn`` parks them for the
-            # successor instead. This channel queues nothing of its own.
+            # successor instead. This channel's own queue is separate and is
+            # cleared below.
             outcome = await (
                 self.sessions.stop_turn(session_key, force=True, preserve_queue=True)
                 if force
@@ -443,6 +471,7 @@ class WhatsAppDispatcher:
                 session_key, scope, lambda: self._say(scope, STOP_DECLINED_COMPACTING_TEXT)
             )
             return
+        await self._cancel_queued(scope)
         stopped = kind in ("soft", "hard")
         await self._say(scope, STOPPED_TEXT if stopped else STOP_NOTHING_RUNNING_TEXT)
 
@@ -872,14 +901,13 @@ class WhatsAppDispatcher:
             await self._say(scope, "Folded into the current reply.")
             return
         if is_operator:
-            # Keep it and replay it when the turn ends; never ask the operator
-            # to send the same question again.
-            depth = self._enqueue(inbound, session_key, inbound_route)
-            await self._say(scope, _queued_note(depth))
+            # Keep it and replay it when the turn ends; the collapsing receipt
+            # is the acknowledgement, and it never asks for a resend.
+            await self._enqueue(inbound, session_key, inbound_route)
             return
         await self._say(scope, BUSY_NOTE)
 
-    def _enqueue(
+    async def _enqueue(
         self,
         inbound: InboundMessage,
         session_key: str,
@@ -895,20 +923,40 @@ class WhatsAppDispatcher:
         # when its dispatch returns. The copy owns a different id, so restoring
         # the tables for the replay cannot be raced by that cleanup.
         queued = replace(inbound)
+        original = transport.pending_original.get(id(inbound))
+        original_text, media_count = original if original is not None else (inbound.text, 0)
+        display = " ".join((original_text or "").split())
+        if not display and (media_count or inbound.attachments):
+            display = ATTACHMENT_PLACEHOLDER
+        if not display:
+            display = ATTACHMENT_PLACEHOLDER
         item = _QueuedTurn(
             inbound=queued,
             verdict=transport.pending_verdicts.get(id(inbound)),
             is_operator=transport.is_operator(inbound),
             message_id=transport.pending_message_id.get(id(inbound), ""),
-            original=transport.pending_original.get(id(inbound)),
+            original=original,
             inbound_route=inbound_route,
             attachment_paths=attachment_paths,
+            receipt_text=display,
         )
-        queue = self._queued.setdefault(inbound.conversation_id, deque())
-        queue.append(item)
+        scope = inbound.conversation_id
+        owner = _receipt_owner(scope)
+        async with self._receipts.lock:
+            queue = self._queued.setdefault(scope, deque())
+            queue.append(item)
+            try:
+                await self._receipts.create_or_grow_locked(
+                    scope,
+                    _WhatsAppReceiptSurface(self, scope),
+                    display,
+                    owner=owner,
+                )
+            except Exception:  # noqa: BLE001: a receipt is cosmetic beside the queue
+                logger.warning("whatsapp: queue receipt failed", exc_info=True)
         logger.info(
             "whatsapp: queued a mid-turn message chat=%s session=%s depth=%d",
-            inbound.conversation_id,
+            scope,
             session_key,
             len(queue),
         )
@@ -927,16 +975,31 @@ class WhatsAppDispatcher:
         self._draining.add(scope)
         try:
             while queue:
-                item = queue.popleft()
-                item_key = self._session_key(scope, is_operator=item.is_operator)
-                if scope in self._retrying or self.sessions.is_busy(item_key):
-                    queue.appendleft(item)
-                    return
-                if is_group_jid(scope):
-                    other_key = self._session_key(scope, is_operator=not item.is_operator)
-                    if self.sessions.is_busy(other_key):
-                        queue.appendleft(item)
+                if self._queued.get(scope) is not queue:
+                    return  # /stop dropped the queue while this drain was running
+                async with self._receipts.lock:
+                    if not queue:
                         return
+                    item = queue[0]
+                    item_key = self._session_key(scope, is_operator=item.is_operator)
+                    if scope in self._retrying or self.sessions.is_busy(item_key):
+                        return
+                    if is_group_jid(scope):
+                        other_key = self._session_key(scope, is_operator=not item.is_operator)
+                        if self.sessions.is_busy(other_key):
+                            return
+                    queue.popleft()
+                    try:
+                        if self._receipts.has_receipt(scope):
+                            await self._receipts.flip_answering_locked(
+                                scope,
+                                _WhatsAppReceiptSurface(self, scope),
+                                [item.receipt_text],
+                                deferred=len(queue),
+                                owner=_receipt_owner(scope),
+                            )
+                    except Exception:  # noqa: BLE001: a receipt must not block the replay
+                        logger.warning("whatsapp: queue receipt flip failed", exc_info=True)
                 # The transport popped these side tables when the original
                 # receive() returned; put them back for this replay and drop
                 # them again afterwards.
@@ -964,6 +1027,23 @@ class WhatsAppDispatcher:
             self._draining.discard(scope)
             if not queue:
                 self._queued.pop(scope, None)
+
+    async def _cancel_queued(self, scope: str) -> None:
+        """`/stop` drops the queued questions and finalizes their receipt."""
+        queue = self._queued.pop(scope, None)
+        transport = self.transport
+        if queue and transport is not None:
+            for item in queue:
+                await transport.release_temp_paths(item.attachment_paths)
+        try:
+            async with self._receipts.lock:
+                await self._receipts.finish_cancelled_locked(
+                    scope,
+                    _WhatsAppReceiptSurface(self, scope),
+                    owner=_receipt_owner(scope),
+                )
+        except Exception:  # noqa: BLE001: a receipt must not fail /stop
+            logger.warning("whatsapp: queue receipt cancellation failed", exc_info=True)
 
     async def _maybe_notice(
         self, scope: str, session_key: str, provider: Any, *, unprompted: bool

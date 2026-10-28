@@ -304,12 +304,17 @@ class FakeClient:
     def __init__(self) -> None:
         self.typing: list[bool] = []
         self.reactions: list[tuple[str, str]] = []
+        self.edits: list[tuple[str, str, str]] = []
 
     async def send_typing(self, jid: str, active: bool) -> None:
         self.typing.append(active)
 
     async def react(self, jid: str, sender: str, message_id: str, emoji: str) -> bool:
         self.reactions.append((message_id, emoji))
+        return True
+
+    async def edit_text(self, jid: str, message_id: str, text: str) -> bool:
+        self.edits.append((jid, message_id, text))
         return True
 
 
@@ -496,6 +501,37 @@ def test_a_second_question_is_answered_after_the_running_turn():
     assert provider.prompts == ["[ctx]first question", "[ctx]second question"]
     assert any("first answer" in text for _, text in transport.sent)
     assert any("second answer" in text for _, text in transport.sent)
+
+
+def test_queue_receipt_is_one_bubble_that_grows():
+    provider = FakeProvider()
+    d, client, _sessions, transport = _make(provider=provider, busy=True)
+
+    asyncio.run(d.handle_message(_msg("first")))
+    asyncio.run(d.handle_message(_msg("second")))
+
+    queued = [text for _, text in transport.sent if "Queued" in text]
+    assert len(queued) == 1, "one receipt bubble, not one note per message"
+    assert "(1)" in queued[0]
+    assert any("(2)" in text for _jid, _mid, text in client.edits)
+
+
+def test_stop_clears_the_queue_and_cancels_the_receipt():
+    provider = FakeProvider()
+    d, client, sessions, transport = _make(provider=provider, busy=True)
+    asyncio.run(d.handle_message(_msg("first")))
+    asyncio.run(d.handle_message(_msg("second")))
+    assert len(d._queued[_DM]) == 2
+
+    async def stop_turn(key, **kw):
+        return "soft"
+
+    sessions.stop_turn = stop_turn  # type: ignore[attr-defined]
+    asyncio.run(d._handle_stop(_DM))
+
+    assert d._queued.get(_DM) is None
+    assert any("Stopped" in text for _, text in transport.sent)
+    assert any("Cancelled" in text for _jid, _mid, text in client.edits)
 
 
 def test_a_message_arriving_during_retry_backoff_is_queued():
