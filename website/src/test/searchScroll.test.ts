@@ -864,3 +864,42 @@ describe('scrollCurrentMatchIntoView: range-based target', () => {
     clearSearchHighlights(box); box.remove()
   })
 })
+
+describe('attachUserScrollIntent: a sideways wheel a page swipe claims', () => {
+  /** A scroller inside an ancestor that may cancel the wheel, as the chat
+   *  page's trackpad swipe (on the shell grid) does. */
+  const mount = (claim: boolean) => {
+    const root = document.createElement('div')
+    const scroller = document.createElement('div')
+    root.appendChild(scroller)
+    document.body.appendChild(root)
+    if (claim) root.addEventListener('wheel', (e) => e.preventDefault())
+    const calls: Array<[string | undefined, number | undefined]> = []
+    const detach = attachUserScrollIntent(scroller, (dir, px) => { calls.push([dir, px]) })
+    const wheel = (dx: number, dy: number) =>
+      scroller.dispatchEvent(new WheelEvent('wheel', { deltaX: dx, deltaY: dy, bubbles: true, cancelable: true }))
+    return { root, calls, wheel, done: () => { detach(); root.remove() } }
+  }
+
+  it('is not the reader\'s input once the page cancelled it: its drift names no direction', () => {
+    const m = mount(true)
+    m.wheel(20, -2)
+    m.wheel(-20, 3)
+    expect(m.calls).toEqual([])
+    m.done()
+  })
+
+  it('still counts when nothing claimed it', () => {
+    const m = mount(false)
+    m.wheel(20, -2)
+    expect(m.calls).toEqual([['up', 2]])
+    m.done()
+  })
+
+  it('a vertical wheel is the reader\'s, claimed or not, at once', () => {
+    const m = mount(true)
+    m.wheel(1, -30)
+    expect(m.calls).toEqual([['up', 30]])
+    m.done()
+  })
+})

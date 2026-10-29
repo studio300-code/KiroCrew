@@ -329,6 +329,27 @@ export function canScrollX(from: EventTarget | null | readonly EventTarget[], dx
   return false
 }
 
+/** Whether an element on the way from the event's target up to (not past)
+ *  `root` is a modal layer: `role="dialog"` / `"alertdialog"`, `aria-modal`, or
+ *  an open `<dialog>`. Read as a rule, as the phone drawer does
+ *  (useDrawerSwipe), so the next dialog needs no attribute of its own. */
+export function inModalLayer(from: EventTarget | null | readonly EventTarget[], root: Element | null): boolean {
+  const chain: Element[] = []
+  if (Array.isArray(from)) {
+    for (const n of from as readonly EventTarget[]) if (n instanceof Element) chain.push(n)
+  } else {
+    for (let n = from instanceof Element ? from : null; n; n = n.parentElement) chain.push(n)
+  }
+  for (const n of chain) {
+    if (n === root) break
+    const role = n.getAttribute('role')
+    if (role === 'dialog' || role === 'alertdialog') return true
+    if (n.getAttribute('aria-modal') === 'true') return true
+    if (n.tagName === 'DIALOG' && (n as HTMLDialogElement).open) return true
+  }
+  return false
+}
+
 function prefersReducedMotion(): boolean {
   return typeof window !== 'undefined'
     && typeof window.matchMedia === 'function'
@@ -469,7 +490,10 @@ export function useTrackpadSwipe(rootRef: RefObject<HTMLElement | null>, opts: T
       // The composed path, so a scroller inside a shadow root (a code block
       // rendered by a web component) is seen, not just its host.
       const path = typeof e.composedPath === 'function' ? e.composedPath() : []
-      const owned = e.deltaX !== 0 && canScrollX(path.length ? path : e.target, e.deltaX, root)
+      // A run that starts inside a modal layer is the layer's: the page behind
+      // it must not move (a swipe over the What's New dialog opened the panel).
+      const owned = inModalLayer(path.length ? path : e.target, root)
+        || (e.deltaX !== 0 && canScrollX(path.length ? path : e.target, e.deltaX, root))
       // The event's own time, not the time it is handled: wheels queued behind a
       // slow frame arrive in a burst, and handling time would read that frame
       // as a gap in the fingers and end the drag under them.

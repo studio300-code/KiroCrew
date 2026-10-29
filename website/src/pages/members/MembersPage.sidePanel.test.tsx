@@ -288,6 +288,9 @@ vi.mock('react-router-dom', async (importOriginal) => {
 import { api } from '../../api/client'
 import { resetDashboardOnLoad } from './dashboardOnLoad'
 import { swipeTiming, SWIPE_GESTURE_IDLE_MS } from '../../hooks/useTrackpadSwipe'
+import { MotionGlobalConfig, frame, frameData } from 'framer-motion'
+/** The event time `swipe()` stamps on every event (see there). */
+const SWIPE_AT = 1
 import { CREW_DASHBOARD_TAB_ID, CREW_PANEL_TAB_IDS, MEMBERS_UNCONFIRMED_WITHHELD_VIEWS, MEMBERS_UNFED_VIEWS, MEMBERS_WITHHELD_VIEWS } from './MembersPage'
 import { resetFirstGreetingRequests } from './useFirstGreeting'
 import { __resetPanelTabs, VIEW_DATA_SOURCE } from '../../hooks/usePanelTabs'
@@ -618,6 +621,9 @@ describe('MembersPage side panel (Dashboard / Work log / Notes / Schedules) and 
           const ev = new WheelEvent('wheel', { deltaX: dx, deltaY: dy, bubbles: true, cancelable: true, ...init })
           // The test DOM drops modifier keys from a WheelEvent's init.
           if (init.ctrlKey) Object.defineProperty(ev, 'ctrlKey', { value: true })
+          // One event time for every call: a batch has no speed, so it never
+          // commits mid-drag on speed (rule C); the tests that mean speed stamp it.
+          Object.defineProperty(ev, 'timeStamp', { value: SWIPE_AT })
           target.dispatchEvent(ev)
           if (ev.defaultPrevented) cancelled++
         }
@@ -776,6 +782,20 @@ describe('MembersPage side panel (Dashboard / Work log / Notes / Schedules) and 
       await waitFor(() => expect(slideX()).toBeCloseTo(384, 0))
     })
 
+    it('a swipe that starts inside a dialog does nothing to the panel', async () => {
+      localStorage.setItem(PANEL_OPEN_KEY, '0')
+      const chat = await openOncall()
+      const dialog = document.createElement('div')
+      dialog.setAttribute('role', 'dialog')
+      const text = document.createElement('p')
+      dialog.appendChild(text)
+      chat.appendChild(dialog)
+      expect(swipe(text, 20, 30)).toBe(0)
+      expect(sliding()).toBe(false)
+      expect(screen.queryByTestId('member-side-panel')).toBeNull()
+      expect(localStorage.getItem(PANEL_OPEN_KEY)).toBe('0')
+    })
+
     it('a short leftward run lets the panel fall back out', async () => {
       localStorage.setItem(PANEL_OPEN_KEY, '0')
       const chat = await openOncall()
@@ -881,6 +901,89 @@ describe('MembersPage side panel (Dashboard / Work log / Notes / Schedules) and 
     const tailSteps = (dx: number, n: number, t0: number, ratio = 0.85): Array<[number, number]> =>
       Array.from({ length: n }, (_, i) => [dx * ratio ** (i + 1), t0 + (i + 1) * 16])
 
+    /** Both clocks under the test's hand: the reader's timers, and framer's. */
+    const manualClocks = () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'requestAnimationFrame', 'cancelAnimationFrame'] })
+      frameData.timestamp = performance.now()
+      MotionGlobalConfig.useManualTiming = true
+      onTestFinished(() => {
+        MotionGlobalConfig.useManualTiming = false
+        vi.useRealTimers()
+      })
+      return (ms = 0) => act(async () => {
+        frameData.timestamp += ms
+        await new Promise<void>((resolve) => { frame.postRender(() => resolve()) })
+      })
+    }
+
+    it('rule C: a fast drag commits before any lift-off and settles open within 240ms', async () => {
+      localStorage.setItem(PANEL_OPEN_KEY, '0')
+      const chat = await openOncall()
+      const paint = manualClocks()
+      wheelSeq(chat, steps(10, 4, performance.now()))
+      let frames = 0
+      while (sliding() && frames < 60) { await paint(1000 / 60); frames += 1 }
+      expect(frames).toBeLessThanOrEqual(16)
+      expect(screen.getByTestId('member-side-panel')).toHaveAttribute('data-placement', 'docked')
+    })
+
+    it('rule C: a slow drag past 20% waits for the release, and dragged back under it falls back', async () => {
+      localStorage.setItem(PANEL_OPEN_KEY, '0')
+      const chat = await openOncall()
+      const travel = window.innerWidth
+      const paint = manualClocks()
+      const t0 = performance.now()
+      const n = Math.round((travel * 0.3) / 3)
+      wheelSeq(chat, steps(3, n, t0))
+      await paint()
+      expect(sliding()).toBe(true)
+      expect(slideX()).toBeCloseTo(travel - 3 * n, 0)
+      const back = Math.round((travel * 0.2) / 3)
+      // The next frame: framer schedules one render per frame time, so input
+      // must land in a frame not yet painted.
+      frameData.timestamp += 1000 / 60
+      wheelSeq(chat, steps(-3, back, t0 + n * 16))
+      await paint()
+      expect(slideX()).toBeCloseTo(travel - 3 * (n - back), 0)
+      act(() => {
+        vi.advanceTimersByTime(swipeTiming.idleMs)
+        vi.advanceTimersToNextFrame()
+      })
+      for (let i = 0; i < 60 && sliding(); i++) await paint(1000 / 60)
+      expect(screen.queryByTestId('member-side-panel')).toBeNull()
+      expect(localStorage.getItem(PANEL_OPEN_KEY)).toBe('0')
+    })
+
+    it('a slow 30% drag that commits settles open within the trackpad band (240ms), on a wide panel', async () => {
+      localStorage.setItem(PANEL_OPEN_KEY, '0')
+      const chat = await openOncall()
+      const travel = window.innerWidth
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'requestAnimationFrame', 'cancelAnimationFrame'] })
+      frameData.timestamp = performance.now()
+      MotionGlobalConfig.useManualTiming = true
+      onTestFinished(() => {
+        MotionGlobalConfig.useManualTiming = false
+        vi.useRealTimers()
+      })
+      const paint = (ms = 0) => act(async () => {
+        frameData.timestamp += ms
+        await new Promise<void>((resolve) => { frame.postRender(() => resolve()) })
+      })
+      const n = Math.round((travel * 0.3) / 3)
+      wheelSeq(chat, steps(3, n, performance.now()))
+      await paint()
+      act(() => {
+        vi.advanceTimersByTime(swipeTiming.idleMs)
+        vi.advanceTimersToNextFrame()
+      })
+      let frames = 0
+      while (sliding() && frames < 60) { await paint(1000 / 60); frames += 1 }
+      expect(travel).toBeGreaterThan(800)
+      // 240ms is 15 frames; one more for the hand-back. The phone band took 27.
+      expect(frames).toBeLessThanOrEqual(16)
+      expect(screen.getByTestId('member-side-panel')).toHaveAttribute('data-placement', 'docked')
+    })
+
     it('a slow 15% drag that lifts off snaps back: the panel follows, then falls back out', async () => {
       localStorage.setItem(PANEL_OPEN_KEY, '0')
       const chat = await openOncall()
@@ -928,7 +1031,7 @@ describe('MembersPage side panel (Dashboard / Work log / Notes / Schedules) and 
       localStorage.setItem(PANEL_OPEN_KEY, '0')
       const chat = await openOncall()
       const t0 = performance.now()
-      wheelSeq(chat, REVERSAL.map((dx, i) => [dx, t0 + i * 16] as [number, number]))
+      wheelSeq(chat, REVERSAL.map((dx, i) => [dx, t0 + i * 80] as [number, number]))
       // Read as a tail, the turn was dropped and the drag released on the way
       // in, at the opening speed: it settled open.
       await waitFor(() => expect(screen.queryByTestId('member-side-panel')).toBeNull(), { timeout: 3000 })
@@ -1224,7 +1327,7 @@ describe('MembersPage side panel (Dashboard / Work log / Notes / Schedules) and 
         REVERSAL.forEach((dx, i) => {
           const ev = new MessageEvent('message', { data: { type: 'mc-frame-wheel', dx: -dx, dy: 0, mode: 0 } })
           Object.defineProperty(ev, 'source', { value: frame.contentWindow })
-          Object.defineProperty(ev, 'timeStamp', { value: t0 + i * 16 })
+          Object.defineProperty(ev, 'timeStamp', { value: t0 + i * 80 })
           window.dispatchEvent(ev)
         })
       })

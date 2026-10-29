@@ -620,6 +620,39 @@ its tunnel origin, holds one bridge subscription while any pane listens, and for
 phase only to the pane on screen, addressed to its exact origin; the pane accepts a phase
 only from `window.parent` at the origin it asked, for its own watch id.
 
+### The same swipe on the chat page's side panel
+
+The chat page plays the same drag on its right side panel off the phone
+(`useChatPanelTrackpadSwipe` in `pages/chat/page/chatTrackpadSwipe.ts`), over
+the same reader and the same drag and release (`hooks/trackpadPanelDrag`, which
+the Mates page uses too). The panel lives in the shell's `actbar` column, an
+`auto` grid track, so the drag does not need a spacer in a page row: while it
+runs, the column becomes a window onto the panel as wide as its visible part
+(`deskSpacerW`), with the panel pinned at its left edge and clipped, so the
+panel's edge and the chat's right edge both follow the fingers. A close starts
+from the column's own docked width, measured before the swap, and the panel is
+the same element throughout (its terminals and frames live on). The settle runs
+on the main thread so the column reads every frame. The swipe is bound on the
+shell grid, which holds both the chat and the column, so a run keeps going when
+the panel arrives under the pointer. It is off for a bottom-docked panel, while
+the find pane holds the dock, and in embed frames. The exact lift-off from the desktop app reaches it
+through the same reader. The chat page's frames do not
+relay their wheels, so a swipe that starts over a frame in the panel is the
+frame's.
+
+On both pages a trackpad drag commits by rule C (`hooks/trackpadPanelDrag`):
+SPEED commits mid-drag (past `COMMIT_VELOCITY` over the last 60ms, held over at
+least two steps and without its largest step, so one spiky event cannot), and
+the rest of that run is ignored; DISTANCE waits for the release, so a slow drag
+past 20% stays under the fingers and can come back. The settle is the
+trackpad's own (`settleTrackpadDrag`), not the phone's: at most 240ms, never
+under 2 px/ms on average, opening at no less than the release speed, picking up
+speed and easing into the edge at the very end. A run that starts inside a
+modal layer is the layer's. While a panel slides it carries
+`data-native-overlay`, so a native Browser view hides until it docks, and a
+sideways wheel the swipe cancelled does not count as the transcript reader's
+input (`attachUserScrollIntent`), so the chat stays pinned to its last message.
+
 ## A panel that gains a gesture must be bound LIVE to its offset
 
 A panel moved only by a tap may serialize its offset at render time —

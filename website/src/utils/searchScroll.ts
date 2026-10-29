@@ -300,12 +300,30 @@ export function attachUserScrollIntent(
     onUser(scrollKeyDirection(key))
   }
   const onWheel = (e: Event) => {
+    const we = e as WheelEvent
+    // A sideways-first wheel may belong to a page's trackpad swipe
+    // (hooks/useTrackpadSwipe), whose listener sits on an ANCESTOR, so it runs
+    // after this one. Judge it once the event has bubbled to the window: a
+    // wheel the page cancelled scrolls nothing, so it is not the reader's input.
+    // Counted, its drift (a few px of deltaY over a whole swipe) held or
+    // released the bottom pin while the panel's slide reflowed the transcript,
+    // and the chat ended short of its last message.
+    if (Math.abs(we.deltaX) > Math.abs(we.deltaY) && typeof window !== 'undefined') {
+      const after = (late: Event) => {
+        if (late !== e) return
+        if (!we.defaultPrevented) reportWheel(we)
+      }
+      window.addEventListener('wheel', after, { once: true, passive: true })
+      return
+    }
+    reportWheel(we)
+  }
+  const reportWheel = (we: WheelEvent) => {
     // The wheel delta is the input's own direction, available BEFORE any scroll
     // event: negative deltaY scrolls up. A zero/absent delta stays directionless.
     // Its magnitude is the input's own travel too -- how far the reader ASKED
     // to move, before the engine clamps the answer at the scroller's maximum
     // -- but only in pixel mode; a line or page delta has no pixel size here.
-    const we = e as WheelEvent
     const dy = we.deltaY
     if (!(dy < 0 || dy > 0)) {
       onUser(undefined)
