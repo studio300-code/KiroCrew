@@ -1224,6 +1224,19 @@ class CompactionCoordinator:
                 # lose the session's memory to a restart the notice then blames
                 # on compaction.
                 return await self._settle_cancelled(key, pct)
+            if self._owner._sessions.get(key) is not session:
+                # The session was closed or replaced while ``/compact`` ran, and
+                # that took its process down with it: the error here is the
+                # harness dying under the teardown, not compaction failing. The
+                # teardown that unregistered it owns its shutdown, so there is no
+                # failure to report or count, and nothing left to recycle. A
+                # recycle would shut the same process down a second time.
+                self._deps.logger.debug(
+                    "Session %s left during in-place /compact after %.0fs — nothing to recycle",
+                    key,
+                    time.monotonic() - started,
+                )
+                return "absent"
             self._deps.logger.warning(
                 "Session %s in-place /compact failed after %.0fs — recycling "
                 "(semaphore held; async status wait %s)",

@@ -5787,3 +5787,11 @@ pops by object identity — if a racing cold-start already replaced the
 entry, only the old session object is shut down; the fresh replacement
 and its session_map entry survive (the old provider is still reaped so
 its process never leaks).
+
+A failed `/compact` whose session is no longer registered under its key is not
+a compaction failure. A close (`remove`), a reset or another teardown popped it
+and shut its provider down, so the stream died with the process. That arm
+returns `"absent"`, next to the user-Stop arm and checked after it, with no
+warning, no failure callback or `CONTEXT_COMPACTIONS` count, and no recycle:
+the teardown that unregistered the session owns its shutdown, and a recycle
+here would shut the same process down a second time.
