@@ -22,6 +22,7 @@ from kiro_crew.agent_sdk.backends import (
     ACP_BACKEND_CODEX,
     ACP_BACKEND_COPILOT,
     ACP_BACKEND_DEEPSEEK,
+    ACP_BACKEND_MUSE,
     ACP_BACKEND_GOOSE,
     ACP_BACKEND_KAS,
     ACP_BACKEND_KIRO,
@@ -148,6 +149,7 @@ ACP_BACKENDS_SESSION_MCP_ARRAY: FrozenSet[str] = frozenset(
         ACP_BACKEND_DEEPSEEK,
         ACP_BACKEND_PI,
         ACP_BACKEND_COPILOT,
+        ACP_BACKEND_MUSE,
     }
 )
 
@@ -379,6 +381,7 @@ ACP_BACKENDS_HONOR_ZERO_TOOL_BAN = frozenset(
         ACP_BACKEND_GOOSE,
         ACP_BACKEND_DEEPSEEK,
         ACP_BACKEND_PI,
+        ACP_BACKEND_MUSE,
     }
 )
 

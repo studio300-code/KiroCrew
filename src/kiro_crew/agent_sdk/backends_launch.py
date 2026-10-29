@@ -23,6 +23,7 @@ from kiro_crew.agent_sdk.backends import (
     ACP_BACKEND_CODEX,
     ACP_BACKEND_COPILOT,
     ACP_BACKEND_DEEPSEEK,
+    ACP_BACKEND_MUSE,
     ACP_BACKEND_GOOSE,
     ACP_BACKEND_KAS,
     ACP_BACKEND_KIRO,
@@ -252,6 +253,23 @@ ACP_BACKEND_LAUNCH: Mapping[str, SelfServedLaunch] = {
         install_command=f"npm i -g @github/copilot@{COPILOT_VERIFIED_VERSION}",
         protocol_version=1,
         missing_hint="No adapter package is needed: this harness serves ACP itself.",
+    ),
+    ACP_BACKEND_MUSE: SelfServedLaunch(
+        label="Muse Code",
+        binary="muse-acp",
+        acp_args=(),
+        bin_env_var="MUSE_ACP_BIN",
+        # The adapter is a native binary delivered through npm. Muse itself is a
+        # separate install and is deliberately not named as the missing component:
+        # the probe can only answer for the ACP server it launches, and the hint
+        # below names the host command the operator would otherwise miss.
+        install_command="npm i -g @brokkai/muse-acp",
+        protocol_version=1,
+        missing_hint=(
+            "Muse Code is installed separately: run its installer from "
+            "https://dev.meta.ai/install.sh and sign in with `muse login` before "
+            "starting a session."
+        ),
     ),
 }
 

@@ -28,6 +28,7 @@ from kiro_crew.agent_sdk.backends import (
     ACP_BACKEND_CODEX,
     ACP_BACKEND_COPILOT,
     ACP_BACKEND_DEEPSEEK,
+    ACP_BACKEND_MUSE,
     ACP_BACKEND_GOOSE,
     ACP_BACKEND_KAS,
     ACP_BACKEND_KIRO,
@@ -394,6 +395,13 @@ ACP_BACKEND_ROUTING: dict = {
     # that switch as an ACP v1 session config option (``allow_all``) on every
     # session/new and session/load -- Codex's mechanism, applied the same way.
     ACP_BACKEND_COPILOT: Routing.SESSION_CONFIG,
+    # Muse Code asks through ``muse-acp``'s approval flow, which the adapter maps
+    # onto ``session/request_permission``. The adapter advertises the host's four
+    # approval modes as the ``approval_mode`` config option; ``promptUnmatched``
+    # is the one that sends every un-pre-approved tool call to the client, and the
+    # session refuses to start unless that exact value is advertised and applied
+    # before the first prompt.
+    ACP_BACKEND_MUSE: Routing.SESSION_CONFIG,
 }
 
 
@@ -419,6 +427,10 @@ ACP_BACKEND_PERMISSION_CONFIG: dict = {
     # the session's directory run without asking, which is the same residual Codex
     # has and the same OS credential mask compensates for.
     ACP_BACKEND_COPILOT: ("allow_all", "off"),
+    # ``muse-acp`` lists the host's four approval modes (allowAll, promptUnmatched,
+    # onRequest, denyUnmatched); promptUnmatched is the one that prompts for every
+    # tool call not already allowed by a persistent Muse rule.
+    ACP_BACKEND_MUSE: ("approval_mode", "promptUnmatched"),
 }
 
 
