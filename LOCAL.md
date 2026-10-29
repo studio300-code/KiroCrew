@@ -13,6 +13,7 @@ editable into `~/.kiro/crew-venv`, so the running gateway loads the code from
 
 - `main` = upstream **main** (v0.12.0) + the local commits on top.
 - `origin` = `https://github.com/kirodotdev/KiroCrew.git`.
+- `fork` = `https://github.com/studio300-code/KiroCrew.git` — our fork; `main` tracks `fork/main` and pushes there, while `origin` stays the upstream for updates.
 - `src/kiro_crew/static/dist/` is the built dashboard, `.gitignore`d. Rebuild it
   from `website/` when the UI changes:
   `cd website && npm ci && npm run build`, then
