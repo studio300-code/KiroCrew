@@ -18,7 +18,7 @@ import { isReconcileNote } from '../../lib/noteContract'
 import { sanitizeLlmOutput } from '../../utils/sanitize'
 import { deriveToolCallTitle } from '../../utils/toolCallTitle'
 import { sessionDisplayTitle } from '../../utils/sessionDisplayTitle'
-import { isCrewWorkerSlot, attendArrival } from './attention'
+import { attendArrival } from './attention'
 import { emitToolCall } from './browserEvents'
 import type { StreamBuffers } from './streamBuffers'
 import { batchedUnlessOpen } from '../../lib/streamBatch'
@@ -56,11 +56,10 @@ export function useChatStream({ dispatch, buffers, voice, reconnectingRef }: Cha
       // the append — and a reconnect replay stay silent. A Slack post
       // that fails after the row went out retires it via
       // `approval_resolved`; that arrival chime is the accepted residual.
-      // A Crew Mode worker's prompt is decided on its conductor's approval card,
-      // so its row raises neither the chime nor the banner (the row itself stays
-      // in the worker's transcript); same rule as `onApprovalFrame` in approvals.ts.
-      if (data.role === 'permission' && !isCrewWorkerSlot(String(data.slot ?? ''))
-        && shouldChimeOnPermissionRow({ meta: data.meta, reconnecting: reconnectingRef.current })) {
+      // A Crew Mode crew member's prompt sounds and toasts like any chat's: the
+      // toast's title is the crew member's name, and its conductor's row shows
+      // the wait (docs/decisions/2026-10-29-crew-member-approvals-notify.md).
+      if (data.role === 'permission' && shouldChimeOnPermissionRow({ meta: data.meta, reconnecting: reconnectingRef.current })) {
         dispatchMcNotification(APPROVAL_KIND)
         // The same row is the OS toast for a user away from the window: no
         // feed note exists for it, so `useNativeNotification` never sees it.
