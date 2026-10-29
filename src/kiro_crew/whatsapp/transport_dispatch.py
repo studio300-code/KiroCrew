@@ -198,6 +198,7 @@ class _QueuedTurn:
     inbound_route: InboundRoute | None
     attachment_paths: list[str]
     receipt_text: str
+    voice_transcript: str
 
 
 class _WhatsAppReceiptSurface:
@@ -615,6 +616,8 @@ class WhatsAppDispatcher:
             if approval_mode == APPROVAL_INTERACTIVE and may_approve
             else None
         )
+        voice_transcript = transport.pending_voice_transcript.get(id(inbound), "")
+
         def _make_renderer(*, suppress_error: bool) -> WhatsAppRenderer:
             return WhatsAppRenderer(
                 transport,
@@ -623,6 +626,7 @@ class WhatsAppDispatcher:
                 WHATSAPP_CAPABILITIES,
                 unprompted=unprompted,
                 suppress_error=suppress_error,
+                voice_transcript=voice_transcript,
                 session_key=session_key,
                 approval_session_key=session_key if decider is not None else None,
                 # Resolved at delivery time: the shared pipeline acquires the
@@ -941,6 +945,7 @@ class WhatsAppDispatcher:
             inbound_route=inbound_route,
             attachment_paths=attachment_paths,
             receipt_text=display,
+            voice_transcript=transport.pending_voice_transcript.get(id(inbound), ""),
         )
         scope = inbound.conversation_id
         owner = _receipt_owner(scope)
@@ -1010,6 +1015,8 @@ class WhatsAppDispatcher:
                 transport.pending_message_id[id(item.inbound)] = item.message_id
                 if item.original is not None:
                     transport.pending_original[id(item.inbound)] = item.original
+                if item.voice_transcript:
+                    transport.pending_voice_transcript[id(item.inbound)] = item.voice_transcript
                 try:
                     await self._drive(
                         item.inbound,
@@ -1024,6 +1031,7 @@ class WhatsAppDispatcher:
                     transport.pending_operator.pop(id(item.inbound), None)
                     transport.pending_message_id.pop(id(item.inbound), None)
                     transport.pending_original.pop(id(item.inbound), None)
+                    transport.pending_voice_transcript.pop(id(item.inbound), None)
                     await transport.release_temp_paths(item.attachment_paths)
         finally:
             self._draining.discard(scope)

@@ -271,6 +271,7 @@ class FakeTransport:
         self.pending_operator: dict[int, bool] = {}
         self.group_gate = FakeGroupGate()
         self.pending_message_id: dict[int, str] = {}
+        self.pending_voice_transcript: dict[int, str] = {}
         self.pending_original: dict[int, tuple[str, int]] = {}
         #: Phase reactions go through the TRANSPORT, not the client: it owns the
         #: echo tracker, because a reaction is a message and echoes back.
@@ -503,6 +504,19 @@ def test_a_second_question_is_answered_after_the_running_turn():
     assert provider.prompts == ["[ctx]first question", "[ctx]second question"]
     assert any("first answer" in text for _, text in transport.sent)
     assert any("second answer" in text for _, text in transport.sent)
+
+
+def test_a_voice_invocation_reports_the_transcript_first():
+    provider = FakeProvider("Ecco la risposta.")
+    d, _client, _sessions, transport = _make(provider=provider)
+    inbound = _msg("ignored")
+    transport.pending_voice_transcript[id(inbound)] = "Ciao Kiro, che ore sono?"
+
+    asyncio.run(d.handle_message(inbound))
+
+    reply = transport.sent[-1][1]
+    assert "🎙️ Trascrizione: “Ciao Kiro, che ore sono?”" in reply
+    assert reply.index("Trascrizione") < reply.index("Ecco la risposta.")
 
 
 def test_queue_receipt_is_one_bubble_that_grows():

@@ -130,6 +130,10 @@ class IngestResult:
     rejections: list[str] = field(default_factory=list)
     #: Byte-identical opaque files for agent tools. Caller deletes after the turn.
     file_paths: list[str] = field(default_factory=list)
+    #: The speech-to-text result for the voice note(s) in this message. The
+    #: prompt already carries it as a text block; the channel keeps it here as
+    #: well so a surface can report exactly what it heard before answering.
+    voice_transcript: str = ""
 
     @property
     def temp_paths(self) -> list[str]:
@@ -649,6 +653,11 @@ async def transcribe_audio_attachments(result: IngestResult, source: str) -> Ing
         if transcript:
             result.text_blocks.append(
                 f"[Voice memo transcription]\n{transcript}\n[End of transcription]"
+            )
+            result.voice_transcript = (
+                f"{result.voice_transcript}\n{transcript}".strip()
+                if result.voice_transcript
+                else transcript
             )
         else:
             result.rejections.append("[Audio attachment — transcription failed]")

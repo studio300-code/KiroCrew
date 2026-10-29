@@ -125,6 +125,10 @@ class WhatsAppRenderer(Renderer):
         #: The retry's renderer is built with this off and sends the notice only
         #: if the retry fails too.
         suppress_error: bool = False,
+        #: The transcript of the voice note that invoked this turn, if any. The
+        #: reply opens with it so the reader can see what was actually heard
+        #: before the answer.
+        voice_transcript: str = "",
         session_key: str = "",
         approval_session_key: str | None = None,
         upload_root: "Callable[[], str] | None" = None,
@@ -136,6 +140,7 @@ class WhatsAppRenderer(Renderer):
         self._chat = chat_jid
         self._unprompted = unprompted
         self._suppress_error = bool(suppress_error)
+        self._voice_transcript = voice_transcript.strip()
         self._session_key = session_key
         #: Set only when the dispatcher built a decider for this turn, i.e. the
         #: sender may approve. ``None`` keeps ``on_prompt_choice`` silent rather
@@ -759,7 +764,15 @@ class WhatsAppRenderer(Renderer):
 
     def text(self) -> str:
         """The turn's visible answer (OPTIONS stripped); also persisted."""
-        return _strip_options("".join(self._buf).strip())
+        body = _strip_options("".join(self._buf).strip())
+        if not body or not self._voice_transcript:
+            return body
+        head = body.lstrip()
+        # The model sometimes opens by echoing the transcription itself. Keep
+        # that once; prefix only when the answer does not already lead with it.
+        if head.startswith("🎙️") or head.startswith(self._voice_transcript[:40]):
+            return body
+        return f'🎙️ Trascrizione: “{self._voice_transcript}”\n\n{body}'
 
     async def _send(self, body: str) -> None:
         """Deliver via the transport (echo-tracked). Raises on failure so the
