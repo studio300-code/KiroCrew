@@ -1754,6 +1754,8 @@ async def startup_check() -> _containment.ContainmentReport | None:
         service = await current_service()
         if not service.enabled:
             if not service.limits.hard_limits:
+                # Clears a pending hold placed before the bind (hard limits since turned off).
+                _containment.publish_report(None)
                 return None
             report = _containment.admission_off_report()
             _containment.publish_report(report)
