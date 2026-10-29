@@ -501,7 +501,10 @@ def _read_app_agent_owner(r: _Read) -> None:
 
 
 def _read_project(r: _Read) -> None:
-    if r.meta.get("project"):
+    # A live alias's directory wins over disk; see ``binding_is_shared``.
+    from kiro_crew.dashboard.transcript_binding import binding_is_shared
+
+    if r.meta.get("project") and not binding_is_shared(r.state, r.slot):
         r.slot.project = r.meta["project"]
 
 

@@ -824,6 +824,8 @@ async def api_chat_slot_project(request: web.Request) -> web.Response:
             # an arm that races a cold start stays queued for the next consume
             # rather than clobbering a correct session.
             if arm_reset:
-                slot._pending_reset_history_key = session_key
+                from kiro_crew.dashboard.transcript_binding import arm_project_reset
+
+                arm_project_reset(state, slot, session_key)
     state.push_slots_update()
     return web.json_response({"ok": True, "project": project})
