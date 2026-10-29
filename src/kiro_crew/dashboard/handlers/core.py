@@ -859,19 +859,19 @@ async def api_session_agent_stream(request: web.Request) -> web.StreamResponse:
     resp.headers["Cache-Control"] = "no-cache"
     await resp.prepare(request)
 
-    last_pos = 0
     from kiro_crew.security import redact_credentials, redact_exfiltration_urls  # noqa: F811
+    from kiro_crew.session_workspace_tail import ResultTail  # noqa: F811
 
+    # Each poll reads only the bytes appended since the last one, in a thread:
+    # re-reading the whole file every second on the loop grows with its square.
+    tail = ResultTail(path)
     for _ in range(1200):  # 20 min max
         try:
-            if path.exists():
-                content = path.read_text(encoding="utf-8")
-                if len(content) > last_pos:
-                    chunk = content[last_pos:]
-                    last_pos = len(content)
-                    chunk, _ = redact_exfiltration_urls(chunk)
-                    chunk, _ = redact_credentials(chunk)
-                    await resp.write(f"data: {json.dumps(chunk)}\n\n".encode())
+            chunk = await asyncio.to_thread(tail.read_new)
+            if chunk:
+                chunk, _ = redact_exfiltration_urls(chunk)
+                chunk, _ = redact_credentials(chunk)
+                await resp.write(f"data: {json.dumps(chunk)}\n\n".encode())
             # Check if the subagent is done.
             state: DashboardState = request.app["state"]
             if state.subagents:
