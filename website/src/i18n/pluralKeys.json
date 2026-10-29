@@ -309,5 +309,12 @@
   "pages.mcpManagement.reload_confirm_title",
   "pages.mcpManagement.approval_title",
   "pages.mcpManagement.confirm_will_share",
-  "apps.issueRadar.components.threads.show_earlier"
+  "apps.issueRadar.components.threads.show_earlier",
+  "pages.sessionBreakdown.tool_count",
+  "pages.sessionStorage.refused_heading",
+  "apps.mochi.stats.drags",
+  "apps.mochi.stats.peeks",
+  "apps.mochi.stats.screenshots",
+  "apps.mochi.stats.walks",
+  "apps.mochi.stats.longest_chat"
 ]
