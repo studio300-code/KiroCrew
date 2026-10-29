@@ -7,7 +7,7 @@
  * a Crew Mode page found here comes from ChatPage's own branch.
  */
 import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest'
-import { render, screen, act, fireEvent, waitFor, within } from '@testing-library/react'
+import { render, screen, act, fireEvent, waitFor, within, cleanup } from '@testing-library/react'
 import { Provider } from 'react-redux'
 import { MemoryRouter } from 'react-router-dom'
 import { configureStore } from '@reduxjs/toolkit'
@@ -112,16 +112,18 @@ type Slot = {
   pendingApproval?: boolean
   /** The gateway connection is up (sends are not refused as offline). */
   connected?: boolean
+  /** slot-a is a Crew Mode root (a conductor chat) the gateway stamped. */
+  crewModeRoot?: boolean
 }
 
-function makeStore({ messages, mode = '', agent = 'default', agentKind = '', origin = 'user', memoryMode = 'persistent', slotKeys = ['slot-a'], createdBy, instanceId, crewRoot, slotRunning = false, listedRunning = false, slotLoading = false, activityOpen = false, pendingApproval = false, connected = false }: Slot) {
+function makeStore({ messages, mode = '', agent = 'default', agentKind = '', origin = 'user', memoryMode = 'persistent', slotKeys = ['slot-a'], createdBy, instanceId, crewRoot, slotRunning = false, listedRunning = false, slotLoading = false, activityOpen = false, pendingApproval = false, connected = false, crewModeRoot = false }: Slot) {
   return configureStore({
     reducer: { dashboard: dashboardReducer, chat: chatReducer, notifications: notificationsReducer },
     preloadedState: {
       dashboard: {
         status: null,
         ...(connected ? { connected: true } : {}),
-        slots: slotKeys.map(key => ({ key, messages: key === 'slot-a' ? messages.length : 0, running: key === 'slot-a' && listedRunning, mode: key === 'slot-a' ? mode : '', agent: key === 'slot-a' ? agent : 'default', agent_kind: key === 'slot-a' ? agentKind : '', origin: key === 'slot-a' ? origin : 'user', memory_mode: key === 'slot-a' ? memoryMode : 'persistent', ...(key === 'slot-a' && createdBy ? { created_by: createdBy } : {}), ...(key === 'slot-a' && instanceId ? { instance_id: instanceId } : {}), ...(key === 'slot-a' && crewRoot ? { crew_root: crewRoot, title: 'Worker B' } : {}), ...(key === 'root-1' ? { title: 'Sample goal', crew_mode_root: true } : {}), pending_approval: key === 'slot-a' && pendingApproval, waiting_for_input: false, last_activity_ts: undefined })),
+        slots: slotKeys.map(key => ({ key, messages: key === 'slot-a' ? messages.length : 0, running: key === 'slot-a' && listedRunning, mode: key === 'slot-a' ? mode : '', agent: key === 'slot-a' ? agent : 'default', agent_kind: key === 'slot-a' ? agentKind : '', origin: key === 'slot-a' ? origin : 'user', memory_mode: key === 'slot-a' ? memoryMode : 'persistent', ...(key === 'slot-a' && createdBy ? { created_by: createdBy } : {}), ...(key === 'slot-a' && instanceId ? { instance_id: instanceId } : {}), ...(key === 'slot-a' && crewRoot ? { crew_root: crewRoot, title: 'Worker B' } : {}), ...(key === 'root-1' ? { title: 'Sample goal', crew_mode_root: true } : {}), ...(key === 'slot-a' && crewModeRoot ? { crew_mode_root: true } : {}), pending_approval: key === 'slot-a' && pendingApproval, waiting_for_input: false, last_activity_ts: undefined })),
         unreadSlots: [], refreshTrigger: 0, approvalMode: 'normal',
         subagentRunning: {}, subagentDetails: {}, subagentText: {},
       } as unknown as RootState['dashboard'],
@@ -326,6 +328,42 @@ describe('Crew Mode on ChatPage', () => {
     await waitFor(() => expect(screen.getByTestId('crew-breadcrumb-root')).toHaveTextContent('Toy Flag Review'))
     expect(screen.getByTestId('crew-worker-breadcrumb')).toHaveTextContent('Done')
     expect(screen.getByTestId('crew-worker-root-closed')).toHaveTextContent('Main chat is closed. Open it again to message Worker B.')
+  })
+
+  it("shows the conductor's worker counts above its composer while the side panel is closed, and opens it", async () => {
+    const R = (key: string, group: string) => ({ key, title: key, agent: 'kirocrew-worker', status: 'idle', group, last_activity: '', ledger_item: '', created_by: 'slot-a' })
+    crewWorkers.mockImplementation(() => Promise.resolve({ root: 'slot-a', workers: [R('w1', 'working'), R('w2', 'approval'), R('w3', 'done')] }))
+    const store = await renderWith({ messages: [{ role: 'user', content: 'go' }], agent: 'kirocrew-conductor', agentKind: 'template', crewModeRoot: true })
+    const strip = await screen.findByTestId('crew-status-strip')
+    expect(within(strip).getAllByTestId('crew-status-chip').map(c => c.getAttribute('data-group'))).toEqual(['approval', 'working', 'done'])
+    fireEvent.click(strip)
+    expect(store.getState().chat.activityOpen).toBe(true)
+    // The panel now says it: the strip stands down rather than repeat it.
+    await waitFor(() => expect(screen.queryByTestId('crew-status-strip')).toBeNull())
+  })
+
+  it('shows no worker strip while the side panel is open, or with no workers', async () => {
+    const R = { key: 'w1', title: 'w1', agent: 'kirocrew-worker', status: 'working', group: 'working', last_activity: '', ledger_item: '', created_by: 'slot-a' }
+    crewWorkers.mockImplementation(() => Promise.resolve({ root: 'slot-a', workers: [R] }))
+    await renderWith({ messages: [{ role: 'user', content: 'go' }], agent: 'kirocrew-conductor', agentKind: 'template', crewModeRoot: true, activityOpen: true })
+    await waitFor(() => expect(crewWorkers).toHaveBeenCalled())
+    expect(screen.queryByTestId('crew-status-strip')).toBeNull()
+    cleanup()
+    crewWorkers.mockClear()
+    const empty = Promise.resolve({ root: 'slot-a', workers: [] })
+    crewWorkers.mockImplementation(() => empty)
+    await renderWith({ messages: [{ role: 'user', content: 'go' }], agent: 'kirocrew-conductor', agentKind: 'template', crewModeRoot: true })
+    // The empty list has been read and settled before the absence is judged.
+    await waitFor(() => expect(crewWorkers).toHaveBeenCalled())
+    await act(async () => { await empty })
+    expect(screen.queryByTestId('crew-status-strip')).toBeNull()
+  })
+
+  it('a plain chat has no worker strip and reads no worker list', async () => {
+    crewWorkers.mockClear()
+    await renderWith({ messages: [{ role: 'user', content: 'hello' }] })
+    expect(screen.queryByTestId('crew-status-strip')).toBeNull()
+    expect(crewWorkers).not.toHaveBeenCalled()
   })
 
   it('a plain chat has no breadcrumb and no steer composer', async () => {

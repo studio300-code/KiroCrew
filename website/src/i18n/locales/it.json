@@ -10094,6 +10094,7 @@
       "composer_chip_label": "Crew Mode è attivo per questa chat",
       "breadcrumb_label": "Membro della squadra",
       "back_to_main_chat": "Torna alla chat principale",
+      "status_strip_open": "Stato della squadra. Apri l’elenco della squadra",
       "steer_too_long": "Un messaggio per {{name}} può avere al massimo {{max}} caratteri. Accorcialo per inviarlo.",
       "steer_placeholder": "Messaggio per {{name}}: lo legge prima del passo successivo",
       "summary_approval": "Approvazione necessaria · {{n}}",
