@@ -51,9 +51,14 @@ const isChatSurfaceVisible = (): boolean =>
 export const focusedSlotForCurrentSurface = (): string | null =>
   getMountedMemberThreadSlot() || store.getState().chat.activeSlot
 
-/** A mounted crewmate transcript that may arm a warm task brief. */
-const warmBriefSlotForCurrentSurface = (): string | null =>
-  getMountedMemberThreadSlot()
+/** Whether a page hide may arm a warm task brief: a mounted crewmate
+ *  transcript, or, on a chat route, a Crew Mode root as the slot the server
+ *  last heard as focused (a split-view pane's focus is not `activeSlot`). */
+const hideMayArmWarmBrief = (announced: string | null): boolean => {
+  if (getMountedMemberThreadSlot()) return true
+  if (!announced || !isChatSurfaceVisible()) return false
+  return store.getState().dashboard.slots.some(s => s.key === announced && s.crew_mode_root === true)
+}
 /** True when *slot* is the thread this window is displaying: the chat
  *  surfaces' `chat.activeSlot`, or the thread a non-chat surface (the Crew
  *  Members page) registered in `viewedThread`. The unread-marker's gate: a
@@ -110,9 +115,25 @@ export function attendArrival(
    best-effort optimization, never load-bearing. */
 let sendSlotFocusedImpl: (slot: string | null) => void = () => {}
 
+/* Split view's own pane focus, as last reported through emitSlotFocused;
+   `undefined` while no split view reports one. A page reveal re-announces it,
+   so the return names the pane the hide left rather than Redux activeSlot. */
+let splitPaneFocus: string | null | undefined
+
 export function emitSlotFocused(slot: string | null): void {
+  splitPaneFocus = slot
   sendSlotFocusedImpl(slot)
 }
+
+/** Split view unmounted: a reveal goes back to announcing the active slot. */
+export function endSplitPaneFocus(): void {
+  splitPaneFocus = undefined
+}
+
+/** The slot a page reveal announces: a mounted crewmate thread, else the
+ *  focused split-view pane, else the active chat. */
+const revealedSlotForCurrentSurface = (): string | null =>
+  getMountedMemberThreadSlot() || (splitPaneFocus !== undefined ? splitPaneFocus : store.getState().chat.activeSlot)
 
 /* Compose intent (lib/composeIntent.ts): the user focused or typed in the
    composer of the slot this socket last announced. Re-sending that same
@@ -149,6 +170,7 @@ export function attachFocusRelay({ socket, flushSlotActivity, onActiveSlotChange
     lastAnnounced = hidden ? null : slot
     socket.sendIfOpen(hidden ? { type: 'slot_focused', slot: null, hidden: true } : { type: 'slot_focused', slot })
   }
+  splitPaneFocus = undefined
   sendSlotFocusedImpl = slot => sendFocus(slot)
   // A view that starts showing more slots' subagent cards asks for their
   // finished runs on the same best-effort contract.
@@ -177,6 +199,9 @@ export function attachFocusRelay({ socket, flushSlotActivity, onActiveSlotChange
     // re-badges the slot and wipe a bubble nobody read.
     if (lastFocusSent) flushSlotRead(lastFocusSent)
     lastFocusSent = active
+    // A store-driven focus change (sidebar, keyboard, deep link) supersedes
+    // the split-view pane focus until a pane reports again.
+    splitPaneFocus = undefined
     onActiveSlotChange()
     if (!document.hidden) sendFocus(active)
   }
@@ -192,9 +217,9 @@ export function attachFocusRelay({ socket, flushSlotActivity, onActiveSlotChange
       flushSlotRead()
       // Only a visible chat or mounted crewmate thread may arm a warm brief.
       // Other routes retain the old focus row and clear it without a reason.
-      sendFocus(null, warmBriefSlotForCurrentSurface() !== null)
+      sendFocus(null, hideMayArmWarmBrief(lastAnnounced))
     } else {
-      sendFocus(focusedSlotForCurrentSurface())
+      sendFocus(revealedSlotForCurrentSurface())
     }
     if (!document.hidden) {
       // Returning to the tab IS the read of whatever the active slot shows.
@@ -228,6 +253,7 @@ export function attachFocusRelay({ socket, flushSlotActivity, onActiveSlotChange
     unsubFocus()
     unsubMemberThread()
     sendSlotFocusedImpl = () => {}
+    splitPaneFocus = undefined
     bindSubagentReplaySender(null)
     bindComposeIntentSender(null)
   }
