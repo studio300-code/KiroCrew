@@ -351,6 +351,12 @@ ACP_BACKEND_DEEPSEEK = "deepseek"
 # (``test/fixtures/acp_frames/copilot/``). Its ``allow_all`` option and its
 # ``session/request_permission`` per tool call are wire facts of that release.
 ACP_BACKEND_COPILOT = "copilot"
+# Muse Code, reached through the community ``muse-acp`` adapter: the adapter is a
+# single binary that serves ACP over stdio and drives Muse over its native MSP
+# session protocol. Muse itself has no ACP mode, so the adapter is the transport
+# rather than an optimization -- the same shape pi-acp has, except the adapter is
+# a self-contained Rust binary instead of a Node entry script.
+ACP_BACKEND_MUSE = "muse"
 # The kiro-cli backend is spelled as the empty string throughout, so name it
 # rather than leaving every call site to infer it from "not claude".
 ACP_BACKEND_KIRO = ""
@@ -395,6 +401,7 @@ ACP_BACKENDS_KNOWN: FrozenSet[str] = frozenset(
         ACP_BACKEND_GOOSE,
         ACP_BACKEND_DEEPSEEK,
         ACP_BACKEND_COPILOT,
+        ACP_BACKEND_MUSE,
     }
 )
 
@@ -411,6 +418,7 @@ ACP_BACKENDS_INDEPENDENT_SETUP: FrozenSet[str] = frozenset(
         ACP_BACKEND_GOOSE,
         ACP_BACKEND_DEEPSEEK,
         ACP_BACKEND_COPILOT,
+        ACP_BACKEND_MUSE,
     }
 )
 
@@ -526,6 +534,7 @@ BASELINE_SELECTABLE_BACKENDS: FrozenSet[str] = frozenset(
         ACP_BACKEND_GOOSE,
         ACP_BACKEND_DEEPSEEK,
         ACP_BACKEND_COPILOT,
+        ACP_BACKEND_MUSE,
     }
 )
 
@@ -552,6 +561,7 @@ POLICY_ID_BY_BACKEND: dict = {
     ACP_BACKEND_GOOSE: ACP_BACKEND_GOOSE,
     ACP_BACKEND_DEEPSEEK: ACP_BACKEND_DEEPSEEK,
     ACP_BACKEND_COPILOT: ACP_BACKEND_COPILOT,
+    ACP_BACKEND_MUSE: ACP_BACKEND_MUSE,
 }
 
 #: The backend a deployment policy may never deny.

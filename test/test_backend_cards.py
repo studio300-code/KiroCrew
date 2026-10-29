@@ -367,6 +367,7 @@ def test_core_counts_per_harness_are_pinned() -> None:
         "goose": 7,
         "kas": 7,
         "kiro": 6,
+        "muse": 3,
         "opencode": 6,
         "pi": 6,
     }

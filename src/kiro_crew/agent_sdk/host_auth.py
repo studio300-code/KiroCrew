@@ -71,6 +71,7 @@ from kiro_crew.agent_sdk.backends import (
     ACP_BACKEND_GOOSE,
     ACP_BACKEND_KAS,
     ACP_BACKEND_KIRO,
+    ACP_BACKEND_MUSE,
     ACP_BACKEND_OPENCODE,
     ACP_BACKEND_PI,
     ACP_BACKENDS_KNOWN,
@@ -547,6 +548,32 @@ AGENT_AUTH_DECLARATIONS: Tuple[AgentAuthDeclaration, ...] = (
         # Excluded deliberately: it signs in through its own credential file, so a
         # ``kiro-cli logout`` says nothing about whether a running opencode session
         # is still authenticated.
+        host_logout_retires_children=False,
+        entitlement_source=ENTITLEMENT_OWN_CREDENTIAL_FILE,
+    ),
+    AgentAuthDeclaration(
+        backend=ACP_BACKEND_MUSE,
+        # Verified on disk and in the installed binary: ``muse`` resolves its
+        # credential file under ``$XDG_CONFIG_HOME/muse/auth.json`` and falls back
+        # to ``~/.config/muse/auth.json``. The adapter launches ``muse serve`` from
+        # its own process tree, so this is the leaf the mask must spare for the
+        # adapter to authenticate; the read gate still refuses it to the AGENT's
+        # file tools, which covers a different reader.
+        credential_leaves=(".config/muse/auth.json",),
+        home_override_env_vars=("XDG_CONFIG_HOME",),
+        # ``XDG_CONFIG_HOME`` replaces ``.config``, so the relocated file keeps both
+        # remaining segments.
+        override_relative_leaves=("muse/auth.json",),
+        adapter_own_leaves=(".config/muse/auth.json",),
+        sign_in_remedy=(
+            "Muse Code signs in on its own — run muse login in a terminal and "
+            "complete the browser sign-in. It is not checked here: the adapter reads "
+            "its credential file."
+        ),
+        signed_out_message=(
+            "Muse Code is not signed in. Run muse login in your terminal, complete "
+            "the sign-in, then start a new chat."
+        ),
         host_logout_retires_children=False,
         entitlement_source=ENTITLEMENT_OWN_CREDENTIAL_FILE,
     ),

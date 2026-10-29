@@ -38,6 +38,7 @@ from kiro_crew.acp.harness.deepseek import DeepseekLaunch
 from kiro_crew.acp.harness.goose import GooseLaunch
 from kiro_crew.acp.harness.kas import KasHarness
 from kiro_crew.acp.harness.kiro import KiroHarness
+from kiro_crew.acp.harness.muse import MuseLaunch
 from kiro_crew.acp.harness.opencode import OpencodeLaunch
 from kiro_crew.acp.harness.pi import PiLaunch
 from kiro_crew.acp.types import (
@@ -45,6 +46,7 @@ from kiro_crew.acp.types import (
     ACP_BACKEND_CODEX,
     ACP_BACKEND_COPILOT,
     ACP_BACKEND_DEEPSEEK,
+    ACP_BACKEND_MUSE,
     ACP_BACKEND_GOOSE,
     ACP_BACKEND_KAS,
     ACP_BACKEND_KIRO,
@@ -62,6 +64,7 @@ __all__ = [
     "KasHarness",
     "KiroHarness",
     "LaunchAdapter",
+    "MuseLaunch",
     "NotificationAliases",
     "OpencodeLaunch",
     "PiLaunch",
@@ -118,6 +121,7 @@ _PROCESS_ADAPTERS: dict[str, type[ProcessAdapter]] = {
     ACP_BACKEND_PI: PiLaunch,
     ACP_BACKEND_DEEPSEEK: DeepseekLaunch,
     ACP_BACKEND_COPILOT: CopilotLaunch,
+    ACP_BACKEND_MUSE: MuseLaunch,
 }
 
 
