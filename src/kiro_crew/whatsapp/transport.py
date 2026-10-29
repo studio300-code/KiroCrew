@@ -95,7 +95,14 @@ from kiro_crew.whatsapp.jids import (
 )
 
 from kiro_crew.whatsapp.mirror import MirrorTap
-from kiro_crew.whatsapp.media import KIND_POLL, describe, musone_wake, unsupported_note, unwrap_message
+from kiro_crew.whatsapp.media import (
+    KIND_POLL,
+    KIND_VOICE,
+    describe,
+    musone_wake,
+    unsupported_note,
+    unwrap_message,
+)
 from kiro_crew.whatsapp.renderer import WHATSAPP_CHUNK_LIMIT
 
 logger = logging.getLogger(__name__)
@@ -329,6 +336,10 @@ class WhatsAppTransport(MessagingTransport):
         #: paths to files that do not survive the restart. Same keying and lifetime as the
         #: three tables above.
         self.pending_original: dict[int, tuple[str, int]] = {}
+        #: The speech-to-text result for a voice note INVOKING the agent, so the
+        #: reply can report what was heard before answering. Same keying and
+        #: lifetime as the side tables above.
+        self.pending_voice_transcript: dict[int, str] = {}
         client.on_message = self.receive
 
     # -- Tier-1 core ---------------------------------------------------
@@ -1018,6 +1029,8 @@ class WhatsAppTransport(MessagingTransport):
         elif desc.has_media:
             result = await ingest_media(self._client, inner, desc, message_id)
             temp_paths = list(result.temp_paths)
+            if desc.kind == KIND_VOICE and getattr(result, "voice_transcript", ""):
+                self.pending_voice_transcript[id(msg)] = result.voice_transcript
             msg.text = append_attachment_context(msg.text, result)
             # Populated because downstream readers gate on it (the shared
             # cancellation exemption among them), and a field that is always empty
@@ -1041,6 +1054,7 @@ class WhatsAppTransport(MessagingTransport):
             self.pending_operator.pop(id(msg), None)
             self.pending_message_id.pop(id(msg), None)
             self.pending_original.pop(id(msg), None)
+            self.pending_voice_transcript.pop(id(msg), None)
             # The shared ingest hands path ownership to the caller. Unlinked in a
             # worker, last, so a cancel arriving during the await cannot skip the
             # side-table pops above: TMPDIR is not guaranteed to be local disk.
@@ -1128,6 +1142,7 @@ class WhatsAppTransport(MessagingTransport):
         self.pending_message_id[id(msg)] = message_id
         self.pending_operator[id(msg)] = True
         self.pending_original[id(msg)] = (transcript, 0)
+        self.pending_voice_transcript[id(msg)] = transcript
         if is_group_jid(chat_id):
             self.pending_verdicts[id(msg)] = GroupVerdict(respond=True, may_steer=True)
         try:
@@ -1137,6 +1152,7 @@ class WhatsAppTransport(MessagingTransport):
             self.pending_operator.pop(id(msg), None)
             self.pending_message_id.pop(id(msg), None)
             self.pending_original.pop(id(msg), None)
+            self.pending_voice_transcript.pop(id(msg), None)
 
     # -- Configured outbound targets ----------------------------------------
 
