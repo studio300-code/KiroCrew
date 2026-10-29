@@ -19,10 +19,16 @@ from kiro_crew.config.paths import kiro_agents_dir
 from kiro_crew.dashboard.handlers._shared_skill_roots import _edition_skill_roots
 from kiro_crew.frontmatter import SKILL_LOADER, parse_frontmatter
 from kiro_crew.security import is_sensitive_path
+from kiro_crew.skill_runtime.catalog import _alias_matches
 from kiro_crew.skill_trust import is_project_trusted as _is_project_trusted
-from kiro_crew.skills import _matches_any, _with_canonical_globs
+from kiro_crew.skills import _matches_any, _with_canonical_globs, skills_dir
 
 logger = logging.getLogger("kiro_crew.dashboard.handlers._shared")
+
+
+def _scope_matches(skill_md: Path, globs: list[str]) -> bool:
+    """The loader's scope match, including an app skill listed under its flat link."""
+    return _matches_any(str(skill_md), globs) or _alias_matches(skill_md, globs, [skills_dir()])
 
 
 # ── Kiro-cli native skills (~/.kiro/skills/, <project>/.kiro/skills/) ──
@@ -150,7 +156,7 @@ def _agent_loads_skill(agent_json: dict[str, Any], agent_path: Path, skill_md: P
         for g in (_expand_resource_uri(res, agent_path),)
         if g
     ]
-    return _matches_any(str(skill_md), _with_canonical_globs(globs))
+    return _scope_matches(skill_md, _with_canonical_globs(globs))
 
 
 def _expand_agent_globs(
@@ -193,8 +199,7 @@ def _agents_loading_skill(
     Uses the runtime scope match, so a row listed under a symlinked ``$HOME``
     also matches a glob written against the resolved home path.
     """
-    target = str(skill_md)
-    return [name for name, globs in expanded_agents if _matches_any(target, globs)]
+    return [name for name, globs in expanded_agents if _scope_matches(skill_md, globs)]
 
 
 # The parsed-agents snapshot lives in ``agent_discovery.parsed_agent_specs``
