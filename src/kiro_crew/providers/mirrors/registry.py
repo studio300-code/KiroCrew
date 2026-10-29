@@ -36,6 +36,7 @@ from kiro_crew.acp_backends import (
     ACP_BACKEND_GOOSE,
     ACP_BACKEND_KAS,
     ACP_BACKEND_KIRO,
+    ACP_BACKEND_MUSE,
     ACP_BACKEND_OPENCODE,
     ACP_BACKEND_PI,
 )
@@ -44,6 +45,7 @@ from kiro_crew.providers.mirrors.claude_code import ClaudeCodeMirror
 from kiro_crew.providers.mirrors.codex import CodexMirror
 from kiro_crew.providers.mirrors.deepseek import DeepSeekMirror
 from kiro_crew.providers.mirrors.goose import GooseMirror
+from kiro_crew.providers.mirrors.muse import MuseMirror
 from kiro_crew.providers.mirrors.opencode import OpenCodeMirror
 
 
@@ -222,6 +224,7 @@ MIRRORS: dict[str, type[AgentConfigMirror]] = {
     ACP_BACKEND_OPENCODE: OpenCodeMirror,
     ACP_BACKEND_GOOSE: GooseMirror,
     ACP_BACKEND_DEEPSEEK: DeepSeekMirror,
+    ACP_BACKEND_MUSE: MuseMirror,
 }
 
 #: Every backend this build can spell, and how its MCP surface is reached.
@@ -375,6 +378,17 @@ PROJECTIONS: dict[str, McpProjection] = {
         "as failed (ACP_BACKENDS_PRUNE_UNSTARTABLE_MCP)",
         # No per-call deny path is verified for this harness, so a narrowed server is
         # withheld whole, the direction that cannot leave a switched-off tool reachable.
+        per_tool_deny=PerToolDeny.WHOLE_SERVER,
+    ),
+    ACP_BACKEND_MUSE: McpProjection(
+        kind=ProjectionKind.MIRROR,
+        reason="muse.py -- the session/new mcpServers array. muse-acp forwards it to "
+        "muse serve through the host's sessionMcp grant (Muse 1.3.0+), and it drops "
+        "an entry it cannot forward rather than failing the session. Crew's own "
+        "control plane travels here because Muse reads no agent file of Crew's",
+        # The ACP element has no per-tool disable slot and Muse's permission frames
+        # carry no stable server/tool identity Crew can match, so a narrowed server
+        # is withheld whole.
         per_tool_deny=PerToolDeny.WHOLE_SERVER,
     ),
 }

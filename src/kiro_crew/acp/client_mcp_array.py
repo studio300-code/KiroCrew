@@ -976,6 +976,19 @@ def _deepseek_session_mcp_servers(self: AcpClient) -> list:
     return self._session_mcp_servers()
 
 
+def _muse_session_mcp_servers(self: AcpClient) -> list:
+    """MCP server array passed to a Muse ``session/new`` / ``session/load``.
+
+    ``muse-acp`` reads no ``~/.kiro/agents/<name>.json`` and forwards the ACP
+    ``mcpServers`` array to ``muse serve`` through its ``sessionMcp`` grant, so
+    this array is the only channel Crew has onto the session's MCP surface --
+    Crew's own control plane included. The mirror is in
+    :mod:`kiro_crew.providers.mirrors.muse`; this accessor is in-memory, like its
+    siblings, and the spawn path warms ``_session_mcp_cache`` off the loop.
+    """
+    return self._session_mcp_servers()
+
+
 def _pi_session_mcp_servers(self: AcpClient) -> list:
     """MCP server array passed to a pi ``session/new`` / ``session/load``.
 

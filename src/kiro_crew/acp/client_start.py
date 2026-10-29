@@ -607,6 +607,7 @@ async def _new_session_following_substitution(self: AcpClient) -> dict:
             *(self._opencode_session_mcp_servers() if self._is_opencode else []),
             *(self._goose_session_mcp_servers() if self._is_goose else []),
             *(self._deepseek_session_mcp_servers() if self._is_deepseek else []),
+            *(self._muse_session_mcp_servers() if self._is_muse else []),
             *(self._pi_session_mcp_servers() if self._is_pi else []),
             *(await asyncio.to_thread(self._pooled_mcp_servers)),
         ],
@@ -685,6 +686,7 @@ async def _new_session_following_substitution(self: AcpClient) -> dict:
             *(self._opencode_session_mcp_servers() if self._is_opencode else []),
             *(self._goose_session_mcp_servers() if self._is_goose else []),
             *(self._deepseek_session_mcp_servers() if self._is_deepseek else []),
+            *(self._muse_session_mcp_servers() if self._is_muse else []),
             *(self._pi_session_mcp_servers() if self._is_pi else []),
             *(await asyncio.to_thread(self._pooled_mcp_servers)),
         ]
@@ -899,6 +901,7 @@ async def _initialize_session(self: AcpClient) -> None:
                         *(self._opencode_session_mcp_servers() if self._is_opencode else []),
                         *(self._goose_session_mcp_servers() if self._is_goose else []),
                         *(self._deepseek_session_mcp_servers() if self._is_deepseek else []),
+                        *(self._muse_session_mcp_servers() if self._is_muse else []),
                         *(self._pi_session_mcp_servers() if self._is_pi else []),
                         *(await asyncio.to_thread(self._pooled_mcp_servers)),
                     ],

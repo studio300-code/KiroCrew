@@ -325,6 +325,7 @@ MAIN_ROUTING = {
     "kas": ("agent_spec", ("", ""), False),
     "claude": ("seeded_settings", ("", ""), False),
     "codex": ("session_config", ("mode", "read-only"), True),
+    "muse": ("session_config", ("approval_mode", "promptUnmatched"), True),
     "nope": ("unverified", ("", ""), False),
     "kiro": ("unverified", ("", ""), False),
 }
@@ -365,6 +366,7 @@ def test_known_membership_is_unchanged_by_the_move() -> None:
         "deepseek",
         "goose",
         "kas",
+        "muse",
         "opencode",
         "pi",
     ]
@@ -381,6 +383,7 @@ EXPECTED_CAPABILITIES = {
     "kas": (PROVIDER_ACP, MODEL_NAMESPACE_ACP, False, True, False, False),
     "claude": (PROVIDER_CLAUDE_CODE, "claude_code", True, True, True, True),
     "codex": (PROVIDER_ACP, "codex", True, True, True, False),
+    "muse": (PROVIDER_ACP, "muse", True, True, False, False),
     "nope": (PROVIDER_ACP, MODEL_NAMESPACE_ACP, False, False, False, False),
 }
 
@@ -761,6 +764,7 @@ def test_honor_zero_tool_ban_membership_matches_the_rule() -> None:
         sdk_backends.ACP_BACKEND_GOOSE,
         sdk_backends.ACP_BACKEND_DEEPSEEK,
         sdk_backends.ACP_BACKEND_PI,
+        sdk_backends.ACP_BACKEND_MUSE,
     }
 
 
@@ -786,6 +790,7 @@ def test_the_knowledge_pool_client_takes_the_default_backend() -> None:
         ACP_BACKEND_DEEPSEEK,
         ACP_BACKEND_GOOSE,
         ACP_BACKEND_KIRO,
+        ACP_BACKEND_MUSE,
         ACP_BACKEND_OPENCODE,
         ACP_BACKEND_PI,
         ACP_BACKENDS_ACP_CLIENT_SPAWNABLE,
@@ -811,6 +816,7 @@ def test_the_knowledge_pool_client_takes_the_default_backend() -> None:
         ACP_BACKEND_GOOSE,
         ACP_BACKEND_DEEPSEEK,
         ACP_BACKEND_PI,
+        ACP_BACKEND_MUSE,
     }, (
         "the set of backends this pool trusts changed -- decide the effort "
         "channel for whichever member is new or missing deliberately, then "

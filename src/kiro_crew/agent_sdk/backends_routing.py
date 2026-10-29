@@ -28,6 +28,7 @@ from kiro_crew.agent_sdk.backends import (
     ACP_BACKEND_GOOSE,
     ACP_BACKEND_KAS,
     ACP_BACKEND_KIRO,
+    ACP_BACKEND_MUSE,
     ACP_BACKEND_OPENCODE,
     ACP_BACKEND_PI,
 )
@@ -382,6 +383,13 @@ ACP_BACKEND_ROUTING: dict = {
     # extension Crew composes, which is this member, and the frame corpus carries the
     # live capture (``test/fixtures/acp_frames/deepseek/permission-request-live``).
     ACP_BACKEND_DEEPSEEK: Routing.VERIFIED_GATE_EXTENSION,
+    # Muse Code asks through ``muse-acp``'s approval flow, which the adapter maps
+    # onto ``session/request_permission``. The adapter advertises the host's four
+    # approval modes as the ``approval_mode`` config option; ``promptUnmatched``
+    # is the one that sends every un-pre-approved tool call to the client, and the
+    # session refuses to start unless that exact value is advertised and applied
+    # before the first prompt.
+    ACP_BACKEND_MUSE: Routing.SESSION_CONFIG,
 }
 
 
@@ -399,6 +407,10 @@ ACP_BACKEND_ROUTING: dict = {
 #: token store.
 ACP_BACKEND_PERMISSION_CONFIG: dict = {
     ACP_BACKEND_CODEX: ("mode", "read-only"),
+    # ``muse-acp`` lists the host's four approval modes (allowAll, promptUnmatched,
+    # onRequest, denyUnmatched); promptUnmatched is the one that prompts for every
+    # tool call not already allowed by a persistent Muse rule.
+    ACP_BACKEND_MUSE: ("approval_mode", "promptUnmatched"),
 }
 
 
