@@ -255,6 +255,7 @@ _BROWSER_PLAUSIBLE_OWNER_NAMES = frozenset(
         "kiro-cli",
         "kirocrew",
         "launcher",
+        "muse-acp",
         "node",
         "opencode",
         "playwright-cli",
