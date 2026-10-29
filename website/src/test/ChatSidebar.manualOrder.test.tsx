@@ -779,3 +779,33 @@ describe('the Manual sort', () => {
     expect(order(['a', 'b'])).toEqual(['b', 'a'])
   })
 })
+
+describe('with "Group by kind" on', () => {
+  // a and c are normal chats, b a Crew Mode chat: the list draws b | a, c.
+  const MIXED_KINDS = [
+    slot('a', '2026-03-01T00:00:00Z'),
+    slot('b', '2026-02-01T00:00:00Z', { crew_mode_root: true } as Partial<ChatSlot>),
+    slot('c', '2026-01-01T00:00:00Z'),
+  ]
+  beforeEach(() => { localStorage.setItem('mc-session-group-by-kind', '1') })
+
+  it('Alt+ArrowDown moves past the next row the person sees, inside the section', async () => {
+    renderSidebar(MIXED_KINDS, 'manual')
+    expect(order(['a', 'b', 'c'])).toEqual(['b', 'a', 'c'])
+    const row = screen.getByText('a title').closest('[data-session-row]') as HTMLElement
+    row.focus()
+    fireEvent.keyDown(row, { key: 'ArrowDown', altKey: true })
+    await waitFor(() => expect(manualWrites()).toEqual([{ op: 'seed', keys: ['b', 'c', 'a'] }]))
+  })
+
+  it('a move onto a row of another section writes nothing, by keyboard or by drop', async () => {
+    renderSidebar(MIXED_KINDS, 'manual')
+    const row = screen.getByText('b title').closest('[data-session-row]') as HTMLElement
+    row.focus()
+    fireEvent.keyDown(row, { key: 'ArrowDown', altKey: true })
+    drop('b', onRow('c'))
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
+    expect(manualWrites()).toEqual([])
+    expect(sortWrites()).toEqual([])
+  })
+})

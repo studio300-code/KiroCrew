@@ -10,6 +10,10 @@ import type { TagColumn } from '../../types'
 /** Date-segment header between rows. Marks the geometry a row's own rect cannot
  *  see, so the hover hold can anchor on a pixel offset headers contribute to. */
 const DATE_HEADER_SELECTOR = '[data-date-header]'
+/** A "Group by kind" section header (./kindSections). The hold never seats a row
+ *  across one (see `sectionSeat`), so only the date headers inside the row's own
+ *  section enter its anchor. */
+const KIND_HEADER_SELECTOR = '[data-kind-section]'
 
 /** Marks a dormant-collapse region, so the hold can tell which side of the
  *  expander the pointer found a row on. */
@@ -63,7 +67,7 @@ export function useHoverHold({ isPinned }: { isPinned: ((s: Slot) => boolean) | 
     bumpHold()
   }, [])
 
-  const holdHovered = (list: Slot[], scope: string, container: string, segmentOf?: (s: Slot) => string): Slot[] => {
+  const holdHovered = (list: Slot[], scope: string, container: string, segmentOf?: (s: Slot) => string, sectionRank?: (s: Slot) => number): Slot[] => {
     const pin = hoverPinRef.current
     // Container, not just scope: sibling containers share a nav lane, so a scope-only
     // match would seat the row against a frame spanning rows this list never renders.
@@ -75,11 +79,16 @@ export function useHoverHold({ isPinned }: { isPinned: ((s: Slot) => boolean) | 
     // -1 is the normal case for every lane that does not contain the hovered
     // row, including a sibling list sharing this scope, so it is not an error.
     if (at < 0) return list
-    const seat = heldSeat(pin, list, sessionRowIdentity, segmentOf)
+    const seat = sectionRank ? null : heldSeat(pin, list, sessionRowIdentity, segmentOf)
     const rest = list.filter(s => sessionRowIdentity(s) !== pin.key)
     // Inside its own section only: across the pinned boundary the lane would
     // read pinned, unpinned, pinned, and draw the pinned divider twice.
-    const held = seat == null || !isPinned ? seat : seatInSection(seat, rest, isPinned(list[at]), isPinned)
+    // "Group by kind" sections (the rank orders `list`, pinned first) are seated
+    // inside the held row's own section, measured from that section's top, so no
+    // section header draws twice and none skews the pixel anchor.
+    const held = sectionRank
+      ? sectionSeat(pin, list, sessionRowIdentity, sectionRank, segmentOf)
+      : seat == null || !isPinned ? seat : seatInSection(seat, rest, isPinned(list[at]), isPinned)
     if (held == null || held === at) { heldDisplacedRef.current = false; return list }
     heldDisplacedRef.current = true
     // Clamp: the list can shrink under the hold (a session closes, a filter
@@ -90,8 +99,8 @@ export function useHoverHold({ isPinned }: { isPinned: ((s: Slot) => boolean) | 
 
   // The ONE place a lane's hold identity is named: holdHovered's scope and the
   // navScope the rows stamp must match, and so must the container, so all come from here.
-  const heldLane = (list: Slot[], navScope: string, container: string, segmentOf?: (s: Slot) => string) =>
-    ({ rows: holdHovered(list, navScope, container, segmentOf), navScope, container })
+  const heldLane = (list: Slot[], navScope: string, container: string, segmentOf?: (s: Slot) => string, sectionRank?: (s: Slot) => number) =>
+    ({ rows: holdHovered(list, navScope, container, segmentOf, sectionRank), navScope, container })
 
   // Delegated on the sidebar root so the rows stay memo-clean (a per-row
   // handler prop would be a new identity every render). pointerover fires on
@@ -125,16 +134,20 @@ export function useHoverHold({ isPinned }: { isPinned: ((s: Slot) => boolean) | 
     // menu wrappers, so climb to the nearest ancestor that actually holds them.
     let headerEls: HTMLElement[] = []
     for (let el = row.parentElement, hop = 0; el && hop < 6 && headerEls.length === 0; el = el.parentElement, hop++) {
-      headerEls = Array.from(el.querySelectorAll<HTMLElement>(DATE_HEADER_SELECTOR))
+      headerEls = Array.from(el.querySelectorAll<HTMLElement>(`${DATE_HEADER_SELECTOR}, ${KIND_HEADER_SELECTOR}`))
     }
     let headerPxAbove = 0
+    let sectionHeaderPxAbove = 0
     let headerH = 0
+    // Document order, so a section header above the row restarts the in-section sum.
     for (const h of headerEls) {
+      const above = !!(h.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING)
+      if (h.matches(KIND_HEADER_SELECTOR)) { if (above) sectionHeaderPxAbove = 0; continue }
       const hh = h.getBoundingClientRect().height
       if (hh > headerH) headerH = hh
-      if (h.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING) headerPxAbove += hh
+      if (above) { headerPxAbove += hh; sectionHeaderPxAbove += hh }
     }
-    hoverPinRef.current = { key, scope, container, seenOrder, heights, headerPxAbove, headerH, staleSide: !!row.closest(STALE_REGION_SELECTOR) }
+    hoverPinRef.current = { key, scope, container, seenOrder, heights, headerPxAbove, sectionHeaderPxAbove, headerH, staleSide: !!row.closest(STALE_REGION_SELECTOR) }
   }, [releaseHoverPin])
 
   // Two releases pointerleave cannot cover: the window losing focus over a row, and
@@ -167,4 +180,42 @@ export function useHoverPinLiveness({ hoverPinRef, releaseHoverPin, filteredSlot
       && el.closest('[inert]') === null)
     if (!live) releaseHoverPin()
   }, [filteredSlots, boardLaneActive, flatLaneActive, conductorLaneActive, orderedColumns, releaseHoverPin, hoverPinRef])
+}
+
+/**
+ * The held row's seat in `list` (held row removed) under "Group by kind", or null
+ * when the pin says nothing about this list.
+ *
+ * The row may move only inside its own section, the run of rows sharing its
+ * `rankOf`. So the pixel walk (`heldSeat`) runs over that section alone, anchored
+ * on the captured rows of the same section and the date headers between the
+ * section's top and the row (`sectionHeaderPxAbove`). Section headers then never
+ * enter either side of the comparison, and the result is offset by where the
+ * section starts in `list`.
+ */
+export function sectionSeat(
+  pin: HoverPin,
+  list: readonly Slot[],
+  idOf: (s: Slot) => string,
+  rankOf: (s: Slot) => number,
+  segmentOf?: (s: Slot) => string,
+): number | null {
+  const heldRow = list.find(s => idOf(s) === pin.key)
+  if (!heldRow) return null
+  const rank = rankOf(heldRow)
+  const rankById = new Map(list.map(s => [idOf(s), rankOf(s)] as const))
+  const section = list.filter(s => rankOf(s) === rank)
+  const sectionPin: HoverPin = {
+    ...pin,
+    // A captured row no longer in the list keeps its place in the anchor, as in
+    // `heldSeat`; only rows now known to sit in another section leave it.
+    seenOrder: pin.seenOrder.filter(k => (rankById.get(k) ?? rank) === rank),
+    headerPxAbove: pin.sectionHeaderPxAbove ?? pin.headerPxAbove,
+  }
+  const local = heldSeat(sectionPin, section, idOf, segmentOf)
+  if (local == null) return null
+  const rest = list.filter(s => idOf(s) !== pin.key)
+  let start = 0
+  while (start < rest.length && rankOf(rest[start]) < rank) start++
+  return start + local
 }

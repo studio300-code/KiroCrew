@@ -89,6 +89,8 @@ import { renderFolderModal } from './chat-sidebar/folderModal'
 import { renderSessionCleanupPanel, useSessionCleanup } from './chat-sidebar/sessionCleanup'
 import { renderBulkModelPanel, useBulkModelSwitch } from './chat-sidebar/bulkModelSwitch'
 import BroadcastPanel from './chat-sidebar/BroadcastPanel'
+import { groupDrawnOrder, makeKindOf, movesAcrossSections, type KindSections } from './chat-sidebar/kindSections'
+import type { Slot } from './chat-sidebar/types'
 import type { MemorySourceRow } from '../lib/agentMemorySource'
 
 /** Stable empty group list for the board, which groups nothing. */
@@ -279,7 +281,7 @@ function ChatSidebar({
     activeFilters, filtersPaused, setAllFiltersPaused, clearAllFilters,
     filterHiddenFolders, setFilterHiddenFolders, toggleFolderFilter, unhideFolderChain,
     showAllFolders, filterTagIds, toggleTagFilter, clearTagFilter, foldersShelved, setFoldersShelved,
-    toggleFoldersShelved, toggleFilter, disableFilter, enableFilter,
+    toggleFoldersShelved, toggleFilter, disableFilter, enableFilter, groupByKind, toggleGroupByKind,
     hiddenFilters, toggleHideFilter, clearHiddenFilters,
     filterModelKeys, filterModelsExcluded, toggleModelFilter, setModelFilterExcluded, clearModelFilter,
   } = useSessionFilterState()
@@ -463,6 +465,12 @@ function ChatSidebar({
   }, previousRowsRef.current)
   previousRowsRef.current = sidebarRows
   const { listNarrowed, pinnedExemptNarrowing, revealBlockingFilters, laneOrder, isRowFolderHidden, isRowStatusHidden } = sidebarRows
+  // "Group by kind" (the filter menu's view option). Off while a search ranks the
+  // list: the ranking is the answer, and splitting it would bury the best match.
+  const kindSections = useMemo<KindSections | null>(
+    () => (groupByKind && !searchRanked ? { kindOf: makeKindOf(allLiveSlots as unknown as Slot[]) } : null),
+    [groupByKind, searchRanked, allLiveSlots],
+  )
   // Caption shown at the top of the pinned band only when a filter that exempts
   // pinned rows narrows the list (the row model decides which ones) and the search
   // box is empty. Passed into scope so createListLanes can render it.
@@ -688,10 +696,27 @@ function ChatSidebar({
   const { forkError: duplicateError, clearForkError: clearDuplicateError } = sessionActions
   // Which sessions are currently open in a popped-out window (shared singleton).
   const { poppedOut } = useChatPopouts()
+  // While "Group by kind" splits the list a manual move stays inside its section:
+  // the drawn order is grouped (so Alt+Arrow picks the row the person sees next),
+  // and a drop or Alt+Arrow onto a row of another kind does nothing, since the
+  // row would land in an order its section never draws (./chat-sidebar/kindSections).
+  // The kind reader is read through a ref, so toggling the option does not give
+  // the callback a new identity. Not on the tag board, which the grouping skips.
+  const kindOrderOf = kindSections && !boardLaneActive ? kindSections.kindOf : null
+  const kindOrderOfRef = useRef(kindOrderOf)
+  kindOrderOfRef.current = kindOrderOf
+  const reorderManualInSection = useCallback((activeKey: string, overKey: string) => {
+    if (movesAcrossSections(activeKey, overKey, localSlots, kindOrderOfRef.current)) return
+    reorderManual(activeKey, overKey)
+  }, [reorderManual, localSlots])
+  const drawnOrderShown = useMemo(
+    () => groupDrawnOrder(drawnOrder, localSlots, kindOrderOf),
+    [drawnOrder, kindOrderOf, localSlots],
+  )
   const {
     handleSidebarDragStart, reportDndActive, handleSidebarDragEnd, handleSidebarDragCancel,
     handleSidebarDragOver,
-  } = useSidebarDragHandlers({ releaseHoverPin, setDragFrozen, hideFolderReorderHint, setActiveDrag, activeDrag, dragFrozen, folderReorderable, folderSortRead, showFolderReorderHint, moveFolderByDrag, reorderFolders, searchRanked, pinned, reorderPinned, reorderManual, localSlots, activeSlot, onDropSessionRef, moveByDrag, folders, boardFolderCollapsed, updateFolderMutation, clearBoardCollapse })
+  } = useSidebarDragHandlers({ releaseHoverPin, setDragFrozen, hideFolderReorderHint, setActiveDrag, activeDrag, dragFrozen, folderReorderable, folderSortRead, showFolderReorderHint, moveFolderByDrag, reorderFolders, searchRanked, pinned, reorderPinned, reorderManual: reorderManualInSection, localSlots, activeSlot, onDropSessionRef, moveByDrag, folders, boardFolderCollapsed, updateFolderMutation, clearBoardCollapse })
   const {
     folderCreateError, setFolderCreateError, createChatInFolder, refuseCreateOffline,
   } = useFolderChatCreate({ folders, mode, dispatch, dropSlotMutation, onOpenSlotInNewTab, onSelectSlot, updateFolderMutation, clearBoardCollapse, connected, setFolderOfflineNotice })
@@ -709,7 +734,7 @@ function ChatSidebar({
   const {
     startsAutomaticSection, reorderPinnedByKeyboard,
   } = usePinnedKeyboardReorder({ searchRanked, isPinned: sidebarRows.isPinned, pinnedOrder, slotFolders, reorderPinned })
-  const reorderManualByKeyboard = useManualKeyboardReorder({ searchRanked, drawnOrder, slotFolders, reorderManual })
+  const reorderManualByKeyboard = useManualKeyboardReorder({ searchRanked, drawnOrder: drawnOrderShown, slotFolders, reorderManual: reorderManualInSection })
 
   // A row whose session belongs to another page (a crew member's own DM thread,
   // admitted to the conductor lane as a creator anchor) opens where it lives. Read
@@ -820,7 +845,7 @@ function ChatSidebar({
     folderCompare, folderConductorPin, folderCreateError, folderDragWithheld, folderEditInputRef, folderCancelEscapeRef,
     folderFilterRows, folderNameMatchIds, folderReorderable, folderReorderHint, folderReorderHintRef,
     folderRowsDrawn, folders, foldersError, foldersFailed, folderSortMode, folderSortMut, folderSortRead,
-    foldersShelved, folderSubtrees, foldersWithActiveSubtree, handleSidebarDragCancel, handleSidebarDragEnd,
+    foldersShelved, groupByKind, kindSections, toggleGroupByKind, folderSubtrees, foldersWithActiveSubtree, handleSidebarDragCancel, handleSidebarDragEnd,
     handleSidebarDragOver, handleSidebarDragStart, hasRemoteExecutedRow, heldDisplacedRef, heldLane,
     hiddenByContainer, hiddenFilters, hiddenFolderCount, hideEmptyFolderBody, history, historyDragging,
     historyFilter, historyHasMore, historyHeight, historyOpen, historyResize, historySearchResults,
