@@ -613,6 +613,22 @@ async def apply_approval_mode(
         except Exception:
             logger.warning("SEL audit failed for normal mode activation", exc_info=True)
 
+    # The sessions this slot created follow its new mode, capped at it.
+    inherited_keys: set[str] = set()
+    # Only from the slot the branch above wrote: one closed or replaced during its
+    # awaits holds a posture this request never set.
+    if (
+        slot is not None
+        and state._slots.get(slot.key) is slot
+        and mode in ("trust", "trust_reads", "normal")
+    ):
+        inherited_keys = _apply_inherited_postures(
+            state,
+            slot,
+            may_raise=not request_app and not cron_creator,
+            audit_caller=audit_caller,
+        )
+
     # If any slot has a pending approval and mode is trust/yolo, auto-approve it
     if mode in ("trust", "yolo"):
         # A slot-scoped ``trust`` grants auto-approval to ONE session only (the
@@ -626,37 +642,13 @@ async def apply_approval_mode(
         # narrows.
         scoped = mode == "trust" and slot is not None
         _target_key = effective_session_key(slot) if slot is not None and scoped else None
+        # A creator's workers that just inherited the trust (``inherited_keys``) are
+        # in scope too: the person trusted the conductor that dispatched them.
+        _in_scope = {_target_key, *inherited_keys}
         for _slot in state._slots.values():
-            if scoped and effective_session_key(_slot) != _target_key:
+            if scoped and effective_session_key(_slot) not in _in_scope:
                 continue
-            _elicitations = _pending_elicitation_ids(_slot)
-            for aid, fut in list(_slot._approval_futures.items()):
-                if aid in _elicitations:
-                    # A server's own question to the person: a trust tier is
-                    # not an answer to it, and the card stays open.
-                    continue
-                if not fut.done():
-                    fut.set_result("approved")
-                    # Persist resolved state into the permission message. The
-                    # periodic flush skips non-dirty slots, so the mark must
-                    # flag the slot or the write can be lost on restart.
-                    if _mark_permission_resolved(_slot.messages, aid, mode):
-                        _slot._dirty = True
-                    # ``slot`` keys the frame for the slot-scoped WS gate — an
-                    # app token cannot receive its own resolution without it.
-                    state.broadcast_ws(
-                        "approval_resolved",
-                        {"id": aid, "approved": True, "slot": _slot.key},
-                    )
-                    try:
-                        sel().log_api_access(
-                            caller=audit_caller(f"dashboard:{_slot.key}"),
-                            operation=f"tool_approval:bulk_{mode}",
-                            outcome="approved",
-                            resources=aid,
-                        )
-                    except Exception:
-                        logger.warning("SEL audit failed for bulk approval %s", aid, exc_info=True)
+            _sweep_pending_approvals(state, _slot, mode, audit_caller)
         # Background (cron/subagent/taskrunner) and channel approvals are NOT
         # slot-scoped, so a slot-scoped ``trust`` must leave them pending — it
         # asked for auto-approval on one session and cannot answer for unrelated
@@ -714,6 +706,87 @@ async def apply_approval_mode(
 
     state.push_slots_update()
     return web.json_response({"ok": True, "mode": mode})
+
+
+def _sweep_pending_approvals(
+    state: DashboardState, slot: _ChatSlot, mode: str, audit_caller: Callable[[str], str]
+) -> None:
+    """Approve *slot*'s pending tool prompts after a ``trust`` / ``yolo`` grant."""
+    _elicitations = _pending_elicitation_ids(slot)
+    for aid, fut in list(slot._approval_futures.items()):
+        if aid in _elicitations:
+            # A server's own question to the person: a trust tier is
+            # not an answer to it, and the card stays open.
+            continue
+        if not fut.done():
+            fut.set_result("approved")
+            # Persist resolved state into the permission message. The
+            # periodic flush skips non-dirty slots, so the mark must
+            # flag the slot or the write can be lost on restart.
+            if _mark_permission_resolved(slot.messages, aid, mode):
+                slot._dirty = True
+            # ``slot`` keys the frame for the slot-scoped WS gate.
+            state.broadcast_ws(
+                "approval_resolved",
+                {"id": aid, "approved": True, "slot": slot.key},
+            )
+            try:
+                sel().log_api_access(
+                    caller=audit_caller(f"dashboard:{slot.key}"),
+                    operation=f"tool_approval:bulk_{mode}",
+                    outcome="approved",
+                    resources=aid,
+                )
+            except Exception:
+                logger.warning("SEL audit failed for bulk approval %s", aid, exc_info=True)
+
+
+def _apply_inherited_postures(
+    state: DashboardState,
+    slot: _ChatSlot,
+    *,
+    may_raise: bool,
+    audit_caller: Callable[[str], str],
+) -> set[str]:
+    """Hand *slot*'s new mode to the sessions it created; return the keys now trusted.
+
+    *slot* just had its own mode set, which is an explicit choice, so it stops
+    following its own creator. Its inheriting descendants then take its carried
+    posture (``approval_inheritance``): never more than it carries, never across a
+    worker whose own mode a person set, and a raise only along a gateway-authored
+    creation edge and only for a caller allowed to raise (*may_raise*). Written to
+    every slot sharing a descendant's session, as the branches above write the target.
+    """
+    from kiro_crew.dashboard.approval_inheritance import plan_descendant_postures
+
+    target_key = effective_session_key(slot)
+    for _sharing in state._slots.values():
+        if effective_session_key(_sharing) == target_key:
+            _sharing._posture_inherited = False
+    plan = plan_descendant_postures(list(state._slots.values()), slot, may_raise=may_raise)
+    trusted: set[str] = set()
+    for change in plan:
+        key = effective_session_key(change.slot)
+        for _sharing in state._slots.values():
+            if effective_session_key(_sharing) != key:
+                continue
+            _sharing._trust = change.posture == "trust"
+            _sharing._trust_card_scoped = False
+            _sharing._trust_reads = change.posture == "trust_reads"
+            _sharing._posture_inherited = True
+        if change.posture == "trust":
+            trusted.add(key)
+    if plan:
+        try:
+            sel().log_api_access(
+                caller=audit_caller("dashboard:mode"),
+                operation="mode_change:inherited",
+                outcome="changed",
+                resources=",".join(f"{c.slot.key}={c.posture}" for c in plan) + f"|from:{slot.key}",
+            )
+        except Exception:
+            logger.warning("SEL audit failed for inherited mode change", exc_info=True)
+    return trusted
 
 
 def _get_pattern_from_pending(slot: _ChatSlot, request_id: str, field: str) -> str:
@@ -992,6 +1065,8 @@ async def api_chat_slot_approve(request: web.Request) -> web.Response:
             return _deny_trust_pattern(name, request_id, original_action, "pattern_underivable")
         else:
             owner._trust = True
+            # A person chose this slot's mode: its creator's changes stop reaching it.
+            owner._posture_inherited = False
             # A conductor card's "Trust this worker" trusts THAT worker only; a
             # trust pressed in the slot's own pane keeps the usual inheritance.
             owner._trust_card_scoped = bool(delegated)
