@@ -187,7 +187,7 @@ describe('CrewChatWindow', () => {
   it('offers voice input in the composer', async () => {
     detail = { running: false, messages: [{ role: 'user', content: 'hi', ts: 't1' }] }
     renderWindow()
-    expect(await screen.findByRole('button', { name: 'Voice input' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: /^Voice input/ })).toBeInTheDocument()
   })
 
   it('keeps Stop reachable while an approval is pending', async () => {

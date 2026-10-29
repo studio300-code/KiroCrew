@@ -112,7 +112,7 @@ async function renderPane() {
   return store
 }
 
-const mic = () => screen.getByRole('button', { name: 'Voice input' })
+const mic = () => screen.getByRole('button', { name: /^Voice input/ })
 
 beforeEach(() => { localStorage.clear(); engine.start.mockClear() })
 

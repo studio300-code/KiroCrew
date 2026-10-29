@@ -73,7 +73,7 @@ function Providers({ children }: { children: ReactNode }) {
 }
 
 const input = { value: '', onChange: () => {}, onSend: () => {} }
-const mic = () => screen.queryByRole('button', { name: 'Voice input' })
+const mic = () => screen.queryByRole('button', { name: /^Voice input/ })
 
 beforeEach(() => { engine.start.mockClear() })
 

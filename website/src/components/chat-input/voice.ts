@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react'
 import { useDictationPanelUsable } from '../VoiceDictationPanel'
 import { useTouchPushToTalk } from '../../hooks/useTouchPushToTalk'
+import { usePttKeyHint } from '../../hooks/usePttKeyHint'
 import { useAppSelector } from '../../store'
 import { safeSetItem } from '../../utils/safeStorage'
 import { isTouchDevice } from '../../utils/isTouchDevice'
@@ -403,6 +404,7 @@ export function useHoldToTalk({ onVoiceStart, onVoiceStop, onVoiceCancel, voiceC
   // job the click actually performs. Reading `voiceHoldMode` first was what let the
   // two diverge — and a transcription elsewhere must not relabel a control whose
   // only job here is handing the keyboard back.
+  const pttKey = usePttKeyHint()
   const micLabel = micIsModeSwitch
     ? voiceHoldMode
       ? i18nT('components.chatInput.switch_to_keyboard')
@@ -420,7 +422,14 @@ export function useHoldToTalk({ onVoiceStart, onVoiceStop, onVoiceCancel, voiceC
         ? voiceSubmitOnRelease
           ? i18nT('components.chatInput.stop_and_send')
           : i18nT('components.chatInput.stop_recording')
-        : i18nT('components.chatInput.voice_input')
+        // Idle, it names the push-to-talk key too: the key does the same job,
+        // and nothing else in the composer says so.
+        : pttKey
+          ? i18nT('components.chatInput.voice_input_with_key', { name: pttKey.name })
+          : i18nT('components.chatInput.voice_input')
+  // The key starts and stops the same recording, so it is announced whenever
+  // the mic records. As a mode switch the mic records nothing, so it is not.
+  const micKeyShortcuts = !micIsModeSwitch && pttKey ? pttKey.ariaKeyshortcuts : undefined
   /**
    * What the hold bar says, which must describe what the NEXT press or release
    * ACTUALLY does. Two of these were wrong for the same reason — the WeChat
@@ -482,7 +491,7 @@ export function useHoldToTalk({ onVoiceStart, onVoiceStop, onVoiceCancel, voiceC
 
   return {
     transcribeInFlight, transcribingIsHonest, micHeldElsewhere, micBlocked, micOwnerTitle, micHeldElsewhereLabel,
-    setHoldTarget, touchPtt, voiceHoldMode, micIsModeSwitch, voiceSettling, textareaParked, toggleVoiceMode, micLabel, holdBarLabel,
+    setHoldTarget, touchPtt, voiceHoldMode, micIsModeSwitch, voiceSettling, textareaParked, toggleVoiceMode, micLabel, micKeyShortcuts, holdBarLabel,
     voiceModePlaceholder,
   }
 }
