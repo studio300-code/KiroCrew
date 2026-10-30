@@ -52,6 +52,15 @@ image.
   built-in whisper.cpp path; no external ASUS transcriber was needed.
 - AppArmor profile `kirocrew-container` loaded on the ASUS; without it the
   OpenCode harness correctly refuses to run unsandboxed.
+- Self-sufficiency: `wa.db`, `media/`, the WhatsApp session, config, skills,
+  OpenCode state and the STT model all live in the `kirocrew-home` volume.
+  Restart/update keeps them; `compose down -v` deletes them. The archive is the
+  deployment own new archive, not a copy of the ASUS one.
+- The image bundles a generic `whatsapp` archive skill through
+  `skills.extra_paths`; `wa_archive.py chats` on a fresh volume says "archive is
+  empty: no chats yet" instead of a traceback.
+- `whatsapp-pair.sh` accepts the phone number as an argument or from
+  `WHATSAPP_PAIR_PHONE` in `.env`; it prints the code and sends nothing.
 
 ## Constraints
 
