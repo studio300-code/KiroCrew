@@ -68,7 +68,7 @@ _STREAMING_PROVIDERS = (PROVIDER_LOCAL, "apple", "transcribe")
 #: up with live partials; orukeet is markedly better on Italian technical speech
 #: and only needs to run once, when the speaker stops. A missing script or a
 #: failed run falls back to the whisper text, never fails the dictation.
-_ORUKEET_TRANSCRIBER = Path("/home/marco/.config/opencode/scripts/transcriber.sh")
+_ORUKEET_TRANSCRIBER = Path(os.environ.get("KIROCREW_ORUKEET_TRANSCRIBER", ""))
 
 def _live_preview_enabled() -> bool:
     """Whether live partials are forwarded to the browser.
