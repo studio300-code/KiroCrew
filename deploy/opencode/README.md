@@ -23,8 +23,7 @@ document/attachment fixes are included.
 cd deploy/opencode
 cp .env.example .env
 # edit .env: OPENROUTER_API_KEY, TELEGRAM_BOT_TOKEN, ...
-sudo scripts/install-host.sh        # one-time AppArmor profile for the inner sandbox
-docker compose up -d --build
+scripts/up.sh --build                # installs the one-time AppArmor profile if needed
 docker compose exec kirocrew kirocrew token --ttl 2h
 ```
 
@@ -49,9 +48,11 @@ default AppArmor profile blocks the mount namespace the inner sandbox builds.
 references it as `apparmor=kirocrew-container`.
 
 Run it once per host, then keep it across reboots (AppArmor loads the profile
-from `/etc/apparmor.d` automatically). If your host does not use AppArmor, the
-stack cannot select the OpenCode harness with the inner sandbox; use a host
-that supports it or choose a harness whose tool calls reach the gate directly.
+from `/etc/apparmor.d` automatically). `scripts/up.sh` does this check and the
+`sudo` install for you, so day-to-day you only run one command. If your host
+does not use AppArmor, the stack cannot select the OpenCode harness with the
+inner sandbox; use a host that supports it or choose a harness whose tool calls
+reach the gate directly.
 
 ## First-run configuration
 
