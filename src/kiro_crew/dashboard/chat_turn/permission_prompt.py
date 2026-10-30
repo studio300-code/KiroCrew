@@ -681,6 +681,7 @@ async def _on_permission_prompt(
                 event.title,
                 is_shell=event.is_shell,
                 canonical_name=event.tool_name,
+                backend=getattr(client, "backend", "") or getattr(getattr(client, "client", None), "backend", ""),
             )
         except ValueError as e:
             await _reject_invalid_tool(

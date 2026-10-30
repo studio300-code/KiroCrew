@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from kiro_crew.providers.base import LLMEvent
 
 from kiro_crew import _facade_mirror
+from kiro_crew.agent_sdk.backends import ACP_BACKEND_MUSE
 from kiro_crew.context_blocks import attributable_user_chars
 from kiro_crew.dashboard.chat_utils_display import redact_display_content
 from kiro_crew.dashboard.state import (
@@ -534,7 +535,13 @@ def _emit_agent_assignment(slot_key: str, agent: str, outcome: str = "applied") 
     )
 
 
-def _validate_tool_name(tool_name: str, *, is_shell: bool = False, canonical_name: str = "") -> str:
+def _validate_tool_name(
+    tool_name: str,
+    *,
+    is_shell: bool = False,
+    canonical_name: str = "",
+    backend: str = "",
+) -> str:
     """Validate and sanitize tool display names for hook matching.
 
     ``is_shell`` is the provider-agnostic signal (set at the provider boundary)
@@ -554,11 +561,22 @@ def _validate_tool_name(tool_name: str, *, is_shell: bool = False, canonical_nam
     ``is_shell``. Sanitisation and the empty check apply regardless: only the
     length predicate is relaxed. A backend that publishes no identity leaves
     ``canonical_name`` empty and keeps the loud refusal.
+
+    ``backend`` names the harness. Muse Code titles are command lines, paths
+    and task descriptions rather than tool identifiers (its ``bash`` title is
+    the whole command, its ``grep`` title the whole pattern), and its adapter
+    does not publish a canonical name on every permission frame. Its title is
+    therefore content, not identity, and is accepted at any length.
     """
     sanitized = sanitize_string(tool_name)
     if not sanitized:
         raise ValueError("Tool name cannot be empty")
-    if not is_shell and not canonical_name and len(sanitized) > MAX_TOOL_NAME_LEN:
+    if (
+        not is_shell
+        and not canonical_name
+        and backend != ACP_BACKEND_MUSE
+        and len(sanitized) > MAX_TOOL_NAME_LEN
+    ):
         raise ValueError(f"Tool name exceeds max length {MAX_TOOL_NAME_LEN}")
     return sanitized
 

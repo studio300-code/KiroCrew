@@ -32,6 +32,13 @@ class TestToolNameValidation:
         with pytest.raises(ValueError, match="exceeds max length"):
             _validate_tool_name(long_name)
 
+    def test_long_muse_title_is_content(self):
+        """Muse titles are command lines, not tool identities."""
+        from kiro_crew.agent_sdk.backends import ACP_BACKEND_MUSE
+
+        long_cmd = "grep -Rn --include='*.py' -e ACP_BACKEND_MUSE " + "x" * 300
+        assert _validate_tool_name(long_cmd, backend=ACP_BACKEND_MUSE) == long_cmd
+
     def test_shell_skips_length_check(self):
         """Shell tool titles can be arbitrarily long (bash command lines)."""
         long_cmd = "Running: " + "x" * 1000

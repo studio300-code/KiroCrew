@@ -698,6 +698,7 @@ async def _decide_permission_request(turn: _ChatTurn, event) -> Literal[_Flow.CO
                     event.title,
                     is_shell=event.is_shell,
                     canonical_name=event.tool_name,
+                    backend=getattr(client, "backend", "") or getattr(getattr(client, "client", None), "backend", ""),
                 )
             except ValueError as e:
                 await _reject_invalid_tool(
@@ -795,6 +796,7 @@ async def _decide_permission_request(turn: _ChatTurn, event) -> Literal[_Flow.CO
                 event.title,
                 is_shell=event.is_shell,
                 canonical_name=event.tool_name,
+                backend=getattr(client, "backend", "") or getattr(getattr(client, "client", None), "backend", ""),
             )
         except ValueError as e:
             await _reject_invalid_tool(
@@ -1034,6 +1036,7 @@ async def _decide_permission_request(turn: _ChatTurn, event) -> Literal[_Flow.CO
                     event.title,
                     is_shell=event.is_shell,
                     canonical_name=event.tool_name,
+                    backend=getattr(client, "backend", "") or getattr(getattr(client, "client", None), "backend", ""),
                 )
             except ValueError as e:
                 await _reject_invalid_tool(
@@ -1140,6 +1143,7 @@ async def _decide_permission_request(turn: _ChatTurn, event) -> Literal[_Flow.CO
                     event.title,
                     is_shell=event.is_shell,
                     canonical_name=event.tool_name,
+                    backend=getattr(client, "backend", "") or getattr(getattr(client, "client", None), "backend", ""),
                 )
             except ValueError as e:
                 await _reject_invalid_tool(
@@ -1200,6 +1204,7 @@ async def _decide_permission_request(turn: _ChatTurn, event) -> Literal[_Flow.CO
                 event.title,
                 is_shell=event.is_shell,
                 canonical_name=event.tool_name,
+                backend=getattr(client, "backend", "") or getattr(getattr(client, "client", None), "backend", ""),
             )
         except ValueError as e:
             await _reject_invalid_tool(
