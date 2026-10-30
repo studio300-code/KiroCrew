@@ -23,7 +23,7 @@ if [ -z "$TOKEN" ]; then
     exit 1
 fi
 echo "== assistant =="
-curl -N -s --max-time 180 -X POST "http://127.0.0.1:5476/api/chat?token=$TOKEN" \
+curl -N -s --max-time 180 -X POST "http://127.0.0.1:${KIROCREW_PORT:-5476}/api/chat?token=$TOKEN" \
     -H 'Content-Type: application/json' \
     -d "{\"message\":\"Rispondi solo con la parola OK.\",\"slot\":\"$SLOT\"}" \
     | sed -n 's/^data: //p' \

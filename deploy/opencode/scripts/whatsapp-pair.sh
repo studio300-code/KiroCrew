@@ -28,7 +28,7 @@ if [ -z "$URL" ]; then
     echo "could not mint a dashboard token" >&2
     exit 1
 fi
-curl -fsS -X POST "http://127.0.0.1:5476/api/channels/whatsapp/pair-phone?token=$URL" \
+curl -fsS -X POST "http://127.0.0.1:${KIROCREW_PORT:-5476}/api/channels/whatsapp/pair-phone?token=$URL" \
     -H 'Content-Type: application/json' \
     -d "{\"phone\":\"$PHONE\"}" | jq -r 'if .ok then .code else .error end'
 SH

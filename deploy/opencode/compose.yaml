@@ -26,7 +26,10 @@ services:
     restart: unless-stopped
     stop_grace_period: 30s
     ports:
-      - "${KIROCREW_BIND_HOST:-127.0.0.1}:${KIROCREW_PORT:-5476}:5476"
+      # The gateway binds the same port inside the container that the public
+      # dashboard URL names; publishing host:host keeps the healthcheck and the
+      # browser link on one number.
+      - "${KIROCREW_BIND_HOST:-127.0.0.1}:${KIROCREW_PORT:-5476}:${KIROCREW_PORT:-5476}"
     volumes:
       - kirocrew-home:/home/kirocrew
     environment:
@@ -34,6 +37,7 @@ services:
       # gateway .env and the OpenCode auth store, then removes it from the
       # long-lived process environment; the official entrypoint does the same
       # for the channel tokens.
+      KIROCREW_PORT: ${KIROCREW_PORT:-5476}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       OPENROUTER_VISION_MODEL: ${OPENROUTER_VISION_MODEL:-nvidia/nemotron-3.5-super-vl:free}
       # Every KiroCrew channel, empty by default. Fill the ones you use.
@@ -43,6 +47,7 @@ services:
       DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN:-}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_ALLOWED_USER_IDS: ${TELEGRAM_ALLOWED_USER_IDS:-}
+      KIROCREW_ENABLE_TELEGRAM: ${KIROCREW_ENABLE_TELEGRAM:-}
       WECOM_BOT_ID: ${WECOM_BOT_ID:-}
       WECOM_SECRET: ${WECOM_SECRET:-}
       WEBEX_BOT_TOKEN: ${WEBEX_BOT_TOKEN:-}
@@ -77,6 +82,9 @@ services:
     # KIROCREW_ALLOW_UNSANDBOXED=1 makes the container the isolation boundary.
     security_opt:
       - seccomp:./seccomp.json
+      # Grants only `userns,` so the inner KiroCrew sandbox can build its mount
+      # namespace. Install once on the host with scripts/install-host.sh.
+      - apparmor=kirocrew-container
     # The image's HEALTHCHECK covers liveness. Override the port only if needed.
 
 volumes:

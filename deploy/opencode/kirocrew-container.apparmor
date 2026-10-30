@@ -1,0 +1,14 @@
+abi <abi/5.0>,
+
+include <tunables/global>
+
+# Kiro Crew container: allow the inner user-namespace sandbox.
+#
+# Docker's default AppArmor profile blocks the mount namespace the Kiro Crew
+# sandbox builds inside a fresh user namespace (mount(MS_REC|MS_PRIVATE) on /),
+# even when the seccomp profile permits the syscalls. This profile grants only
+# the userns permission, exactly like the native kirocrew-userns profile, and
+# restricts nothing else. Install it with deploy/opencode/scripts/install-host.sh.
+profile kirocrew-container flags=(unconfined) {
+  userns,
+}

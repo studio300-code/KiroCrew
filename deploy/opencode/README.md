@@ -23,6 +23,7 @@ document/attachment fixes are included.
 cd deploy/opencode
 cp .env.example .env
 # edit .env: OPENROUTER_API_KEY, TELEGRAM_BOT_TOKEN, ...
+sudo scripts/install-host.sh        # one-time AppArmor profile for the inner sandbox
 docker compose up -d --build
 docker compose exec kirocrew kirocrew token --ttl 2h
 ```
@@ -36,6 +37,21 @@ Open the printed `http://127.0.0.1:5476/?token=...` link. The first start seeds:
 - `~/.kiro/crew/.env` with the gateway credentials.
 
 All of that lives in the `kirocrew-home` named volume, not in the image.
+
+## Host prerequisite: AppArmor
+
+The OpenCode harness refuses to run unsandboxed: it routes tool calls through a
+permission gate whose compensating control is the OS-level credential mask. On
+Ubuntu 23.10+ the kernel restricts unprivileged user namespaces, and Docker's
+default AppArmor profile blocks the mount namespace the inner sandbox builds.
+`scripts/install-host.sh` installs a tiny profile that grants only `userns,`
+(the same grant the native `kirocrew-userns` profile uses). The compose file
+references it as `apparmor=kirocrew-container`.
+
+Run it once per host, then keep it across reboots (AppArmor loads the profile
+from `/etc/apparmor.d` automatically). If your host does not use AppArmor, the
+stack cannot select the OpenCode harness with the inner sandbox; use a host
+that supports it or choose a harness whose tool calls reach the gate directly.
 
 ## First-run configuration
 
@@ -182,6 +198,7 @@ docker compose -f deploy/opencode/compose.yaml logs -f --tail=200
 docker compose -f deploy/opencode/compose.yaml ps
 docker exec -it kirocrew kirocrew doctor
 docker exec -it kirocrew opencode --version
+docker exec -it kirocrew sh -c 'curl -fsS http://127.0.0.1:5476/api/health'
 docker exec -it kirocrew kirocrew config get agent.model
 ```
 

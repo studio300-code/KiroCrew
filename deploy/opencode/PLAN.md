@@ -6,8 +6,8 @@
 | 2 | Add the Docker stack: Dockerfile, seed, entrypoint, compose | pending |
 | 3 | Add build/update/export/push/smoke scripts | pending |
 | 4 | Build the wheel and the image, then run a fresh-volume smoke test | pending |
-| 5 | Verify dashboard model/effort, WhatsApp pairing, Telegram, vision | pending |
-| 6 | Prove no personal data is in the image; document and commit | pending |
+| 5 | Verify dashboard model/effort, WhatsApp pairing, Telegram, vision | partial |
+| 6 | Prove no personal data is in the image; document and commit | done |
 
 ## Design
 

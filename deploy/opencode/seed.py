@@ -156,13 +156,16 @@ def _seed_kirocrew() -> pathlib.Path:
 
     telegram_token = bool(os.environ.get("TELEGRAM_BOT_TOKEN", "").strip())
     telegram_ids = _ints("TELEGRAM_ALLOWED_USER_IDS")
+    tg_raw = os.environ.get("KIROCREW_ENABLE_TELEGRAM")
+    tg_forced_on = tg_raw is not None and tg_raw.strip().lower() not in {"", "0", "false", "no", "off"}
+    tg_forced_off = tg_raw is not None and not tg_forced_on
     wa_raw = os.environ.get("KIROCREW_ENABLE_WHATSAPP")
     wa_enabled = True if wa_raw is None else wa_raw.strip().lower() not in {"0", "false", "no", "off"}
     wa_ids = _digits("WHATSAPP_ALLOWED_WA_IDS")
 
     if first_run:
-        if telegram_token or telegram_ids:
-            overlay["telegram"] = {"enabled": telegram_token or bool(telegram_ids)}
+        if telegram_token or telegram_ids or tg_forced_on:
+            overlay["telegram"] = {"enabled": telegram_token or bool(telegram_ids) or tg_forced_on}
             if telegram_ids:
                 overlay["telegram"]["allowed_user_ids"] = telegram_ids
         if wa_enabled:
@@ -205,6 +208,10 @@ def _seed_kirocrew() -> pathlib.Path:
             overlay["whatsapp"] = {"enabled": False}
         if telegram_ids:
             overlay.setdefault("telegram", {})["allowed_user_ids"] = telegram_ids
+        if tg_forced_on:
+            overlay.setdefault("telegram", {})["enabled"] = True
+        elif tg_forced_off:
+            overlay.setdefault("telegram", {})["enabled"] = False
         public_url = os.environ.get("KIROCREW_PUBLIC_URL", "").strip()
         if public_url:
             overlay.setdefault("dashboard", {})["url"] = public_url
