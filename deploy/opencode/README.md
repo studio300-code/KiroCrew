@@ -10,6 +10,7 @@ A self-hosted Docker image for the KiroCrew environment:
 - **Telegram**, Slack, Discord, WeCom, Weixin, Webex, Microsoft Teams and Feishu
   (the Teams/Feishu optional dependencies are installed)
 - Local speech-to-text (`pywhispercpp`) and ffmpeg for voice notes and video
+- LibreOffice Writer for DOCX/ODT → PDF conversion
 - No personal data, conversations, skills, WhatsApp database, OpenCode sessions
   or API keys in the image. Everything is created in a named volume on first
   start and configured from `.env`.

@@ -41,6 +41,7 @@ LABEL org.opencontainers.image.title="KiroCrew + OpenCode" \
 #   ffmpeg/ffprobe  — voice conversion and video frame sampling
 #   libgomp1        — pywhispercpp OpenMP runtime
 #   libmagic1       — attachment type sniffing
+#   libreoffice-writer — DOCX/ODT to PDF conversion requested by the operator
 #   sqlite3         — the WhatsApp archive skill reads wa.db with it
 #   jq              — agent shell work and diagnostics
 #   tini            — PID 1, reaps agent subprocess trees
@@ -54,6 +55,8 @@ RUN apt-get update \
         jq \
         libgomp1 \
         libmagic1 \
+        libreoffice-writer \
+        fonts-liberation \
         procps \
         ripgrep \
         sqlite3 \

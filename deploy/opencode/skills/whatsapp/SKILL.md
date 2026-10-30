@@ -52,6 +52,22 @@ Rules:
 - Use the resolved sender the tool prints. Do not infer a name from the
   conversation or carry one forward from an earlier summary.
 
+## Sending a generated file
+
+To put a generated PDF, image, audio or video back into the current chat, call
+the MCP tool `file_send` with the absolute `path`. It copies the file to the
+outbox and delivers it to the conversation the session belongs to. Never use
+`wa_send.py`, `ssh`, `scp` or a browser driver: those are denied by policy and
+the turn fails.
+
+To convert a DOCX/ODT to PDF:
+
+```bash
+libreoffice --headless --convert-to pdf --outdir <dir> <file.docx>
+```
+
+Then pass the produced PDF path to `file_send`.
+
 ## Media and documents
 
 A row can carry:
