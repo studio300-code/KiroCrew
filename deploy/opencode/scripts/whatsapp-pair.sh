@@ -2,6 +2,7 @@
 # Pair the container's WhatsApp device with an 8-character phone code.
 #
 #   deploy/opencode/scripts/whatsapp-pair.sh 393451234567
+#   # or set WHATSAPP_PAIR_PHONE=393451234567 in deploy/opencode/.env
 #
 # The dashboard pairing endpoints are local-machine-only by design. A browser
 # reaching a published Docker port is not local, so this runs the request from
@@ -14,9 +15,15 @@ set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
 cd "$ROOT"
 COMPOSE="$ROOT/deploy/opencode/compose.yaml"
+ENV_FILE="$ROOT/deploy/opencode/.env"
+
 PHONE=${1:-}
+if [ -z "$PHONE" ] && [ -f "$ENV_FILE" ]; then
+    PHONE=$(sed -n 's/^WHATSAPP_PAIR_PHONE=//p' "$ENV_FILE" | tail -n 1)
+fi
 if [ -z "$PHONE" ]; then
     echo "usage: $0 <phone-with-country-code-digits>" >&2
+    echo "or set WHATSAPP_PAIR_PHONE in deploy/opencode/.env" >&2
     exit 2
 fi
 

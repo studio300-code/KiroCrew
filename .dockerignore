@@ -24,3 +24,7 @@ deploy/*
 deploy/opencode/*
 !deploy/opencode/entrypoint.sh
 !deploy/opencode/seed.py
+
+# Generic product skills shipped in the image (no user data).
+!deploy/opencode/skills
+!deploy/opencode/skills/**

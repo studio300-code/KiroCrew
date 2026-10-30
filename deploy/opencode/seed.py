@@ -25,6 +25,8 @@ import sys
 DEFAULT_MODEL = "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free"
 DEFAULT_FALLBACK = DEFAULT_MODEL
 DEFAULT_EFFORT = "high"
+#: Read-only product skills shipped in the image (the WhatsApp archive reader).
+IMAGE_SKILLS = pathlib.Path("/usr/local/share/kirocrew/skills")
 
 
 def _bool(name: str, default: bool) -> bool:
@@ -217,6 +219,21 @@ def _seed_kirocrew() -> pathlib.Path:
             overlay.setdefault("dashboard", {})["url"] = public_url
         _merge(data, overlay)
         print(f"[seed] existing config: merged stack keys into {config_path}")
+
+    # Make the image's product skills visible without copying them into the
+    # volume: extra_paths is the supported read-only channel, and a user's own
+    # skills in ~/.kiro/crew/skills keep precedence.
+    if IMAGE_SKILLS.is_dir():
+        skills = data.setdefault("skills", {})
+        if not isinstance(skills, dict):
+            skills = {}
+            data["skills"] = skills
+        paths = skills.get("extra_paths")
+        if not isinstance(paths, list):
+            paths = []
+        if str(IMAGE_SKILLS) not in paths:
+            paths.append(str(IMAGE_SKILLS))
+        skills["extra_paths"] = paths
 
     _write_json(config_path, data)
     return home

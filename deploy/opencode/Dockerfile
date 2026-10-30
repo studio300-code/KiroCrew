@@ -109,6 +109,12 @@ RUN set -eux; \
       > "${PKG_DIR}/_build_info.py"; \
     python -c 'from kiro_crew import beacon; assert beacon.distribution() == "docker"'
 
+# Read-only product skill for the WhatsApp archive. It is generic (no personal
+# examples) and lives outside the home volume, so an image update refreshes it
+# and a user's own skills stay untouched. skills.extra_paths in the seed points
+# here.
+COPY --chmod=755 deploy/opencode/skills /usr/local/share/kirocrew/skills
+
 # Non-root runtime user. HOME holds ALL persistent state; mount a named volume
 # at /home/kirocrew (named volumes inherit the image's ownership on first use).
 RUN useradd --create-home --uid 1000 --shell /bin/bash kirocrew

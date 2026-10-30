@@ -65,13 +65,16 @@ that supports it or choose a harness whose tool calls reach the gate directly.
 
    ```bash
    deploy/opencode/scripts/whatsapp-pair.sh 393451234567
+   # or put WHATSAPP_PAIR_PHONE=393451234567 in .env and run it with no argument
    ```
 
-   Then on the phone: WhatsApp → Settings → Linked devices → Link a device →
-   **Link with phone number instead**, and enter the printed code. The session
-   is stored in the volume and survives upgrades. If you are browsing the
-   dashboard on the same machine, *Settings → Messaging Channels → WhatsApp*
-   exposes the QR/code flow directly.
+   The command prints an 8-character code on the terminal; nothing is sent to
+   that number or to your own chat. On the phone: WhatsApp → Settings → Linked
+   devices → Link a device → **Link with phone number instead**, and enter the
+   code. WhatsApp always requires the phone to confirm; a server cannot link an
+   account silently. The session is stored in the volume and survives upgrades.
+   If you are browsing the dashboard on the same machine, *Settings → Messaging
+   Channels → WhatsApp* exposes the QR/code flow directly.
 4. **Groups** — add them from the WhatsApp panel. Nothing outside a configured
    group is answered.
 
@@ -94,6 +97,7 @@ Most values are in `.env`; see `.env.example` for the full list.
 | `MICROSOFT_APP_ID`, `MICROSOFT_APP_PASSWORD`, `MICROSOFT_APP_TENANT_ID` | Microsoft Teams |
 | `FEISHU_APP_ID`, `FEISHU_APP_SECRET` | Feishu |
 | `KIROCREW_ENABLE_WHATSAPP` | `1` starts the channel; `0` disables it |
+| `WHATSAPP_PAIR_PHONE` | phone number used by `whatsapp-pair.sh` when no CLI argument is given |
 | `WHATSAPP_ALLOWED_WA_IDS` | optional DM/group sender allowlist |
 | `KIROCREW_STT_MODEL` | whisper.cpp model, default `small` |
 | `KIROCREW_STT_LANGUAGE` | default `it` |
