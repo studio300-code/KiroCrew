@@ -162,6 +162,32 @@ Copy `deploy/opencode/` (compose, `.env`, scripts, seccomp profile) to the
 server. The image already contains KiroCrew, OpenCode, WhatsApp and Telegram
 support; no build toolchain is needed there.
 
+## State and self-sufficiency
+
+One named volume, `kirocrew-home`, holds **everything that changes**:
+
+- `~/whatsapp-web/data/wa.db` — the WhatsApp archive, plus `media/` with the
+  downloaded photos, voice notes, videos and documents
+- `~/.kiro/crew/whatsapp/session.db` — the linked-device credentials
+- `~/.kiro/crew/config.json`, `.env`, skills, sessions, memory and crons
+- `~/.config/opencode` and `~/.local/share/opencode` — OpenCode config/auth and
+  sessions
+- `~/.kiro/crew/models/whisper` — the local STT model after the first download
+
+That makes the deployment self-sufficient after the first pairing: restarting,
+recreating, or updating the container does not lose the archive, the WhatsApp
+link, the settings or the agent sessions. `docker compose down` keeps the
+volume; only `docker compose down -v` (or `docker volume rm`) deletes it.
+
+The archive is **this deployment's own** archive, populated from the messages
+the linked device receives. It is not a copy of the ASUS `wa.db`; if you want
+the old history migrated, copy `wa.db` and `media/` into the volume yourself.
+The image never contains either.
+
+External dependencies remain: OpenRouter for the model, WhatsApp/Telegram for
+the channels, and the network for the first STT model download. After those,
+the archive and the agent state are local to the volume.
+
 ## Persistence and backup
 
 One named volume, `kirocrew-home`, holds:
