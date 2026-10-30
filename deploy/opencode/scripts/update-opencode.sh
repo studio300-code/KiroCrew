@@ -28,7 +28,9 @@ import urllib.request
 env_path = pathlib.Path(sys.argv[1])
 
 def fetch_json(url: str) -> dict:
-    with urllib.request.urlopen(url, timeout=30) as resp:
+    # The npm registry rejects urllib's default User-Agent with HTTP 403.
+    req = urllib.request.Request(url, headers={"User-Agent": "kirocrew-opencode-updater"})
+    with urllib.request.urlopen(req, timeout=30) as resp:
         return json.load(resp)
 
 latest = fetch_json("https://opencode.ai/update/api/latest/cli/npm")
