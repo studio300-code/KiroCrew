@@ -35,7 +35,7 @@ image.
 ## Current evidence
 
 - Image: `kirocrew-opencode:0.12.0` / `:test`, 2.45 GB, built 2026-10-30.
-- `deploy/opencode/scripts/smoke.sh` passed: healthy, OpenCode 2.2.2, ffmpeg,
+- `deploy/opencode/scripts/smoke.sh` passed: healthy, OpenCode 2.2.4, ffmpeg,
   neonize, pywhispercpp, seeded model/effort, auth, dashboard token, image-clean.
 - Live turn in the container: `docker-final-live`, HTTP 200, assistant `OK`,
   `turn_stats.model=openrouter/nvidia/nemotron-3-ultra-550b-a55b:free`.

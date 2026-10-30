@@ -4,7 +4,7 @@
 #
 # Build from the repository root:
 #   docker build -f deploy/opencode/Dockerfile \
-#     --build-arg OPENCODE_VERSION=2.2.2 \
+#     --build-arg OPENCODE_VERSION=2.2.4 \
 #     -t kirocrew-opencode:local .
 #
 # This is a self-contained image: Python 3.12, the KiroCrew wheel built from
@@ -22,11 +22,11 @@ FROM ${PYTHON_BASE}
 
 ARG TARGETARCH
 ARG KIROCREW_VERSION=dev
-ARG OPENCODE_VERSION=2.2.2
+ARG OPENCODE_VERSION=2.2.4
 # sha512 of the pinned npm tarballs (registry.npmjs.org), converted from the
 # registry's dist.integrity. Bump together with OPENCODE_VERSION.
-ARG OPENCODE_SHA512_X64=c1ad289751d468a3434ea8dfa89c2a9aade7e2d95e8c1cb6513e3cc15442ca94541b2f566c8a5778bf719479a58c0a1d403e8771947676a8896054e50cca8854
-ARG OPENCODE_SHA512_ARM64=732a7a97548b14657b3715dde458012094fc5799908418ecf85f6f878a5149a9bd9111a6bff9d412f80f31729f36b65db2595394ba0fbf38075b3419cf67dfd4
+ARG OPENCODE_SHA512_X64=ad66e708e3ff9c837c20b02dd2172ec39d6c35bb97fb3708992097eed3d40ac69881534b719ef7c217d6e2561cd3864c3e1c5ec92a2837422f7cbbe7b1a25f81
+ARG OPENCODE_SHA512_ARM64=306c2b77238b27660c84097d93f253a632c7a7cc82ab0ea0a83293d0630e80fbb9ea830e65268c51483c8492b716adbbb8638540b894b40dec6e175083794500
 ARG SOURCE_REPO_URL="https://github.com/studio300-code/KiroCrew"
 
 LABEL org.opencontainers.image.title="KiroCrew + OpenCode" \
