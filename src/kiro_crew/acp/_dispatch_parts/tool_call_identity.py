@@ -157,9 +157,19 @@ def classify_tool_call(update: dict[str, Any]) -> ToolCallIdentity:
         return ToolCallIdentity(False, False, "", "", False)
 
     # No MCP marker: the kind decides. The harness's built-in tool name (no
-    # server) is still carried so hooks can match a host-known built-in.
+    # server) is still carried so hooks can match a host-known built-in. ACP's
+    # standard ``name`` is adapter-authored too (Muse Code sends it on every
+    # tool_call), and using it keeps the display title out of the identity: a
+    # grep title is a whole command line and exceeds the dashboard's tool-name
+    # cap, while the name is simply ``grep``.
+    standard_tool = _harness_identifier(update.get("name"))
     return ToolCallIdentity(
-        kind_resolved, shell_by_kind, "", meta_tool, False, identity_unreadable=meta_unreadable
+        kind_resolved,
+        shell_by_kind,
+        "",
+        meta_tool or standard_tool,
+        False,
+        identity_unreadable=meta_unreadable,
     )
 
 

@@ -241,6 +241,26 @@ class TestClassifyToolCall:
         assert got.identity_trusted is False
 
 
+    def test_standard_acp_name_is_carried_as_tool_identity(self) -> None:
+        """The ACP ``toolCall.name`` is an adapter-authored identity, not a title.
+
+        Muse Code sends it on every tool call, and its display title can be the
+        whole command line (a grep pattern easily exceeds the dashboard's
+        tool-name cap). Reading the standard field keeps the identity usable and
+        keeps the title where it belongs: content.
+        """
+        got = classify_tool_call(
+            {
+                "kind": "search",
+                "name": "grep",
+                "title": "grep -rn 'sandbox_allow_unsandboxed_exec' .",
+            }
+        )
+        assert got.tool_name == "grep"
+        assert got.tool_identity_trusted is True
+        assert got.is_shell is False
+
+
 # ── the tool_call event builder and its caches ───────────────────────────────
 
 
