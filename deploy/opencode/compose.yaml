@@ -1,0 +1,83 @@
+# KiroCrew + OpenCode appliance.
+#
+#   cp .env.example .env      # fill the values
+#   docker compose up -d --build
+#   docker compose exec kirocrew kirocrew token --ttl 2h
+#
+# The whole home (gateway state, WhatsApp session, archives, skills, OpenCode
+# sessions) lives in the named volume. Rebuilding or pulling a newer image
+# keeps it.
+
+name: kirocrew-opencode
+
+services:
+  kirocrew:
+    image: ${KIROCREW_IMAGE:-kirocrew-opencode:local}
+    build:
+      context: ../..
+      dockerfile: deploy/opencode/Dockerfile
+      args:
+        PYTHON_BASE: ${KIROCREW_PYTHON_BASE:-python:3.12-slim-trixie}
+        KIROCREW_VERSION: ${KIROCREW_VERSION:-dev}
+        OPENCODE_VERSION: ${OPENCODE_VERSION:-2.2.2}
+        OPENCODE_SHA512_X64: ${OPENCODE_SHA512_X64:-c1ad289751d468a3434ea8dfa89c2a9aade7e2d95e8c1cb6513e3cc15442ca94541b2f566c8a5778bf719479a58c0a1d403e8771947676a8896054e50cca8854}
+        OPENCODE_SHA512_ARM64: ${OPENCODE_SHA512_ARM64:-732a7a97548b14657b3715dde458012094fc5799908418ecf85f6f878a5149a9bd9111a6bff9d412f80f31729f36b65db2595394ba0fbf38075b3419cf67dfd4}
+    container_name: ${KIROCREW_CONTAINER_NAME:-kirocrew-opencode}
+    restart: unless-stopped
+    stop_grace_period: 30s
+    ports:
+      - "${KIROCREW_BIND_HOST:-127.0.0.1}:${KIROCREW_PORT:-5476}:5476"
+    volumes:
+      - kirocrew-home:/home/kirocrew
+    environment:
+      # Channel + model credentials. The seed stores the OpenRouter key in the
+      # gateway .env and the OpenCode auth store, then removes it from the
+      # long-lived process environment; the official entrypoint does the same
+      # for the channel tokens.
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_VISION_MODEL: ${OPENROUTER_VISION_MODEL:-nvidia/nemotron-3.5-super-vl:free}
+      # Every KiroCrew channel, empty by default. Fill the ones you use.
+      SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
+      SLACK_APP_TOKEN: ${SLACK_APP_TOKEN:-}
+      KIROCREW_OWNER_ID: ${KIROCREW_OWNER_ID:-}
+      DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_ALLOWED_USER_IDS: ${TELEGRAM_ALLOWED_USER_IDS:-}
+      WECOM_BOT_ID: ${WECOM_BOT_ID:-}
+      WECOM_SECRET: ${WECOM_SECRET:-}
+      WEBEX_BOT_TOKEN: ${WEBEX_BOT_TOKEN:-}
+      WEIXIN_TOKEN: ${WEIXIN_TOKEN:-}
+      FEISHU_APP_ID: ${FEISHU_APP_ID:-}
+      FEISHU_APP_SECRET: ${FEISHU_APP_SECRET:-}
+      MICROSOFT_APP_ID: ${MICROSOFT_APP_ID:-}
+      MICROSOFT_APP_PASSWORD: ${MICROSOFT_APP_PASSWORD:-}
+      MICROSOFT_APP_TENANT_ID: ${MICROSOFT_APP_TENANT_ID:-}
+      JIRA_API_TOKEN: ${JIRA_API_TOKEN:-}
+      AZURE_DEVOPS_EXT_PAT: ${AZURE_DEVOPS_EXT_PAT:-}
+      BITBUCKET_EMAIL: ${BITBUCKET_EMAIL:-}
+      BITBUCKET_API_TOKEN: ${BITBUCKET_API_TOKEN:-}
+      KIRO_API_KEY: ${KIRO_API_KEY:-}
+      # Stack defaults. Every one can be overridden per deployment.
+      KIROCREW_MODEL: ${KIROCREW_MODEL:-openrouter/nvidia/nemotron-3-ultra-550b-a55b:free}
+      KIROCREW_REASONING_EFFORT: ${KIROCREW_REASONING_EFFORT:-high}
+      KIROCREW_FALLBACK_MODEL: ${KIROCREW_FALLBACK_MODEL:-openrouter/nvidia/nemotron-3-ultra-550b-a55b:free}
+      KIROCREW_ENABLE_WHATSAPP: ${KIROCREW_ENABLE_WHATSAPP:-1}
+      WHATSAPP_ALLOWED_WA_IDS: ${WHATSAPP_ALLOWED_WA_IDS:-}
+      KIROCREW_STT_PROVIDER: ${KIROCREW_STT_PROVIDER:-local}
+      KIROCREW_STT_MODEL: ${KIROCREW_STT_MODEL:-small}
+      KIROCREW_STT_LANGUAGE: ${KIROCREW_STT_LANGUAGE:-it}
+      KIROCREW_PUBLIC_URL: ${KIROCREW_PUBLIC_URL:-}
+      KIROCREW_SKIP_ONBOARDING: ${KIROCREW_SKIP_ONBOARDING:-1}
+      KIROCREW_YOLO: ${KIROCREW_YOLO:-1}
+      KIROCREW_APPROVAL_MODE: ${KIROCREW_APPROVAL_MODE:-auto}
+      KIROCREW_ALLOW_UNSANDBOXED: ${KIROCREW_ALLOW_UNSANDBOXED:-1}
+      KIROCREW_PRESERVE_AGENT_MODEL: ${KIROCREW_PRESERVE_AGENT_MODEL:-}
+      TZ: ${TZ:-Europe/Rome}
+    # Permit the inner user-namespace sandbox. If the runtime still refuses it,
+    # KIROCREW_ALLOW_UNSANDBOXED=1 makes the container the isolation boundary.
+    security_opt:
+      - seccomp:./seccomp.json
+    # The image's HEALTHCHECK covers liveness. Override the port only if needed.
+
+volumes:
+  kirocrew-home:

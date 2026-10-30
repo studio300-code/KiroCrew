@@ -57,6 +57,7 @@ _CREW_RUNTIME = (
 #: an installed copy.
 RECIPES: dict[Path, str] = {
     ROOT / "docker" / "Dockerfile": "dist",
+    ROOT / "deploy" / "opencode" / "Dockerfile": "dist",
     _CREW_RUNTIME / "Dockerfile": "vendor",
 }
 

@@ -15,3 +15,12 @@ docker/*
 packaging/*
 !packaging/kiro-cli-version
 !packaging/kiro-cli-sha256
+
+# The OpenCode appliance's entrypoint and first-run seed (never .env, docs or
+# the compose file: those are host-side deployment files).
+!deploy
+deploy/*
+!deploy/opencode
+deploy/opencode/*
+!deploy/opencode/entrypoint.sh
+!deploy/opencode/seed.py
