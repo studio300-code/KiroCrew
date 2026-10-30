@@ -256,6 +256,11 @@ class MirrorTap:
     ) -> None:
         self._client = client
         self._db_path = db_path or DB_PATH
+        # A fresh container has no ~/whatsapp-web/data yet. sqlite3 cannot create
+        # a database in a missing directory, and the archive would spend the
+        # whole process logging "unable to open database file". Create it first;
+        # the media worker creates its own subdirectories later.
+        Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
         #: Called once a VOICE note is transcribed, with
         #: ``(chat_id, transcript, message_id)``. The transport uses it to honor
         #: a spoken wake word, which no stanza-time check can see.

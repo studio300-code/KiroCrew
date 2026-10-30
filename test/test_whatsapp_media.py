@@ -701,3 +701,19 @@ async def test_archive_transcriber_falls_back_to_builtin_stt(monkeypatch, tmp_pa
     audio = tmp_path / "voice.ogg"
     audio.write_bytes(b"not really audio")
     assert await tap._transcribe(audio) == "ciao dal vocale"
+
+
+def test_archive_creates_a_missing_database_directory(tmp_path):
+    """A fresh container has no ~/whatsapp-web/data; the archive must create it.
+
+    sqlite3 cannot open a database whose parent directory is absent, and the
+    worker previously logged "media_jobs table init failed: unable to open
+    database file" on every boot of a clean volume.
+    """
+    from types import SimpleNamespace
+
+    from kiro_crew.whatsapp.mirror import MirrorTap
+
+    db = tmp_path / "whatsapp-web" / "data" / "wa.db"
+    MirrorTap(SimpleNamespace(db_path=""), db_path=str(db))
+    assert db.is_file()
