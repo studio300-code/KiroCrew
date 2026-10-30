@@ -22,8 +22,10 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
+import mimetypes
 import os
 import pickle
+import re
 import sqlite3
 import subprocess
 import tempfile
@@ -34,7 +36,7 @@ from typing import Any, Awaitable, Callable
 
 import aiohttp
 
-from kiro_crew.whatsapp.media import musone_wake, unwrap_message
+from kiro_crew.whatsapp.media import describe, musone_wake, unwrap_message
 
 logger = logging.getLogger(__name__)
 logger.warning("whatsapp mirror: MODULE LOADED")
@@ -149,6 +151,7 @@ _UPDATE_MEDIA = """
 UPDATE messages SET
   transcript=COALESCE(NULLIF(TRIM(:transcript), ''), transcript),
   media_path=COALESCE(NULLIF(TRIM(:media_path), ''), media_path),
+  media_mime=COALESCE(NULLIF(TRIM(:media_mime), ''), media_mime),
   media_desc=COALESCE(NULLIF(TRIM(:media_desc), ''), media_desc),
   frames_desc=COALESCE(NULLIF(TRIM(:frames_desc), ''), frames_desc)
 WHERE msg_id=:msg_id
@@ -189,6 +192,7 @@ RETURNING id, msg_id, chat_id, kind, raw_envelope;
 _MARK_DONE = """
 UPDATE media_jobs SET
     status='done',
+    last_error='',
     updated_at=strftime('%s','now')
 WHERE id=?;
 """
@@ -207,6 +211,21 @@ UPDATE media_jobs SET
     updated_at=strftime('%s','now')
 WHERE status='processing' AND updated_at < strftime('%s','now','-10 minutes');
 """
+
+
+def _looks_like_text(text: str) -> bool:
+    """Whether extracted document text is prose rather than a binary decode.
+
+    A scanned PDF can come back from the byte-scan fallback as control
+    characters and replacement glyphs. Storing that in ``media_desc`` gives the
+    agent a page of noise, so a short document keeps only its name and path and
+    the reader opens the file itself.
+    """
+    sample = (text or "")[:2000]
+    if not sample:
+        return False
+    printable = sum(1 for ch in sample if ch.isprintable() or ch in "\n\r\t")
+    return printable / len(sample) >= 0.85
 
 
 def msg_type(kind: str) -> str:
@@ -644,6 +663,13 @@ class MirrorTap:
         inner = unwrap_message(inner)
         logger.warning("whatsapp mirror: final inner type=%s", type(inner))
 
+        # The sender's declared type and filename, for the extension and for the
+        # document parser. Everything here is advisory until the bytes arrive.
+        try:
+            desc = describe(inner)
+        except Exception:
+            desc = None
+
         # Debug: log what media fields the message has
         try:
             from kiro_crew.whatsapp.media import _MEDIA_FIELDS, _has
@@ -669,8 +695,10 @@ class MirrorTap:
             logger.warning("whatsapp mirror: DOWNLOAD empty job_id=%s msg_id=%s", job_id, msg_id)
             raise RuntimeError("empty download")
 
-        # Save to disk under media root
-        ext = self._ext_for_kind(kind)
+        # Save to disk under media root. A document keeps the sender's extension:
+        # the PDF/text parser and the agent's reader both key on it, and a
+        # ``.bin`` suffix makes a valid PDF look like an opaque blob.
+        ext = self._ext_for_kind(kind, desc)
         media_dir = Path(MEDIA_ROOT) / kind
         media_dir.mkdir(parents=True, exist_ok=True)
         # Sanitize msg_id for filename
@@ -712,22 +740,48 @@ class MirrorTap:
                 job_id,
                 len(transcript),
             )
+        elif kind == "document":
+            # The bytes are already on disk; make their TEXT visible to the
+            # agent too. PDF and the other parseable formats go through the same
+            # parser the live-ingest path uses; a scan without a text layer
+            # yields no text, and the path alone is still worth keeping.
+            logger.warning("whatsapp mirror: DOCUMENT TEXT start job_id=%s", job_id)
+            try:
+                from kiro_crew.doc_parser import extract_text, is_parseable_document
 
-        # Update DB row (messages table)
-        if transcript or media_desc or frames_desc:
-            logger.warning("whatsapp mirror: DB UPDATE start job_id=%s msg_id=%s", job_id, msg_id)
-            await asyncio.to_thread(
-                self._update_media_row,
-                msg_id,
-                str(path),
-                transcript,
-                media_desc,
-                frames_desc,
-            )
-            logger.warning("whatsapp mirror: DB UPDATE done job_id=%s msg_id=%s", job_id, msg_id)
-        else:
-            logger.warning("whatsapp mirror: NO CONTENT to update job_id=%s msg_id=%s", job_id, msg_id)
-            raise RuntimeError("no transcript or description produced")
+                filename = (desc.filename if desc is not None else "") or path.name
+                mimetype = desc.base_mimetype if desc is not None else ""
+                if is_parseable_document(mimetype=mimetype, filename=filename):
+                    text = await asyncio.to_thread(
+                        extract_text,
+                        str(path),
+                        mimetype=mimetype,
+                        filename=filename,
+                        max_chars=20_000,
+                    )
+                    text = (text or "").strip()
+                    if text and _looks_like_text(text):
+                        media_desc = f"[Document: {filename}]\n{text[:20_000]}"
+            except Exception as exc:  # noqa: BLE001 - a parse failure must not lose the file
+                logger.warning("whatsapp mirror: DOCUMENT TEXT failed job_id=%s: %s", job_id, exc)
+            if not media_desc and desc is not None and desc.filename:
+                media_desc = f"[Document: {desc.filename}]"
+            logger.warning("whatsapp mirror: DOCUMENT TEXT done job_id=%s len=%s", job_id, len(media_desc))
+
+        # Persist the path and MIME even when transcription or description
+        # produced nothing: the agent must still be able to open the file, and
+        # the archive is the only durable record of where it is.
+        logger.warning("whatsapp mirror: DB UPDATE start job_id=%s msg_id=%s", job_id, msg_id)
+        await asyncio.to_thread(
+            self._update_media_row,
+            msg_id,
+            str(path),
+            transcript,
+            media_desc,
+            frames_desc,
+            desc.base_mimetype if desc is not None else "",
+        )
+        logger.warning("whatsapp mirror: DB UPDATE done job_id=%s msg_id=%s", job_id, msg_id)
 
         # A spoken wake word is only readable once the transcript exists. The
         # transport answers it in the chat the note was sent to.
@@ -771,14 +825,31 @@ class MirrorTap:
         except Exception:  # noqa: BLE001 - the archive row is already saved
             logger.warning("whatsapp mirror: voice wake dispatch failed", exc_info=True)
 
-    def _ext_for_kind(self, kind: str) -> str:
+    def _ext_for_kind(self, kind: str, desc: object | None = None) -> str:
+        """The file suffix to store *kind* with.
+
+        A document keeps the sender's own suffix, because the document parser
+        and the agent's file reader decide from it whether the file is a PDF,
+        an Office document or a plain text file. The guessed type is only the
+        fallback; a ``.bin`` document is unreadable even when its bytes are
+        perfect.
+        """
+        if kind == "document":
+            filename = getattr(desc, "filename", "") if desc is not None else ""
+            suffix = Path(str(filename)).suffix.lower() if filename else ""
+            if re.fullmatch(r"\.[a-z0-9]{1,10}", suffix):
+                return suffix[1:]
+            mimetype = getattr(desc, "base_mimetype", "") if desc is not None else ""
+            guessed = mimetypes.guess_extension(str(mimetype)) if mimetype else ""
+            if guessed and re.fullmatch(r"\.[a-z0-9]{1,10}", guessed.lower()):
+                return guessed.lower()[1:]
+            return "bin"
         return {
             "voice": "opus",
             "audio": "m4a",
             "image": "jpg",
             "video": "mp4",
             "sticker": "webp",
-            "document": "bin",
         }.get(kind, "bin")
 
     async def _transcribe(self, path: Path, timeout: float = 120.0) -> str:
@@ -947,6 +1018,7 @@ class MirrorTap:
         transcript: str,
         media_desc: str,
         frames_desc: str,
+        media_mime: str = "",
     ) -> None:
         try:
             con = sqlite3.connect(self._db_path, timeout=5.0)
@@ -957,6 +1029,7 @@ class MirrorTap:
                     {
                         "transcript": transcript,
                         "media_path": media_path,
+                        "media_mime": media_mime,
                         "media_desc": media_desc,
                         "frames_desc": frames_desc,
                         "msg_id": msg_id,

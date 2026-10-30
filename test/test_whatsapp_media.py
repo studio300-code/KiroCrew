@@ -648,3 +648,33 @@ def test_non_protobuf_input_degrades(thing):
     assert unwrap_message(thing) is thing
     assert describe(thing).kind == KIND_UNSUPPORTED
     assert caption_text(thing) == ""
+
+
+def test_document_extension_keeps_the_senders_type() -> None:
+    """A document is stored with its real suffix, not ``.bin``.
+
+    The dashboard's archive reader and the document parser both key on the
+    suffix; a PDF saved as ``.bin`` is unreadable even when the bytes are
+    perfect. The sender's filename wins, and the declared mimetype is the
+    fallback for a document that arrives without one.
+    """
+    from types import SimpleNamespace
+
+    from kiro_crew.whatsapp.mirror import MirrorTap
+
+    tap = MirrorTap.__new__(MirrorTap)
+    assert tap._ext_for_kind(
+        "document", SimpleNamespace(filename="Contratto.PDF", base_mimetype="application/pdf")
+    ) == "pdf"
+    assert tap._ext_for_kind(
+        "document", SimpleNamespace(filename="", base_mimetype="application/pdf")
+    ) == "pdf"
+    assert tap._ext_for_kind("document", None) == "bin"
+
+
+def test_binary_pdf_text_is_not_stored_as_media_description() -> None:
+    """A scanned PDF's byte-scan fallback must not become agent-visible prose."""
+    from kiro_crew.whatsapp.mirror import _looks_like_text
+
+    assert _looks_like_text("CONTRATTO DI LOCAZIONE\nArt. 1 ...")
+    assert not _looks_like_text("(;;;;\ufffd\ufffd\x00\x01\x02" * 100)
