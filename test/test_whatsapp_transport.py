@@ -533,7 +533,14 @@ class TestPerGroupAllowlist:
         await h.transport.receive(self._mention(GROUP))
         assert h.dispatched == []
         await h.transport.receive(
-            event(chat=GROUP, sender=OWN_JID, from_me=True, is_group=True, text="status?")
+            event(
+                chat=GROUP,
+                sender=OWN_JID,
+                from_me=True,
+                is_group=True,
+                text="status?",
+                mentions=[OWN_JID],
+            )
         )
         assert len(h.dispatched) == 1
 
