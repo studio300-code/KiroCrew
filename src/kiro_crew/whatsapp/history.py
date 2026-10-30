@@ -57,7 +57,13 @@ def _message_text(row: sqlite3.Row) -> str:
     if kind == "sticker":
         return "[sticker]"
     if kind == "document":
-        return f"[documento] {body}".strip()
+        # media_desc is the text extracted from the PDF/DOCX, not a caption.
+        # The path is what lets the agent open the original when it needs more
+        # than the extracted text (a scan, an attachment, a signature page).
+        detail = desc or body
+        file_path = str(row["media_path"] or "").strip()
+        prefix = f"[documento] [file: {file_path}]" if file_path else "[documento]"
+        return f"{prefix} {detail}".strip()
     return body or f"[{kind}]"
 
 
@@ -86,7 +92,8 @@ def quoted_message_context(
         con.row_factory = sqlite3.Row
         row = con.execute(
             "SELECT msg_id, datetime(ts,'unixepoch','localtime') AS when_, "
-            "sender, from_me, msg_type, body, transcript, media_desc, audio_path "
+            "sender, from_me, msg_type, body, transcript, media_desc, "
+            "media_path, audio_path "
             "FROM messages WHERE chat_id=? AND msg_id=? LIMIT 1",
             (chat_id, msg_id),
         ).fetchone()
@@ -151,7 +158,7 @@ def recent_chat_context(
         cutoff = f"-{WINDOW_DAYS} days"
         rows = con.execute(
             "SELECT datetime(ts,'unixepoch','localtime') AS when_, sender, "
-            "from_me, msg_type, body, transcript, media_desc, chat_name "
+            "from_me, msg_type, body, transcript, media_desc, media_path, chat_name "
             "FROM messages WHERE chat_id=? AND msg_id<>? "
             "AND ts >= strftime('%s','now',?) "
             "ORDER BY ts DESC LIMIT ?",

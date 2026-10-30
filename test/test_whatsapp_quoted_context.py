@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+import time
 
 from kiro_crew.whatsapp import history
 
@@ -30,6 +31,24 @@ def _db(path):
              "", "/tmp/op.ogg"),
         ],
     )
+    con.execute(
+        "INSERT INTO messages (msg_id, chat_id, chat_name, sender, from_me, ts, "
+        "body, msg_type, media_path, media_mime, media_desc) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        (
+            "doc",
+            CHAT,
+            "Maki",
+            "Maki",
+            0,
+            int(time.time()),
+            "",
+            "document",
+            "/tmp/contract.docx",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "[Document: contract.docx]\nCONTRATTO DI LOCAZIONE",
+        ),
+    )
     con.commit()
     con.close()
 
@@ -51,3 +70,26 @@ def test_quoted_context_names_the_audio_file_when_untranscribed(tmp_path):
     assert "io:" in text
     assert "file audio: /tmp/op.ogg" in text
     assert "msg_id=op" in text
+
+
+def test_quoted_document_carries_its_extracted_text_and_path(tmp_path):
+    """A quoted contract is the contract, not the word "[documento]".
+
+    The extracted text is already in ``media_desc``; the path is how the agent
+    opens the original when it needs more than the extracted text.
+    """
+    db = tmp_path / "wa.db"
+    _db(db)
+    text = history.quoted_message_context(CHAT, "doc", db_path=str(db))
+    assert "CONTRATTO DI LOCAZIONE" in text
+    assert "[file: /tmp/contract.docx]" in text
+    assert "[documento] [file: /tmp/contract.docx]" in text
+    assert "[Document: contract.docx]" in text
+
+
+def test_recent_history_carries_a_documents_text_and_path(tmp_path):
+    db = tmp_path / "wa.db"
+    _db(db)
+    text = history.recent_chat_context(CHAT, db_path=str(db), limit=10)
+    assert "CONTRATTO DI LOCAZIONE" in text
+    assert "[file: /tmp/contract.docx]" in text
