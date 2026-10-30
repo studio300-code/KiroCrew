@@ -46,6 +46,10 @@ image.
   "enabled, credentials present". An actual inbound reply still needs a person
   with the Telegram account.
 - Export: `dist/kirocrew-opencode-0.12.0.tar.gz`, 606 MB.
+- Vision: a real `_describe_image` call with `nvidia/nemotron-3.5-super-vl:free`
+  returned an Italian description of a contract screenshot.
+- Voice: the container transcribed a real `.opus` WhatsApp note through the
+  built-in whisper.cpp path; no external ASUS transcriber was needed.
 - AppArmor profile `kirocrew-container` loaded on the ASUS; without it the
   OpenCode harness correctly refuses to run unsandboxed.
 
