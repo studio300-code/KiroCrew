@@ -275,8 +275,13 @@ ACP_BACKENDS_HOOKS_LIST = frozenset({ACP_BACKEND_KAS})
 #: through :mod:`kiro_crew.acp.harness_tool_names`. claude and codex are NOT: each
 #: approves some calls inside the harness without asking, so a PreToolUse hook
 #: would be skipped on exactly those calls until Crew makes them ask.
+#: Muse is a member on the same two facts: its ``session/new`` element set has no
+#: hooks field, and ``muse-acp`` sends ``session/request_permission`` for every
+#: tool call under the ``promptUnmatched`` mode Crew applies and reads back. Its
+#: shell tool carries the provider-neutral ``execute`` kind, so a shell matcher
+#: written in kiro-cli's names meets the call as ``execute_bash``.
 ACP_BACKENDS_CREW_FIRES_SPEC_HOOKS = frozenset(
-    {ACP_BACKEND_KAS, ACP_BACKEND_GOOSE, ACP_BACKEND_OPENCODE}
+    {ACP_BACKEND_KAS, ACP_BACKEND_GOOSE, ACP_BACKEND_OPENCODE, ACP_BACKEND_MUSE}
 )
 
 
