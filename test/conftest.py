@@ -13,12 +13,23 @@ import site
 import socket
 import struct
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.parse
 
 import pytest
 from hypothesis import HealthCheck, settings
+
+# The archive and media directories default to the operator's live WhatsApp data.
+# A transport test constructs MirrorTap, and its durable worker claims pending
+# jobs from that archive and downloads them with the test's fake client, so the
+# suite would rewrite real media_jobs rows and drop fixture files into the live
+# media tree. Point both at a throwaway root for the whole session; a test that
+# needs a specific path still passes one explicitly.
+_TEST_WA_ROOT = pathlib.Path(tempfile.mkdtemp(prefix="kirocrew-test-wa-"))
+os.environ.setdefault("KIROCREW_WA_ARCHIVE", str(_TEST_WA_ROOT / "wa.db"))
+os.environ.setdefault("KIROCREW_WA_MEDIA", str(_TEST_WA_ROOT / "media"))
 
 if os.name == "nt":
 
