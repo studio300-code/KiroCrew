@@ -426,7 +426,7 @@ def schemas() -> list[dict[str, Any]]:
             "description": (
                 "Send a file to the user. Copies the file to the outbox and "
                 "notifies the dashboard with a download link. When this "
-                "session is linked to a Telegram, Discord or WeCom "
+                "session is linked to a Telegram, Discord, WeCom or WhatsApp "
                 "conversation the file is also delivered there natively; "
                 "otherwise it uploads to "
                 "Slack when the caller's Slack identity permits it. Use "

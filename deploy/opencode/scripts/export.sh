@@ -4,7 +4,7 @@
 #   deploy/opencode/scripts/export.sh [output-dir]
 #
 # On the private server:
-#   gunzip -c kirocrew-opencode-0.12.0.tar.gz | docker load
+#   gunzip -c kirocrew-opencode-<version>.tar.gz | docker load
 #   docker compose up -d
 
 set -eu

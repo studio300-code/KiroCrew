@@ -101,6 +101,10 @@ Most values are in `.env`; see `.env.example` for the full list.
 | `KIROCREW_ENABLE_WHATSAPP` | `1` starts the channel; `0` disables it |
 | `WHATSAPP_PAIR_PHONE` | phone number used by `whatsapp-pair.sh` when no CLI argument is given |
 | `WHATSAPP_ALLOWED_WA_IDS` | optional DM/group sender allowlist |
+| `KIROCREW_SKILLS_AUTO_CREATE` | `1` learns reusable procedures from finished sessions |
+| `KIROCREW_SKILLS_AUTO_REFINE` | `1` refines an auto-created skill when the agent finds a better path |
+| `KIROCREW_SKILLS_REQUIRE_APPROVAL` | `0` publishes prose-only candidates without review |
+| `KIROCREW_SKILLS_GENERATE_SCRIPTS` | `0` keeps auto-created skills prose-only (scripts are always approval-gated) |
 | `KIROCREW_STT_MODEL` | whisper.cpp model, default `small` |
 | `KIROCREW_STT_LANGUAGE` | default `it` |
 | `KIROCREW_YOLO` | `1` auto-approves agent tools; `0` keeps approvals |
@@ -109,7 +113,8 @@ Most values are in `.env`; see `.env.example` for the full list.
 | `KIROCREW_BIND_HOST`, `KIROCREW_PORT` | published address and port |
 
 The seed is idempotent. On an existing volume it merges the stack-managed keys
-(model, effort, roles, sandbox, STT, channel enable flags). Groups, skills,
+(model, effort, roles, sandbox, STT, channel enable flags, and the four
+`KIROCREW_SKILLS_*` switches only when they are set). Groups,
 memory, sessions and channel credentials are preserved. Set
 `KIROCREW_PRESERVE_AGENT_MODEL=1` to keep a model chosen in the dashboard.
 
@@ -156,7 +161,7 @@ or export a single file:
 ```bash
 deploy/opencode/scripts/export.sh
 # on the server:
-gunzip -c kirocrew-opencode-0.12.0.tar.gz | docker load
+gunzip -c kirocrew-opencode-<version>.tar.gz | docker load
 cd deploy/opencode && docker compose up -d
 ```
 

@@ -31,12 +31,16 @@ image.
       reverse proxy, and the WhatsApp ToS risk.
 - [x] A smoke test proves the image has no embedded personal data and no
       dependency on the host's `/home/marco`.
+- [x] The image converts DOCX/ODT to PDF with LibreOffice and the bundled
+      WhatsApp skill returns the result through `file_send`, not SSH.
 
 ## Current evidence
 
-- Image: `kirocrew-opencode:0.12.0` / `:test`, 2.45 GB, built 2026-10-30.
+- Image: `kirocrew-opencode:0.12.1` / `:test`, 2.97 GB, built 2026-10-30.
 - `deploy/opencode/scripts/smoke.sh` passed: healthy, OpenCode 2.2.4, ffmpeg,
-  neonize, pywhispercpp, seeded model/effort, auth, dashboard token, image-clean.
+  LibreOffice 25.2.3 (`libreoffice-convert-ok`, DOCX → PDF), neonize,
+  pywhispercpp, seeded model/effort, skill learning on with approval and script
+  generation off, auth, dashboard token, image-clean.
 - Live turn in the container: `docker-final-live`, HTTP 200, assistant `OK`,
   `turn_stats.model=openrouter/nvidia/nemotron-3-ultra-550b-a55b:free`.
 - WhatsApp phone pairing on a fresh volume returned a code through the
@@ -45,7 +49,15 @@ image.
 - Telegram: token stored, `telegram.enabled=true`, doctor reports
   "enabled, credentials present". An actual inbound reply still needs a person
   with the Telegram account.
-- Export: `dist/kirocrew-opencode-0.12.0.tar.gz`, 606 MB.
+- Export: `dist/kirocrew-opencode-0.12.1.tar.gz`, 742 MB.
+- Document delivery: the WhatsApp skill now says to convert with
+  `libreoffice --headless --convert-to pdf` and send with the MCP `file_send`
+  tool; `ssh`/`wa_send.py` remain denied. The `file_send` description now names
+  WhatsApp among the channels with native delivery.
+- Skill learning: `KIROCREW_SKILLS_AUTO_CREATE=1`,
+  `KIROCREW_SKILLS_AUTO_REFINE=1`, `KIROCREW_SKILLS_REQUIRE_APPROVAL=0`,
+  `KIROCREW_SKILLS_GENERATE_SCRIPTS=0` in `.env.example`; the seed applies them
+  only when set, so an operator's dashboard choice survives an update.
 - Vision: a real `_describe_image` call with `nvidia/nemotron-3.5-super-vl:free`
   returned an Italian description of a contract screenshot.
 - Voice: the container transcribed a real `.opus` WhatsApp note through the

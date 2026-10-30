@@ -36,6 +36,18 @@ def _bool(name: str, default: bool) -> bool:
     return raw.strip().lower() not in {"0", "false", "no", "off", ""}
 
 
+def _opt_bool(name: str) -> bool | None:
+    """An env switch that stays unset unless the operator writes it.
+
+    ``None`` means "leave the stored config alone" -- unlike ``_bool``, whose
+    default would overwrite a dashboard choice on every container start.
+    """
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return None
+    return raw.strip().lower() not in {"0", "false", "no", "off"}
+
+
 def _ints(name: str) -> list[int]:
     out: list[int] = []
     for part in os.environ.get(name, "").replace(",", " ").split():
@@ -155,6 +167,21 @@ def _seed_kirocrew() -> pathlib.Path:
             "polish": False,
         },
     }
+
+    # Skill learning is stack-managed only when the operator sets a switch:
+    # an unset variable leaves the dashboard choice in the volume untouched.
+    skills_overlay: dict = {}
+    for key, env_name in (
+        ("auto_create_from_sessions", "KIROCREW_SKILLS_AUTO_CREATE"),
+        ("auto_refine_on_deviation", "KIROCREW_SKILLS_AUTO_REFINE"),
+        ("approval_required", "KIROCREW_SKILLS_REQUIRE_APPROVAL"),
+        ("generate_scripts", "KIROCREW_SKILLS_GENERATE_SCRIPTS"),
+    ):
+        value = _opt_bool(env_name)
+        if value is not None:
+            skills_overlay[key] = value
+    if skills_overlay:
+        overlay["skills"] = skills_overlay
 
     telegram_token = bool(os.environ.get("TELEGRAM_BOT_TOKEN", "").strip())
     telegram_ids = _ints("TELEGRAM_ALLOWED_USER_IDS")

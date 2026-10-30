@@ -73,7 +73,10 @@ RUN set -eux; \
         *) echo "unsupported TARGETARCH: ${TARGETARCH}" >&2; exit 1 ;; \
     esac; \
     URL="https://registry.npmjs.org/@opencode%2f${PKG}/-/${PKG}-${OPENCODE_VERSION}.tgz"; \
-    curl --proto '=https' --tlsv1.2 -fsSL "$URL" -o /tmp/opencode.tgz; \
+    curl --proto '=https' --tlsv1.2 -fsSL \
+        --retry 5 --retry-delay 5 --connect-timeout 30 \
+        -A "kirocrew-docker-build" \
+        "$URL" -o /tmp/opencode.tgz; \
     echo "${SHA}  /tmp/opencode.tgz" | sha512sum -c -; \
     mkdir -p /tmp/opencode; \
     tar -xzf /tmp/opencode.tgz -C /tmp/opencode; \
