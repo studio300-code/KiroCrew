@@ -678,3 +678,26 @@ def test_binary_pdf_text_is_not_stored_as_media_description() -> None:
 
     assert _looks_like_text("CONTRATTO DI LOCAZIONE\nArt. 1 ...")
     assert not _looks_like_text("(;;;;\ufffd\ufffd\x00\x01\x02" * 100)
+
+
+@pytest.mark.asyncio
+async def test_archive_transcriber_falls_back_to_builtin_stt(monkeypatch, tmp_path):
+    """A container has no ASUS transcriber.sh; the archive must still transcribe.
+
+    The external shim is the native fast path. When the configured path does
+    not exist, the worker uses Kiro Crew's own STT instead of silently
+    returning an empty transcript.
+    """
+    from kiro_crew.whatsapp import mirror
+
+    tap = mirror.MirrorTap.__new__(mirror.MirrorTap)
+    monkeypatch.setattr(mirror, "TRANSCRIBER", str(tmp_path / "missing.sh"))
+
+    async def fake_transcribe(path):
+        assert path.endswith("voice.ogg")
+        return "  ciao dal vocale  "
+
+    monkeypatch.setattr("kiro_crew.transcribe.transcribe_audio", fake_transcribe)
+    audio = tmp_path / "voice.ogg"
+    audio.write_bytes(b"not really audio")
+    assert await tap._transcribe(audio) == "ciao dal vocale"

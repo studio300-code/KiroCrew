@@ -9,7 +9,8 @@ Fail-open by construction: bounded queues, short timeouts, every error swallowed
 The archive must never slow down or break a turn.
 
 Media (voice notes, images) are downloaded by a SECOND worker and processed:
-- voice -> transcriber.sh (orukeet/parakeet) -> messages.transcript
+- voice -> KIROCREW_TRANSCRIBER shim when present, else built-in STT ->
+  messages.transcript
 - image/video -> OpenRouter API (Nemotron 3.5 Super VL vision) -> messages.media_desc
 
 Both write back into wa.db so the skill sees them. No browser, no sweep.
@@ -107,6 +108,11 @@ NAME_CACHE_MAX = 2000
 # OpenRouter config for vision
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 OPENROUTER_VISION_MODEL = os.environ.get("OPENROUTER_VISION_MODEL", "nvidia/nemotron-3.5-super-vl:free")
+
+#: Optional external transcriber (the ASUS orukeet/parakeet shim). When unset or
+#: missing, the archive worker uses Kiro Crew's built-in STT instead, so a
+#: container has voice-note transcripts without a host-specific script.
+TRANSCRIBER = os.environ.get("KIROCREW_TRANSCRIBER", "")
 OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 #: media.py kinds -> the strings the archive stores in messages.msg_type
@@ -853,29 +859,46 @@ class MirrorTap:
         }.get(kind, "bin")
 
     async def _transcribe(self, path: Path, timeout: float = 120.0) -> str:
-        """Run transcriber.sh and return transcript text."""
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                "/home/marco/.config/opencode/scripts/transcriber.sh",
-                "--lang", "it",
-                "--model", "orukeet",
-                str(path),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-            if proc.returncode != 0:
-                logger.debug("transcriber failed: %s", stderr.decode()[:200])
+        """Transcribe *path*, preferring the configured external shim.
+
+        The native ASUS install points ``KIROCREW_TRANSCRIBER`` at its
+        orukeet/parakeet wrapper. A container has no such wrapper, so when the
+        path is absent this falls back to Kiro Crew's own ``transcribe_audio``
+        (local whisper.cpp by default). The fallback is what makes the archive
+        worker portable instead of silently producing no transcripts.
+        """
+        script = str(TRANSCRIBER or "").strip()
+        if script and Path(script).is_file():
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    script,
+                    "--lang", os.environ.get("KIROCREW_TRANSCRIBER_LANG", "it"),
+                    "--model", os.environ.get("KIROCREW_TRANSCRIBER_MODEL", "orukeet"),
+                    str(path),
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+                if proc.returncode != 0:
+                    logger.debug("transcriber failed: %s", stderr.decode()[:200])
+                    return ""
+                # Parse output: "TXT=/path/to/file.txt"
+                for line in stdout.decode().splitlines():
+                    if line.startswith("TXT="):
+                        txt_path = Path(line.split("=", 1)[1].strip())
+                        if txt_path.exists():
+                            return txt_path.read_text(encoding="utf-8").strip()
                 return ""
-            # Parse output: "TXT=/path/to/file.txt"
-            for line in stdout.decode().splitlines():
-                if line.startswith("TXT="):
-                    txt_path = Path(line.split("=", 1)[1].strip())
-                    if txt_path.exists():
-                        return txt_path.read_text(encoding="utf-8").strip()
-            return ""
+            except Exception as e:  # noqa: BLE001
+                logger.debug("external transcriber error: %s", e)
+                return ""
+        try:
+            from kiro_crew.transcribe import transcribe_audio
+
+            text = await asyncio.wait_for(transcribe_audio(str(path)), timeout=timeout)
+            return (text or "").strip()
         except Exception as e:  # noqa: BLE001
-            logger.debug("transcriber error: %s", e)
+            logger.debug("built-in transcriber error: %s", e)
             return ""
 
     async def _describe_image(self, path: Path) -> str:
