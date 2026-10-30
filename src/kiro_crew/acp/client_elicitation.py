@@ -40,6 +40,7 @@ from kiro_crew.acp.elicitation import (
     validate_form_content,
 )
 from kiro_crew.acp.types import EVENT_ELICITATION_REQUEST, AcpEvent, JsonRpcMessage
+from kiro_crew.agent_sdk.backends import ACP_BACKEND_MUSE
 from kiro_crew.executors import subprocess_executor
 
 if TYPE_CHECKING:
@@ -125,6 +126,28 @@ async def _handle_elicitation_request(self: AcpClient, msg: JsonRpcMessage) -> A
                 msg.id, ELICITATION_DECLINE, "unrenderable_request"
             )
             await self._send_response(msg.id, elicitation_response(ELICITATION_DECLINE))
+        return None
+    # Muse's adapter offers an optional feedback form after a rejection. It is
+    # not an approval and the rejection already stands; asking the person to
+    # justify it on every denied tool is noise. Decline it automatically so the
+    # denial completes without a dashboard card.
+    if (
+        self.backend == ACP_BACKEND_MUSE
+        and request.message.strip() == "Optional guidance for rejecting this action"
+    ):
+        logger.info(
+            "elicitation: auto-declining Muse rejection feedback [req=%s session=%s]",
+            _loggable_request_id(request.request_id),
+            self._session_id,
+        )
+        await self._audit_elicitation_decision(
+            request.request_id,
+            ELICITATION_DECLINE,
+            "muse_rejection_feedback",
+            tool_call_id=request.tool_call_id,
+            mode=request.mode,
+        )
+        await self._send_response(request.request_id, elicitation_response(ELICITATION_DECLINE))
         return None
     if not self.accepts_elicitation:
         logger.info(
