@@ -121,6 +121,25 @@ The seed is idempotent. On an existing volume it merges the stack-managed keys
 memory, sessions and channel credentials are preserved. Set
 `KIROCREW_PRESERVE_AGENT_MODEL=1` to keep a model chosen in the dashboard.
 
+### Orukeet resident on CUDA (the ASUS setup)
+
+The ASUS keeps the Q8 orukeet model resident in GPU memory
+(`orukeet-transcriber.service`, CUDA only). A second copy inside the container
+does not fit in the 2 GB card, so the container shares the host socket through
+`compose.orukeet.yaml`:
+
+```bash
+docker compose -f deploy/opencode/compose.yaml \
+               -f deploy/opencode/compose.orukeet.yaml up -d
+```
+
+The override mounts the host cache and the read-only orukeet tree at the same
+absolute paths, uses `/usr/local/bin/kirocrew-transcriber-docker`, and sets
+`KIROCREW_TRANSCRIBER_STRICT=1`: if the host service is down, the turn gets no
+transcript rather than silently falling back to whisper. Start the host service
+first (`systemctl status orukeet-transcriber`). Without the override the image
+keeps its portable whisper.cpp path.
+
 ### Optional: external transcriber (orukeet/parakeet)
 
 The image transcribes voice notes and video soundtracks with its own

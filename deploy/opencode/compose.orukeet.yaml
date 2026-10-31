@@ -1,0 +1,20 @@
+# Optional override: share the host's resident orukeet CUDA server.
+#
+#   docker compose -f deploy/opencode/compose.yaml \
+#                  -f deploy/opencode/compose.orukeet.yaml up -d
+#
+# The ASUS GPU has 2 GB and the resident model already takes ~950 MB, so the
+# container does NOT load a second model: it reaches the host socket through a
+# bind-mounted cache directory. The host must be running
+# orukeet-transcriber.service. Without this override the image keeps its
+# portable whisper.cpp fallback.
+services:
+  kirocrew:
+    volumes:
+      - ${ORUKEET_CACHE_DIR:-/home/marco/.cache}:/home/marco/.cache
+      - ${ORUKEET_NATIVE_DIR:-/home/marco/.local/share/orukeet-native}:/home/marco/.local/share/orukeet-native:ro
+    environment:
+      KIROCREW_TRANSCRIBER: /usr/local/bin/kirocrew-transcriber-docker
+      KIROCREW_TRANSCRIBER_STRICT: "1"
+      ORUKEET_SOCKET: /home/marco/.cache/orukeet-transcriber.sock
+      ORUKEET_SHARED_DIR: /home/marco/.cache/orukeet-shared

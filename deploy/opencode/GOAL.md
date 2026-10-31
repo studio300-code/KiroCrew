@@ -36,11 +36,12 @@ image.
 
 ## Current evidence
 
-- Image: `kirocrew-opencode:0.12.3` / `:test`, 2.97 GB, built 2026-10-31.
+- Image: `kirocrew-opencode:0.12.4` / `:test`, 2.97 GB, built 2026-10-31.
 - `deploy/opencode/scripts/smoke.sh` passed: healthy, OpenCode 2.2.4, ffmpeg,
   LibreOffice 25.2.3 (`libreoffice-convert-ok`, DOCX → PDF), neonize,
-  pywhispercpp, sandbox off, seeded model/effort, skill learning on with
-  approval and script generation off, auth, dashboard token, image-clean.
+  pywhispercpp, orukeet client present, sandbox auto, seeded model/effort,
+  skill learning on with approval and script generation off, auth, dashboard
+  token, image-clean.
 - Live turn in the container: `docker-final-live`, HTTP 200, assistant `OK`,
   `turn_stats.model=openrouter/nvidia/nemotron-3-ultra-550b-a55b:free`.
 - WhatsApp phone pairing on a fresh volume returned a code through the
@@ -49,7 +50,7 @@ image.
 - Telegram: token stored, `telegram.enabled=true`, doctor reports
   "enabled, credentials present". An actual inbound reply still needs a person
   with the Telegram account.
-- Export: `dist/kirocrew-opencode-0.12.3.tar.gz`, 742 MB.
+- Export: `dist/kirocrew-opencode-0.12.4.tar.gz`, 742 MB.
 - Document delivery: the WhatsApp skill now says to convert with
   `libreoffice --headless --convert-to pdf` and send with the MCP `file_send`
   tool; `ssh`/`wa_send.py` remain denied. The `file_send` description now names
@@ -58,9 +59,13 @@ image.
   refuses to run unsandboxed. The SEL trust key is restored read-only into the
   sandbox after the masks, so the in-sandbox MCP server verifies the session
   token instead of creating a divergent key and refusing every tool call.
-- Transcription: the native host uses orukeet via `KIROCREW_TRANSCRIBER`; the
-  image ships whisper.cpp as the portable fallback and accepts a mounted
-  external wrapper with the same `TXT=` contract.
+- Transcription: the native host runs orukeet resident on CUDA (Q8 GGUF, ~941
+  MiB VRAM). The image ships whisper.cpp as the portable default; the optional
+  `compose.orukeet.yaml` shares the host socket and cache, sets
+  `KIROCREW_TRANSCRIBER_STRICT=1`, and uses the bundled
+  `kirocrew-transcriber-docker` client. End-to-end test: a voice file copied
+  into an override container produced `.it.orukeet.txt` through the host CUDA
+  server. No second model is loaded in the 2 GB GPU.
 - Skill learning: `KIROCREW_SKILLS_AUTO_CREATE=1`,
   `KIROCREW_SKILLS_AUTO_REFINE=1`, `KIROCREW_SKILLS_REQUIRE_APPROVAL=0`,
   `KIROCREW_SKILLS_GENERATE_SCRIPTS=0` in `.env.example`; the seed applies them

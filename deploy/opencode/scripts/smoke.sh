@@ -53,6 +53,7 @@ echo "== binaries =="
 docker exec "$CTR" opencode --version
 docker exec "$CTR" ffmpeg -version 2>/dev/null | head -n 1
 docker exec "$CTR" python3 -c 'import neonize, pywhispercpp; print("neonize+pywhispercpp ok")'
+docker exec "$CTR" test -x /usr/local/bin/kirocrew-transcriber-docker && echo orukeet-client-present
 
 echo "== document conversion =="
 docker exec "$CTR" sh -c 'libreoffice --version | head -n 1'

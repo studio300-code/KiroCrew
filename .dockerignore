@@ -24,6 +24,10 @@ deploy/*
 deploy/opencode/*
 !deploy/opencode/entrypoint.sh
 !deploy/opencode/seed.py
+# Container-side orukeet client for the optional compose override.
+!deploy/opencode/scripts
+deploy/opencode/scripts/*
+!deploy/opencode/scripts/transcriber-docker.sh
 
 # Generic product skills shipped in the image (no user data).
 !deploy/opencode/skills

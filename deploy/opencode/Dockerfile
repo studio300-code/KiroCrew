@@ -120,6 +120,9 @@ RUN set -eux; \
 # and a user's own skills stay untouched. skills.extra_paths in the seed points
 # here.
 COPY --chmod=755 deploy/opencode/skills /usr/local/share/kirocrew/skills
+# Container-side client for the optional orukeet override (compose.orukeet.yaml):
+# it reaches the host's resident CUDA server through a bind-mounted socket.
+COPY --chmod=755 deploy/opencode/scripts/transcriber-docker.sh /usr/local/bin/kirocrew-transcriber-docker
 
 # Non-root runtime user. HOME holds ALL persistent state; mount a named volume
 # at /home/kirocrew (named volumes inherit the image's ownership on first use).
