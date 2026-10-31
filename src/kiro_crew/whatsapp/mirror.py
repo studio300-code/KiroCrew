@@ -113,6 +113,11 @@ OPENROUTER_VISION_MODEL = os.environ.get("OPENROUTER_VISION_MODEL", "nvidia/nemo
 #: missing, the archive worker uses Kiro Crew's built-in STT instead, so a
 #: container has voice-note transcripts without a host-specific script.
 TRANSCRIBER = os.environ.get("KIROCREW_TRANSCRIBER", "")
+#: When true, never fall back to the built-in recogniser if the configured
+#: external wrapper is missing or fails: the native host wants orukeet only.
+TRANSCRIBER_STRICT = os.environ.get(
+    "KIROCREW_TRANSCRIBER_STRICT", ""
+).strip().lower() not in {"", "0", "false", "no", "off"}
 OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 #: media.py kinds -> the strings the archive stores in messages.msg_type
@@ -897,6 +902,13 @@ class MirrorTap:
             except Exception as e:  # noqa: BLE001
                 logger.debug("external transcriber error: %s", e)
                 return ""
+        if TRANSCRIBER_STRICT:
+            logger.warning(
+                "whatsapp mirror: external transcriber unavailable (%r); "
+                "strict mode refuses the built-in recogniser",
+                script,
+            )
+            return ""
         try:
             from kiro_crew.transcribe import transcribe_audio
 
