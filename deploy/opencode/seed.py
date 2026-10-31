@@ -146,7 +146,7 @@ def _seed_kirocrew() -> pathlib.Path:
         "fallback_model": fallback,
         "approval_mode": os.environ.get("KIROCREW_APPROVAL_MODE", "auto"),
         "dangerously_skip_permissions": _bool("KIROCREW_YOLO", False),
-        "sandbox": "auto",
+        "sandbox": os.environ.get("KIROCREW_SANDBOX", "auto").strip() or "auto",
         "sandbox_allow_unsandboxed_exec": (not probe_ok and allow_unsandboxed),
         "chat_turn_timeout_secs": 86400,
     }

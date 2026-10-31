@@ -1006,6 +1006,18 @@ class OpencodeLaunch(ProcessAdapter):
             launch_mod._sandbox_preflight, self.backend, ctx.sandbox_mode
         )
         expose = acp_tool_gate.adapter_expose_files(self.backend, hidden)
+        # The in-sandbox MCP server verifies the session token with the SEL trust
+        # root. ``trust/`` is masked to an empty writable tmpfs, so without this
+        # read-only copy the verifier sees no key, creates its own, and refuses
+        # every tool call with a signature mismatch. ``expose`` is pre-read outside
+        # the sandbox and restored read-only inside the mask.
+        from kiro_crew.sel import sel_hmac_key_path
+
+        sel_key_path = sel_hmac_key_path()
+        if sel_key_path.is_file():
+            sel_key = str(sel_key_path)
+            if sel_key not in expose:
+                expose = (*expose, sel_key)
         # The version gate, BEFORE the read-back: every child below this line is
         # this harness's own binary doing work only its tested major's shapes are
         # measured against. A binary outside that line is refused here, so the

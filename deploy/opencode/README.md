@@ -38,22 +38,23 @@ Open the printed `http://127.0.0.1:5476/?token=...` link. The first start seeds:
 
 All of that lives in the `kirocrew-home` named volume, not in the image.
 
-## Host prerequisite: AppArmor
+## Host prerequisite: AppArmor (only for the inner sandbox)
 
-The OpenCode harness refuses to run unsandboxed: it routes tool calls through a
-permission gate whose compensating control is the OS-level credential mask. On
-Ubuntu 23.10+ the kernel restricts unprivileged user namespaces, and Docker's
-default AppArmor profile blocks the mount namespace the inner sandbox builds.
-`scripts/install-host.sh` installs a tiny profile that grants only `userns,`
-(the same grant the native `kirocrew-userns` profile uses). The compose file
-references it as `apparmor=kirocrew-container`.
+The default `.env.example` sets `KIROCREW_SANDBOX=off`: the container itself is
+the isolation boundary, the ASUS-validated mode. It also avoids the in-sandbox
+MCP identity mismatch, where the masked SEL trust root made every tool call
+fail closed. In that mode the AppArmor profile is not required, though
+`scripts/up.sh` still installs it so `auto`/`strict` remain available.
 
-Run it once per host, then keep it across reboots (AppArmor loads the profile
-from `/etc/apparmor.d` automatically). `scripts/up.sh` does this check and the
-`sudo` install for you, so day-to-day you only run one command. If your host
-does not use AppArmor, the stack cannot select the OpenCode harness with the
-inner sandbox; use a host that supports it or choose a harness whose tool calls
-reach the gate directly.
+To re-enable the inner mount namespace, set `KIROCREW_SANDBOX=auto` (or
+`strict`). The OpenCode harness then needs a kernel that permits unprivileged
+user namespaces. On Ubuntu 23.10+ Docker's default profile blocks the mount
+namespace the inner sandbox builds, so `scripts/install-host.sh` installs a tiny
+profile that grants only `userns,` (the same grant the native
+`kirocrew-userns` profile uses); compose references it as
+`apparmor=kirocrew-container`. Run it once per host; AppArmor reloads it from
+`/etc/apparmor.d` at boot. `scripts/up.sh` performs the check and the `sudo`
+install for you.
 
 ## First-run configuration
 
@@ -109,6 +110,7 @@ Most values are in `.env`; see `.env.example` for the full list.
 | `KIROCREW_STT_LANGUAGE` | default `it` |
 | `KIROCREW_YOLO` | `1` auto-approves agent tools; `0` keeps approvals |
 | `KIROCREW_ALLOW_UNSANDBOXED` | `1` accepts container-only isolation if the inner sandbox is refused |
+| `KIROCREW_SANDBOX` | `off` keeps the container as the boundary (validated default); `auto`/`strict` re-enable the inner sandbox |
 | `KIROCREW_PUBLIC_URL` | public dashboard origin for links/CORS |
 | `KIROCREW_BIND_HOST`, `KIROCREW_PORT` | published address and port |
 
@@ -117,6 +119,16 @@ The seed is idempotent. On an existing volume it merges the stack-managed keys
 `KIROCREW_SKILLS_*` switches only when they are set). Groups,
 memory, sessions and channel credentials are preserved. Set
 `KIROCREW_PRESERVE_AGENT_MODEL=1` to keep a model chosen in the dashboard.
+
+### Optional: external transcriber (orukeet/parakeet)
+
+The image transcribes voice notes and video soundtracks with its own
+`pywhispercpp` model. To use a host-installed wrapper instead, mount it into the
+container read-only and set `KIROCREW_TRANSCRIBER` to the container path. The
+wrapper receives `--lang`, `--model` and the audio path, and must print
+`TXT=<absolute path>` for the produced text (the contract the ASUS
+`transcriber.sh` already implements). Without it the archive worker keeps using
+the portable local model.
 
 ## Updates
 

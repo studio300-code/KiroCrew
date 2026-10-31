@@ -36,11 +36,11 @@ image.
 
 ## Current evidence
 
-- Image: `kirocrew-opencode:0.12.1` / `:test`, 2.97 GB, built 2026-10-30.
+- Image: `kirocrew-opencode:0.12.2` / `:test`, 2.97 GB, built 2026-10-31.
 - `deploy/opencode/scripts/smoke.sh` passed: healthy, OpenCode 2.2.4, ffmpeg,
   LibreOffice 25.2.3 (`libreoffice-convert-ok`, DOCX → PDF), neonize,
-  pywhispercpp, seeded model/effort, skill learning on with approval and script
-  generation off, auth, dashboard token, image-clean.
+  pywhispercpp, sandbox off, seeded model/effort, skill learning on with
+  approval and script generation off, auth, dashboard token, image-clean.
 - Live turn in the container: `docker-final-live`, HTTP 200, assistant `OK`,
   `turn_stats.model=openrouter/nvidia/nemotron-3-ultra-550b-a55b:free`.
 - WhatsApp phone pairing on a fresh volume returned a code through the
@@ -49,11 +49,19 @@ image.
 - Telegram: token stored, `telegram.enabled=true`, doctor reports
   "enabled, credentials present". An actual inbound reply still needs a person
   with the Telegram account.
-- Export: `dist/kirocrew-opencode-0.12.1.tar.gz`, 742 MB.
+- Export: `dist/kirocrew-opencode-0.12.2.tar.gz`, 742 MB.
 - Document delivery: the WhatsApp skill now says to convert with
   `libreoffice --headless --convert-to pdf` and send with the MCP `file_send`
   tool; `ssh`/`wa_send.py` remain denied. The `file_send` description now names
   WhatsApp among the channels with native delivery.
+- Sandbox: `KIROCREW_SANDBOX=off` in `.env.example` (the ASUS-validated mode):
+  the container is the isolation boundary. The SEL trust key is also exposed
+  read-only to the inner sandbox when `auto` is selected, so its MCP server can
+  verify the session token instead of creating a divergent key and refusing
+  every tool call.
+- Transcription: the native host uses orukeet via `KIROCREW_TRANSCRIBER`; the
+  image ships whisper.cpp as the portable fallback and accepts a mounted
+  external wrapper with the same `TXT=` contract.
 - Skill learning: `KIROCREW_SKILLS_AUTO_CREATE=1`,
   `KIROCREW_SKILLS_AUTO_REFINE=1`, `KIROCREW_SKILLS_REQUIRE_APPROVAL=0`,
   `KIROCREW_SKILLS_GENERATE_SCRIPTS=0` in `.env.example`; the seed applies them
