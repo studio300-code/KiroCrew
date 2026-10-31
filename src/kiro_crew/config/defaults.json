@@ -19,7 +19,9 @@
     "@kirocrew-core",
     "@kirocrew-computer",
     "@kirocrew-guide",
-    "@kirocrew-mate"
+    "@kirocrew-mate",
+    "@kirocrew-core/spawn_run",
+    "@kirocrew-core/spawn_sub_agents"
   ],
   "allowedTools": [
     "fs_read",
@@ -62,15 +64,16 @@
     "@kirocrew-mate/offer_dashboard_page",
     "@kirocrew-mate/key_result_progress",
     "@kirocrew-mate/save_goal_report",
-    "@kirocrew-mate/save_notes"
+    "@kirocrew-mate/save_notes",
+    "@kirocrew-core/spawn_run",
+    "@kirocrew-core/spawn_sub_agents"
   ],
   "resources": [
     "file://.kiro/steering/**/*.md"
   ],
   "includeMcpJson": false,
   "hooks": {
-    "auto_approve_tools": [
-    ],
+    "auto_approve_tools": [],
     "postToolUse": [
       {
         "matcher": "execute_bash",
