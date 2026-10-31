@@ -86,7 +86,7 @@ docker exec "$CTR" kirocrew config get agent.reasoning_effort
 docker exec "$CTR" kirocrew config get agent.role_models
 docker exec "$CTR" kirocrew config get agent.role_efforts
 docker exec "$CTR" kirocrew config get stt.model
-docker exec "$CTR" sh -c 'kirocrew config get agent.sandbox | grep -qix off' && echo sandbox-off
+docker exec "$CTR" sh -c 'kirocrew config get agent.sandbox | grep -qix auto' && echo sandbox-auto
 docker exec "$CTR" sh -c 'kirocrew config get skills.auto_create_from_sessions | grep -qix true' && echo skills-auto-create-on
 docker exec "$CTR" sh -c 'kirocrew config get skills.approval_required | grep -qix false' && echo skills-approval-off
 docker exec "$CTR" sh -c 'kirocrew config get skills.generate_scripts | grep -qix false' && echo skills-scripts-off

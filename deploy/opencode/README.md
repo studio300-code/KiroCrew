@@ -38,23 +38,24 @@ Open the printed `http://127.0.0.1:5476/?token=...` link. The first start seeds:
 
 All of that lives in the `kirocrew-home` named volume, not in the image.
 
-## Host prerequisite: AppArmor (only for the inner sandbox)
+## Host prerequisite: AppArmor
 
-The default `.env.example` sets `KIROCREW_SANDBOX=off`: the container itself is
-the isolation boundary, the ASUS-validated mode. It also avoids the in-sandbox
-MCP identity mismatch, where the masked SEL trust root made every tool call
-fail closed. In that mode the AppArmor profile is not required, though
-`scripts/up.sh` still installs it so `auto`/`strict` remain available.
+The OpenCode harness refuses to run unsandboxed (its permission gate depends on
+the OS-level credential mask), so `.env.example` keeps `KIROCREW_SANDBOX=auto`.
+On Ubuntu 23.10+ the kernel restricts unprivileged user namespaces, and Docker's
+default AppArmor profile blocks the mount namespace the inner sandbox builds.
+`scripts/install-host.sh` installs a tiny profile that grants only `userns,`
+(the same grant the native `kirocrew-userns` profile uses). Compose references
+it as `apparmor=kirocrew-container`.
 
-To re-enable the inner mount namespace, set `KIROCREW_SANDBOX=auto` (or
-`strict`). The OpenCode harness then needs a kernel that permits unprivileged
-user namespaces. On Ubuntu 23.10+ Docker's default profile blocks the mount
-namespace the inner sandbox builds, so `scripts/install-host.sh` installs a tiny
-profile that grants only `userns,` (the same grant the native
-`kirocrew-userns` profile uses); compose references it as
-`apparmor=kirocrew-container`. Run it once per host; AppArmor reloads it from
-`/etc/apparmor.d` at boot. `scripts/up.sh` performs the check and the `sudo`
-install for you.
+Run it once per host, then keep it across reboots (AppArmor loads the profile
+from `/etc/apparmor.d` automatically). `scripts/up.sh` does this check and the
+`sudo` install for you, so day-to-day you only run one command.
+
+The image also restores the SEL trust key (`trust/sel_hmac.key`) into the
+sandbox read-only, after the masks. The in-sandbox MCP server needs it to verify
+the session token; without that copy it creates a divergent key and refuses
+every tool call with a signature mismatch.
 
 ## First-run configuration
 

@@ -54,11 +54,10 @@ image.
   `libreoffice --headless --convert-to pdf` and send with the MCP `file_send`
   tool; `ssh`/`wa_send.py` remain denied. The `file_send` description now names
   WhatsApp among the channels with native delivery.
-- Sandbox: `KIROCREW_SANDBOX=off` in `.env.example` (the ASUS-validated mode):
-  the container is the isolation boundary. The SEL trust key is also exposed
-  read-only to the inner sandbox when `auto` is selected, so its MCP server can
-  verify the session token instead of creating a divergent key and refusing
-  every tool call.
+- Sandbox: `KIROCREW_SANDBOX=auto` in `.env.example`; the OpenCode harness
+  refuses to run unsandboxed. The SEL trust key is restored read-only into the
+  sandbox after the masks, so the in-sandbox MCP server verifies the session
+  token instead of creating a divergent key and refusing every tool call.
 - Transcription: the native host uses orukeet via `KIROCREW_TRANSCRIBER`; the
   image ships whisper.cpp as the portable fallback and accepts a mounted
   external wrapper with the same `TXT=` contract.

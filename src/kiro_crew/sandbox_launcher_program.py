@@ -374,18 +374,23 @@ def place_masks(launch):
     """Place every mount, in the order the kernel's mount semantics require.
 
     Windows are staged before anything is masked, read-only seals land before the hides
-    placed on top of them, carve-outs after the seals they punch through, the exposed
-    files are restored into their empty masks, and the single files and ``~/.ssh`` are
-    masked last.
+    placed on top of them, carve-outs after the seals they punch through, and the single
+    files and ``~/.ssh`` are masked last. Exposed files are restored AFTER those masks:
+    their parent is already an empty stand-in, so the file loop skips them, and the
+    read-only copy is not masked again (the SEL trust key is one such file).
     """
     stage_private_windows(launch)
     seal_readonly(launch)
     mask_sensitive(launch)
     apply_carveouts(launch)
-    restore_exposed_files(launch)
     verify_fail_closed_aliases(launch)
     mask_sensitive_files(launch)
     mask_ssh_keys(launch)
+    # LAST: the exposed files are pre-read outside the masks and written back
+    # into their now-empty parent masks. Restoring before the single-file mask
+    # loop would re-mask a file that is also on the sensitive list (the SEL
+    # trust key), leaving the in-sandbox MCP server with no key.
+    restore_exposed_files(launch)
 
 
 def run_child(launch, argv):
