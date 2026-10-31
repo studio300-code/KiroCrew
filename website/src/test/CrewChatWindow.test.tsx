@@ -70,6 +70,7 @@ import {
   openCrewWindow, closeCrewWindow, useCrewWindow, reloadCrewWindowForTest, writeCrewDraft,
   capsRetryInterval,
 } from '../pages/chat/crew-window/crewWindowStore'
+import { crewModePreviewOn } from './crewModePreview'
 
 class FakeEventSource {
   static all: FakeEventSource[] = []
@@ -198,6 +199,24 @@ describe('CrewChatWindow', () => {
     const mic = await screen.findByRole('button', { name: 'Voice input' })
     expect(mic).toHaveAttribute('title', 'Voice input')
     expect(mic).not.toHaveAttribute('aria-keyshortcuts')
+  })
+
+  // #23928: the dock is the local page's bare box, not a band of its own. A band
+  // wrapper fails the children assertion (it is not a `dock-inert` wrapper); a
+  // notices column without `empty:hidden` fails the column assertion.
+  it('floats the composer in the local dock shape, with an empty notices column that takes no room', async () => {
+    renderWindow()
+    // Connected: until the version read lands, the column carries the offline line.
+    const box = await screen.findByRole('textbox', PEER_ROW_WAIT)
+    await waitFor(() => expect(box).not.toBeDisabled())
+    const dock = screen.getByTestId('crew-window-dock')
+    expect(dock.className).toContain('pointer-events-none')
+    expect(dock.className).not.toMatch(/border-t|py-/)
+    expect([...dock.children].map(c => c.className)).toEqual(['dock-inert', 'relative z-10 dock-inert'])
+    const notices = screen.getByTestId('crew-window-notices')
+    expect(notices.className).toContain('empty:hidden')
+    await waitFor(() => expect(notices.childElementCount).toBe(0))
+    expect(within(dock.children[1] as HTMLElement).getByRole('textbox')).toBeTruthy()
   })
 
   it('keeps Stop reachable while an approval is pending', async () => {
@@ -1289,3 +1308,6 @@ describe('CrewChatWindow', () => {
     expect(FakeEventSource.all[0].close).toHaveBeenCalled()
   })
 })
+
+// Last, after the file's own hooks that clear localStorage: Crew Mode is a feature preview.
+crewModePreviewOn()

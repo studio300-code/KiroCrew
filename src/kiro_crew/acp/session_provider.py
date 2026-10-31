@@ -450,6 +450,18 @@ class AcpSessionProvider(LLMProvider):
         return value if isinstance(value, str) else ""
 
     @property
+    def kas_registered_agents(self) -> list[dict[str, Any]]:
+        """A copy of ``AcpSessionHandle.kas_registered_agents``: the batch KAS holds."""
+        value = getattr(self._handle, "kas_registered_agents", None)
+        return [dict(a) for a in value if isinstance(a, dict)] if isinstance(value, list) else []
+
+    @property
+    def kas_active_mode_id(self) -> str:
+        """The last mode id KAS reported for this session, or ``""`` before any switch."""
+        value = getattr(self._handle, "_last_kas_mode_id", "")
+        return value if isinstance(value, str) else ""
+
+    @property
     def kas_agent_prompt_notice(self) -> str:
         """See ``AcpSessionHandle.kas_agent_prompt_notice``."""
         value = getattr(self._handle, "kas_agent_prompt_notice", "")
@@ -637,7 +649,12 @@ class AcpSessionProvider(LLMProvider):
         return resolve_prompt_timeout_for_deadline(deadline)
 
     async def stream(
-        self, message: str, timeout: float | None = None, *, allow_image: bool = True
+        self,
+        message: str,
+        timeout: float | None = None,
+        *,
+        allow_image: bool = True,
+        sign_in_ask: str = "",
     ) -> AsyncIterator[LLMEvent]:
         """Send a prompt and yield LLMEvent objects until the turn completes."""
         # Re-establish this session's gateway claim before the turn can call a
@@ -669,7 +686,10 @@ class AcpSessionProvider(LLMProvider):
             # Outside the turn's own try below, so its claim is released here.
             await self._end_shared_turn(claim)
             raise
+        # Bind only to this attempt's handle, after any re-injection replaced it.
         send = self._handle.prompt
+        if sign_in_ask:
+            send = functools.partial(send, sign_in_ask=sign_in_ask)
         if not allow_image:
             send = functools.partial(send, allow_image=False)
         if timeout is not None:

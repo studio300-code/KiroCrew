@@ -46,6 +46,7 @@ from kiro_crew.messaging.dispatch import (
     rearm_reinjection,
     rollback_skill_bodies,
 )
+from kiro_crew.prompt_segments import segments_of
 
 if TYPE_CHECKING:
     from kiro_crew.context import ContextBuilder
@@ -753,6 +754,15 @@ async def _turn_build_prompt(turn: _ChatTurn) -> None:
         # mirror — avoids leaking injected context to the linked thread.
         _user_msg_for_mirror = message
         turn._user_msg_for_mirror = _user_msg_for_mirror
+        # Shared Crew: tell the agent who sent this message (prompt only).
+        from kiro_crew.shared_crew.attribution import sender_line
+
+        _sender = sender_line(
+            slot, _current_replay_message, owner_id=str(getattr(state, "owner_id", "") or "")
+        )
+        if _sender:
+            message = _sender + message
+            turn.message = message
         # Drain pending context injections (silent background context
         # from apps/subagents).  Expired entries are discarded.
         _ctx_prefix = drain_pending_context(slot)
@@ -1024,6 +1034,10 @@ async def _turn_build_prompt(turn: _ChatTurn) -> None:
             turn._span_probe = _span_probe
             _span_base_len = len(full_message)
             turn._span_base_len = _span_base_len
+        # The prompt's provenance as build_message marked it; the runner
+        # re-applies it under the prefixes added below (chat_runner).
+        _prompt_segments = segments_of(full_message)
+        turn._prompt_segments = _prompt_segments
         full_message = _apply_incognito_prefix(slot, full_message)
         turn.full_message = full_message
         _trusted_prompt_tail = full_message

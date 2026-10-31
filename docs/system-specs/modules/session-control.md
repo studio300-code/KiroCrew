@@ -610,6 +610,73 @@ opens, and renaming, moving or deleting the person's folders stays refused. A
 member's folder list adds that home folder and its ancestors, the path its own
 `[FOLDER]` line already shows, so the walk resolves `Ops` instead of missing it.
 
+A mate is the exception, and keeps everything it creates in ONE folder of its
+own (`dashboard/mate_folders.py`, #25935). Its home folder is a top-level folder
+owned by `member:<store>` and marked `mate_home`; it is created on first use under
+the folder-store lock (one per store, however many creates race), named with the
+mate's display name, and renamed when that changes: by the agent-update route on
+a saved `display_name`, and by the next `ensure_mate_home` for any other writer.
+The store is the link, so a rename never re-points it. Only a member identity
+(an execution with a `member_id`) has a home; a legacy selection without one
+files where it asks, as before. A folder a member caller
+creates (`api_chat_folder_create`) at the top level, or under any folder outside
+that home, is filed under the home instead (`home_parent_for_create`); one inside
+the home keeps its parent. A create filed home out of an existing person's folder
+with no `project_dir` of its own takes the project that folder inherits
+(`home_create_target`), the same rule a conductor's re-filed session follows, and the
+MCP folder-path walk reaches it through this route. A session a mate's conductor chat opens
+(`session_create`, `mate_home_filing`; the conductor is told by
+`_conducts_for_a_worker`, the worker hand-off's own test, run off the loop
+so it never schedules an installed-agents rescan) is filed in the folder it named when that
+folder is inside the home, else in the home itself. A person's folder it named
+still supplies the child's project directory, as in Crew Mode (filing dropped,
+project kept), and the late folder re-check compares that folder's project; a
+named folder that does not exist, or one in another mate's home, supplies
+nothing and the home is used for both. Any other caller naming a
+folder in a mate's home is refused `mate_home_locked` (403), unless it runs on
+that mate's store (one of the mate's own workers). Moves are fenced the same
+way, refused `mate_folder_scope` (403) rather than redirected: a member caller
+may not re-parent its home folder, re-parent any folder to outside the home,
+move a folder from outside the home into it, since a person's chats filed there
+would be locked in too (`api_chat_folder_update`), or file a chat outside it
+(`api_chat_slot_folder`).
+The home is also closed to everyone else, the person included, refused
+`mate_home_locked` (403): the home itself takes only `collapsed` and `order`
+(no rename, move, recolor, project or delete, from anyone), and nothing outside
+the mate may create a folder or chat in its subtree, file a chat into it or out of it, move a
+folder into it, or edit or delete a folder inside it (`home_owner_of`,
+`refuses_write_into`). Every writer of the folder tree applies this: the shared
+create (`create_folder_record`, so the folder scaffold too) refuses it under the
+folder-store lock (`FolderMateHomeLockedError`), the empty-folder cleanup never
+lists a home or a folder inside one (`mate_home_subtree_ids`), `session_fork`
+and `session_revive` refuse a named folder in another mate's home
+(`refuse_foreign_home_filing`), a fork that would inherit its parent's folder
+in a mate's home the forker does not own (the person's Fork, or `session_fork`
+by anyone but that mate) is left unfiled (`inherited_folder`), a scheduled job
+is saved with a chat folder there only when it runs on that mate's store (the
+cron create and update routes refuse it `mate_home_locked` (403) and record the
+denial in the security event log, the Schedule form does not offer such a
+folder, and the tab placement re-checks it at run time and records a refusal
+the same way), and the name lookups that adopt an existing
+folder (a channel's `session_folder`, the import arrival folder, Code Review
+Sage's follow-up folder) never adopt one. Every route that refiles an EXISTING
+chat checks both ends of the move with one rule (`refuses_refile`): the slot
+folder PATCH (`api_chat_slot_folder`), a slot create that names an open slot
+(`api_chat_slot_create`), `session_revive` against the archived record's folder,
+and the cron update route against the job's current chat folder (with
+`move_cron_job_tab` re-checking it), so none of them moves a chat out of a mate's
+home it may not write. Deleting the mate releases its home:
+after the delete succeeds, the agent-delete route drops the `mate_home` marker
+from the home of the retired store's principal (`release_mate_home`, best-effort), so it becomes
+an ordinary folder the person may rename, move or delete. Agent sync does the
+same for each V2 store it retires (`installed_agents`). Nothing else unlocks a
+home; a config read that finds no mate never does. Accepted gap: a mate removed
+by hand-editing `config.json` leaves its home locked. The sidebar draws the subtree
+the same way: no menu, no new-chat control, no rename, no drag, no drop
+(`isMateManaged`). Folders a mate
+made before this rule are left where they are. Pinned in
+`test/test_mate_folders.py`.
+
 `session_create` also takes an optional `model` — the model the child starts
 on, pinned as the person's own pick in the model dropdown would be (same
 `_model_rejected_reason` guard, same pick-generation bump) — and an optional
@@ -1454,7 +1521,7 @@ KAS backend the wire agent projection additionally grants the server in
 conductor's set (`_CONDUCTOR_DASHBOARD_GRANTS`: `chat_folder_tree`,
 `chat_folder_create`, `chat_folder_file_self`, `session_create`,
 `session_read_message`, `session_status`) plus `session_send`,
-`session_broadcast`, `session_stop` and `session_retry` — the write verbs are safe to auto-approve for a member *specifically* because the
+`session_broadcast`, `session_stop`, `session_retry` and `session_close` — the write verbs are safe to auto-approve for a member *specifically* because the
 `created_by` ownership fence above bounds them to worker sessions the member
 itself opened. Member sessions also bypass the provider warm pool
 (`bypass_member`): a pooled child was spawned with no session key on the
@@ -2189,7 +2256,9 @@ session before closing it. Close waives the self-target refusal
 (`allow_self=True`, as release does) on both its admission gate and its pre-pop
 re-check, so a session that has finished its one job can archive its own tab; the
 self-close cancels the caller's own running turn, which is the turn that asked
-for it, and every other caller and target rule still applies. It reuses the dashboard's own close path
+for it, and every other caller and target rule still applies. A crewmate's own
+DM thread (`mode == DM_SLOT_MODE`) is the exception and is refused
+`member_thread_self_close`: only the person dismisses it. It reuses the dashboard's own close path
 (`close_slot`), the same sequence the ✕ button runs: a synchronous tombstone,
 auto-nudge-loop retirement BEFORE the awaits so no nudge resurrects the tab, the
 owning app's close hook with rollback, persist-as-closed, and per-tab session
@@ -2356,6 +2425,31 @@ title or metadata line; when it runs out of them first it answers
 `scan_truncated: true` (and `more: true`), and the scan's memory stays bounded
 however large the archive is.
 
+## Remote dispatch: `crew=` on five verbs (preview)
+
+Wave 1 of [rfc-conductor-remote-dispatch.md](../../request-for-change/rfc-conductor-remote-dispatch.md). `session_create`, `session_send`, `session_read_message`, `session_stop` and `session_close` take an optional `crew` (a connected crew's instance id or exact name). A body (or, for the read, a query) that carries the `crew` key at all, whatever its value, is handed by its own `/api/session-control/*` route to `dashboard/handlers/remote_dispatch_routes.py` and never runs the local verb. Without the key the routes are unchanged.
+
+| Verb | Peer call |
+|---|---|
+| create | `POST api/chat/slots` `{memory_mode, agent?, model?}`, then `PATCH api/chat/slots/{s}/title` when a title was given |
+| send | `POST api/chat?ws=1` `{message, slot, turn_origin: "agent", steer?}` |
+| read | `GET api/chat/slots/{s}?limit=N` (1-100, no `since`) |
+| stop | `POST api/chat/slots/{s}/stop` |
+| close | `DELETE api/chat/slots/{s}` |
+
+Each call is checked in this order, and each refusal has its own code:
+
+1. **Switch.** `work_ledger.remote_dispatch` (default `false`, read per call) off refuses `remote_dispatch_disabled` before anything else. `agent.session_control` off then refuses `session_control_disabled`, as it does for every local verb. Off, the dashboard MCP server's `tools/list` is byte-for-byte the table's own; on, it adds a `crew` property to exactly these five schemas. The validator schemas accept `crew` either way, so the gateway, not an unknown-field error, answers a call that carries it.
+2. **Owner-only caller.** The declared key is owner-minted (`is_owner_minted_session_key`, the `dashboard` namespace; `owner_only`); the shared agent-caller resolver (`handlers/guide.py` `_resolve_agent_caller`) admits it with its own codes; the slot was not opened on another caller's behalf (`_created_by` / `_lineage_minted`) and is not a crew member's thread (`owner_only`); the session is not bound to a private member store (`private_memory`); the session is not the bound worker of any work-ledger item here, read through the same binding `work_brief` resolves and refused when it cannot be read (`crew_caller_is_worker`), which keeps dispatch one level deep: a session another gateway's conductor opens here is bound to its mailbox item once the peer side binds at create (RFC wave 2), and a nested conductor is a bound worker too; and finally the running turn must be one the owner sent (`crew_owner_unverifiable`). That last arm, `owner_unverifiable_reason`, is the crew-read gate's slot check (`handlers_instances_crew_reads._slot_refusal`): the turn carries `_turn_owner_sent` and the slot was not opened on another caller's behalf. A dashboard login a messaging channel minted for someone else fails it, and so does a turn the person did not send (a loop wake, a `session_send`, a sub-agent completion). The earlier arms refuse first, so each refusal still names the rule a caller fails.
+3. **Crew.** An exact id wins over any name; a name resolves only when one crew carries it (`crew_unknown`, `crew_ambiguous`, `crew_invalid`).
+4. **Target fence.** send/read/stop/close reach only a peer slot this caller's slot created with `session_create(crew=)` on that same crew (`crew_target_not_dispatched`). The record lives in gateway memory, at most 64 slots per caller (`crew_dispatch_limit`), and a close forgets the slot. It does not survive a hub restart, after which the person still drives the slot from the crew window. Wave 4 replaces it with the work item's `worker_session_key` and `worker_instance_id`.
+5. **Version.** The crew's `major.minor` must match this hub's (`crew_version_mismatch`); a disconnected crew answers `proxy_peer_not_connected`.
+6. **Path fence and redaction.** Every peer path is built from the table above, its slot key held to one plain segment, and passes `_proxy_canonical_path` before `SshTunnelManager.proxy_request` sees it (`proxy_path_denied`). A reply cut off mid-body is refused `crew_peer_interrupted`. A peer reply must be JSON within `PROXY_REDACT_BUFFER_MAX_BYTES` and is run through `_redact_peer_payload` before any field is read. A create reply whose `key` is not one plain segment is refused `crew_reply_malformed` and nothing is recorded.
+
+Every send carries `turn_origin: "agent"` (`dashboard/agent_origin.py`), so the crew runs it as an agent's turn that holds no person-only right. Outgoing message and title text passes the exfiltration-URL then the credential redactor; an incognito or temporary caller is refused `ephemeral_caller`.
+
+A crew create takes only `title`, `agent` and `model` (`crew_field_unsupported` for anything else). `memory_mode` is always this hub's `dashboard.default_memory_mode`. An omitted `agent` sends none, so the crew applies its own default. A crew create arms no patrol: the item binding that a patrol reads arrives in wave 4.
+
 ## Configuration
 
 `agent.session_manager_chain` (bool, default **false**) lets a fenced caller reach
@@ -2509,6 +2603,8 @@ goes to its owner, and the owners import each other lowest layer first, in this 
   history and `session_revive`.
 
 The facade itself holds no verb: its docstring, its logger and the mirror.
+
+The `crew=` half of five verbs sits outside the facade: `src/kiro_crew/dashboard/handlers/remote_dispatch_routes.py` (the gateway checks and peer calls), `src/kiro_crew/mcp_session_crew.py` (the tool bodies and the schema overlay) and `src/kiro_crew/remote_dispatch.py` (the switch).
 
 ## What is deliberately not here
 

@@ -74,6 +74,7 @@ Object.defineProperty(window, 'matchMedia', {
 import ChatSidebar from '../pages/ChatSidebar'
 import type { RootState } from '../store'
 import type { ChatSlot } from '../types'
+import { expectLoopIcon } from './GoalLoopIconTestUtils'
 
 const WAITING_LABEL = 'Waiting on you'
 
@@ -162,15 +163,15 @@ describe('chat sidebar — loop waiting-on-you subtitle', () => {
     // over an old [OPTIONS:] marker arrives here as has_options=false: the badge
     // clears by construction, never by a dismiss endpoint (#10615).
     const slots = [{ key: 'k', title: 'loop', running: false, messages: 5, has_options: false }]
-    const { getByText, queryByText } = renderSidebar(slots, { goalLoops: { k: { cycle_count: 8, max_cycles: 24 } } })
-    expect(getByText('Loop 8/24')).toBeTruthy()
+    const { container, queryByText } = renderSidebar(slots, { goalLoops: { k: { cycle_count: 8, max_cycles: 24 } } })
+    expectLoopIcon(container, 8, 24)
     expect(queryByText(WAITING_LABEL)).toBeNull()
   })
 
   it('a RUNNING loop turn is the loop working, not waiting — even with options still on the newest reply', () => {
     const slots = [{ key: 'k', title: 'loop', running: true, messages: 5, has_options: true }]
-    const { getByText, queryByText } = renderSidebar(slots, { goalLoops: { k: { cycle_count: 3, max_cycles: 24 } } })
-    expect(getByText('Loop 3/24')).toBeTruthy()
+    const { container, queryByText } = renderSidebar(slots, { goalLoops: { k: { cycle_count: 3, max_cycles: 24 } } })
+    expectLoopIcon(container, 3, 24)
     expect(queryByText(WAITING_LABEL)).toBeNull()
   })
 
@@ -181,6 +182,39 @@ describe('chat sidebar — loop waiting-on-you subtitle', () => {
     const { getByText, queryByText } = renderSidebar(slots, {})
     expect(getByText('pick one')).toBeTruthy()
     expect(queryByText(WAITING_LABEL)).toBeNull()
+  })
+
+  it('a conductor loop whose dispatched worker is running stays on the progress row despite [OPTIONS:]', () => {
+    // Between patrol cycles the conductor turn is idle and its reply ends with
+    // a courtesy [OPTIONS:] menu, but the worker it opened is mid-turn: the
+    // loop is moving, so the row must not claim it waits on the person.
+    const slots = [
+      { key: 'k', title: 'conductor', running: false, messages: 5, has_options: true },
+      { key: 'w', title: 'worker', running: true, messages: 3, created_by: 'k' },
+    ]
+    const { container, queryByText } = renderSidebar(slots, { goalLoops: { k: { cycle_count: 5, max_cycles: 300 } } })
+    expectLoopIcon(container, 5, 300)
+    expect(queryByText(WAITING_LABEL)).toBeNull()
+    expect(queryByText(/Paused at 5\/300/)).toBeNull()
+  })
+
+  it('a loop whose own sub-agents run stays on the progress row despite [OPTIONS:]', () => {
+    const slots = [{ key: 'k', title: 'loop', running: false, messages: 5, has_options: true, subagents_running: true }]
+    const { container, queryByText } = renderSidebar(slots, { goalLoops: { k: { cycle_count: 7, max_cycles: 24 } } })
+    expectLoopIcon(container, 7, 24)
+    expect(queryByText(WAITING_LABEL)).toBeNull()
+  })
+
+  it('a loop whose workers are all idle still waits on you — the genuine ask keeps its row', () => {
+    const slots = [
+      { key: 'k', title: 'conductor', running: false, messages: 5, has_options: true },
+      { key: 'w', title: 'worker', running: false, messages: 3, created_by: 'k' },
+      // A running session someone ELSE opened does not count for this loop.
+      { key: 'o', title: 'other', running: true, messages: 3, created_by: 'x' },
+    ]
+    const { getByText } = renderSidebar(slots, { goalLoops: { k: { cycle_count: 5, max_cycles: 300 } } })
+    expect(getByText(WAITING_LABEL)).toBeTruthy()
+    expect(getByText(/Paused at 5\/300/)).toBeTruthy()
   })
 
   it('an owed approval outranks the waiting row', () => {

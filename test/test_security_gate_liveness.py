@@ -592,7 +592,29 @@ def _url_payload_command(n: int) -> str:
 #: bare-secret pass: the closed ``_ELB_TARGET_GROUP_ARN_RE`` shape, its two span
 #: helpers, the lazy lookup in pass 3 that honours ``judged_sri_values``, and their
 #: comments; the exemption only narrows what pass 3 redacts.
-_PACKAGE_LINE_BUDGET = 32_970
+#: Raised by 177, from 32,970, for the ``rm`` floor reading each nested-shell payload
+#: through the shared reader, and ``shell_commands.redirect_hidden_payloads``: a redirect
+#: before the ``-c`` operand hides no payload. Deny-only: no allow widened.
+#: Raised by 25, from 33,147, for ``rm_floor._expands_nothing`` and
+#: ``_literal_shell_script``: a single-quoted ``\\$`` stays literal only in a lone
+#: ``<shell> -c`` / ``<<<`` script that expands nothing, judged once per command.
+#: Raised again for ``shell_normalizer._shell_option_run``: the nested payload reader
+#: takes the word a shell runs after the options and redirections that follow a shell's
+#: own ``-c`` (``bash -c -x '<script>'``). One forward scanner, its lazy per-position
+#: memos and the own-option-run scope; the reader only adds payloads. Re-measured.
+#: Raised by 189, from 33,334, for ``s3_direction``: the fail-closed reader that
+#: narrows the three ``aws s3 cp|mv|sync`` upload rows away on a download. It
+#: reads only plain literal words (the shared quote walk, ``shlex`` for the split),
+#: a fixed aws CLI flag table and exactly two operands, and refuses everything
+#: else, so the rows keep main's text and deny whatever it cannot read. Plus its
+#: branch in ``deny_gate``'s narrowing adapter, the raw command it is handed so
+#: a character that case-folds to ASCII is refused, ``EffectiveDenied`` so only a
+#: shipped row narrows (an operator's identical copy stays denied), and one facade
+#: import. It reads POSIX shell only, so it narrows nothing on Windows, where a
+#: hook runs under cmd.exe, and its verdict is cached once per command so a
+#: command of many segments is not re-read per segment. A regex alternative was
+#: tried first and lost twice to bash word splitting.
+_PACKAGE_LINE_BUDGET = 33_523
 
 #: Ceiling on any ONE file in the package. This is what the bound is really for --
 #: a package total says nothing about a single file growing back into a second

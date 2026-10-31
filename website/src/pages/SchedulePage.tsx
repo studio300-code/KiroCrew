@@ -430,6 +430,12 @@ export default function SchedulePage() {
   const folderNameIme = useImeGuard()
   const batchConfirmIme = useImeGuard()
   const [folderModalError, setFolderModalError] = useState<string | null>(null)
+  // One create at a time: a quick second Enter or click would otherwise POST
+  // the same name twice. The ref blocks the repeat in the same tick; the state
+  // disables Create and Cancel, labels Create "Creating…", and holds the dialog
+  // open until the POST settles.
+  const folderCreateInFlight = useRef(false)
+  const [folderCreating, setFolderCreating] = useState(false)
   const toggleFolderCollapse = useCallback((folderId: string) => {
     setCollapsedFolders(prev => {
       const next = new Set(prev)
@@ -510,7 +516,9 @@ export default function SchedulePage() {
   }, [])
   const handleFolderModalSubmit = useCallback(async () => {
     const name = folderModalName.trim()
-    if (!name) return
+    if (!name || folderCreateInFlight.current) return
+    folderCreateInFlight.current = true
+    setFolderCreating(true)
     try {
       setFolderModalError(null)
       const res = await api.createCronFolder(name) as { id: string }
@@ -519,6 +527,9 @@ export default function SchedulePage() {
     } catch (e) {
       // Keep modal OPEN so user can correct the name — show inline error
       setFolderModalError(e instanceof Error ? e.message : i18nT('pages.schedulePage.failed'))
+    } finally {
+      folderCreateInFlight.current = false
+      setFolderCreating(false)
     }
   }, [folderModalName, refreshFolders])
   const handleMoveJob = useCallback(async (jobId: string, folderId: string) => {
@@ -894,7 +905,7 @@ export default function SchedulePage() {
                     }}
                     onNewFolder={handleNewFolder}
                   />
-                  <Btn danger onClick={openBatchConfirm} title={`Delete ${selectedIds.size} selected job(s)`}>
+                  <Btn danger onClick={openBatchConfirm} title={i18nT('pages.schedulePage.delete_n_selected_jobs', { count: selectedIds.size })}>
                     <span className="flex items-center gap-1.5"><Trash2 size={14} /> {i18nT('pages.schedulePage.delete')} {selectedIds.size} {i18nT('pages.schedulePage.selected')}</span>
                   </Btn>
                 </div>
@@ -1289,7 +1300,7 @@ export default function SchedulePage() {
 
       <Dialog
         open={!!folderModal}
-        onOpenChange={next => { if (!next) setFolderModal(prev => { prev?.resolve?.(undefined); return null }) }}
+        onOpenChange={next => { if (!next && !folderCreating) setFolderModal(prev => { prev?.resolve?.(undefined); return null }) }}
       >
         <DialogContent maxWidth={360}>
           <DialogHeader>
@@ -1315,9 +1326,9 @@ export default function SchedulePage() {
             <ErrorNotice className="mt-3" message={folderModalError} testId="schedule-folder-create-error" />
           </DialogBody>
           <DialogFooter>
-            <Btn onClick={() => { setFolderModal(prev => { prev?.resolve?.(undefined); return null }) }}>{i18nT('pages.schedulePage.cancel')}</Btn>
-            <SendBtn onClick={handleFolderModalSubmit} disabled={!folderModalName.trim()}>
-              {i18nT('pages.schedulePage.cronFolders.create')}
+            <Btn onClick={() => { setFolderModal(prev => { prev?.resolve?.(undefined); return null }) }} disabled={folderCreating}>{i18nT('pages.schedulePage.cancel')}</Btn>
+            <SendBtn onClick={handleFolderModalSubmit} disabled={!folderModalName.trim() || folderCreating}>
+              {folderCreating ? i18nT('pages.schedulePage.cronFolders.creating') : i18nT('pages.schedulePage.cronFolders.create')}
             </SendBtn>
           </DialogFooter>
         </DialogContent>
@@ -1752,8 +1763,8 @@ function JobDetailDialog({ job, prefill, prefillWrites, agents, defaultAgent, ro
           <div className="flex items-center justify-between">
             <SegmentedControl
               segments={[
-                { key: 'details' as const, label: 'Details' },
-                { key: 'logs' as const, label: 'Logs' },
+                { key: 'details' as const, label: i18nT('pages.schedulePage.details_tab') },
+                { key: 'logs' as const, label: i18nT('pages.schedulePage.logs_tab') },
               ]}
               value={detailTab}
               onChange={setDetailTab}

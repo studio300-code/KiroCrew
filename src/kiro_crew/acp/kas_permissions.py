@@ -53,6 +53,7 @@ from collections.abc import Callable, Iterable
 from typing import Any
 
 from kiro_crew.platform import allowed_commands as allowed_commands_mod
+from kiro_crew.platform import allowed_paths as allowed_paths_mod
 from kiro_crew.platform.tool_names import KIRO_CLI_NAME_BY_KAS_TOOL, KIRO_TOOL_ALIASES
 
 logger = logging.getLogger(__name__)
@@ -147,9 +148,26 @@ CREW_ANSWERED_BUILTINS_KEY = "_crewAnsweredBuiltins"
 #: the session's own record, like :data:`CREW_ANSWERED_BUILTINS_KEY`.
 CREW_ANSWERED_COMMANDS_KEY = "_crewAnsweredCommands"
 
+#: The key a projected entry carries its :func:`spec_shell_allowlist` under, for
+#: the session's own record, like :data:`CREW_ANSWERED_COMMANDS_KEY`. Present only
+#: when the spec sets ``denyByDefault``; the gate then refuses every shell call no
+#: entry of the list matches.
+CREW_SHELL_ALLOWLIST_KEY = "_crewShellAllowlist"
+
+#: The key a projected entry carries its :func:`spec_write_allowlist` under, like
+#: :data:`CREW_SHELL_ALLOWLIST_KEY`. Present only when the spec sets the write
+#: tool's ``fallbackAction: "deny"``; the gate then refuses every file write no
+#: entry of the list covers.
+CREW_WRITE_ALLOWLIST_KEY = "_crewWriteAllowlist"
+
 #: Keys of a projected ``customAgents`` entry that never reach the engine.
 CREW_ONLY_ENTRY_KEYS: frozenset[str] = frozenset(
-    {CREW_ANSWERED_BUILTINS_KEY, CREW_ANSWERED_COMMANDS_KEY}
+    {
+        CREW_ANSWERED_BUILTINS_KEY,
+        CREW_ANSWERED_COMMANDS_KEY,
+        CREW_SHELL_ALLOWLIST_KEY,
+        CREW_WRITE_ALLOWLIST_KEY,
+    }
 )
 
 #: The ``toolsSettings`` keys kiro-cli reads its shell settings under.
@@ -220,6 +238,107 @@ def crew_answered_commands(tools_settings: Any) -> list[str]:
     Pure: the caller asks the governance ceiling about the shell tool.
     """
     return _usable_allowed_commands(tools_settings)[:_MAX_ALLOWED_COMMANDS]
+
+
+def shell_denies_by_default(tools_settings: Any) -> bool:
+    """Whether *tools_settings* sets ``denyByDefault`` on either shell key.
+
+    Any value other than ``False``/``None``/absent counts, so a malformed value
+    restricts rather than lifts the restriction.
+    """
+    if not isinstance(tools_settings, dict):
+        return False
+    for key in _SHELL_SETTINGS_KEYS:
+        settings = tools_settings.get(key)
+        if isinstance(settings, dict) and settings.get("denyByDefault") not in (None, False):
+            return True
+    return False
+
+
+def spec_shell_allowlist(tools_settings: Any) -> list[str] | None:
+    """The only shell commands a ``denyByDefault`` spec lets run, or ``None``.
+
+    ``None`` when neither shell key sets ``denyByDefault``. Otherwise the usable
+    ``allowedCommands`` patterns of both keys (:func:`crew_answered_commands`'s
+    subset and bound), possibly empty. The gate's ``spec-shell-allowlist`` tier
+    REFUSES a shell call of the session's own agent that no pattern here matches,
+    the way kiro-cli refuses it, on every approval policy. An entry outside the
+    subset, or past the bound, allows nothing: its commands are refused, never let
+    through (fail closed), and the session-start notice names it.
+
+    Read whatever the governance ceiling says: it is a restriction, not a grant.
+    A command it keeps still prompts unless :func:`crew_answered_commands` answers it.
+    """
+    if not shell_denies_by_default(tools_settings):
+        return None
+    return crew_answered_commands(tools_settings)
+
+
+#: The ``toolsSettings`` keys kiro-cli reads its file-write settings under.
+_WRITE_SETTINGS_KEYS = ("fs_write", "write")
+
+#: Bound on what :func:`spec_write_allowlist` keeps, like :data:`_MAX_ALLOWED_COMMANDS`.
+_MAX_ALLOWED_PATHS = 64
+
+
+def _write_falls_back_to_deny(settings: Any) -> bool:
+    """Whether one write entry sets ``fallbackAction`` to ``"deny"``.
+
+    Read case-insensitively, and a value that is not a string at all counts too, so
+    a malformed value restricts rather than lifts the restriction. Any other string
+    (``"interactive"``, the default) leaves the write prompting, as before.
+    """
+    if not isinstance(settings, dict) or "fallbackAction" not in settings:
+        return False
+    value = settings["fallbackAction"]
+    if value is None:
+        return False
+    if not isinstance(value, str):
+        return True
+    return value.strip().casefold() == "deny"
+
+
+def write_denies_by_default(tools_settings: Any) -> bool:
+    """Whether *tools_settings* sets ``fallbackAction: "deny"`` on either write key."""
+    if not isinstance(tools_settings, dict):
+        return False
+    return any(_write_falls_back_to_deny(tools_settings.get(k)) for k in _WRITE_SETTINGS_KEYS)
+
+
+def _usable_allowed_paths(tools_settings: Any) -> list[str]:
+    """Every distinct usable ``allowedPaths`` entry of both write keys, in order."""
+    if not isinstance(tools_settings, dict):
+        return []
+    out: list[str] = []
+    for key in _WRITE_SETTINGS_KEYS:
+        settings = tools_settings.get(key)
+        entries = settings.get("allowedPaths") if isinstance(settings, dict) else None
+        for raw in entries if isinstance(entries, list) else ():
+            pattern = allowed_paths_mod.parse(raw)
+            if pattern is not None:
+                out.append(pattern)
+    return list(dict.fromkeys(out))
+
+
+def spec_write_allowlist(tools_settings: Any) -> list[str] | None:
+    """The only paths a ``fallbackAction: "deny"`` spec lets its write tool touch.
+
+    ``None`` when neither write key sets it. Otherwise the usable ``allowedPaths``
+    entries of both keys (the subset :mod:`kiro_crew.platform.allowed_paths` reads
+    the way kiro-cli does, at most :data:`_MAX_ALLOWED_PATHS`), possibly empty, as
+    the spec wrote them: the session handle anchors a relative entry at the
+    session's directory. The gate's ``spec-write-allowlist`` tier REFUSES a file
+    write of the session's own agent whose target none covers, the way kiro-cli
+    refuses it, on every approval policy. An entry outside the subset, or past the
+    bound, covers nothing: its writes are refused, never let through (fail
+    closed), and the session-start notice names it.
+
+    Read whatever the governance ceiling says: it is a restriction, not a grant. A
+    write it covers still prompts, as every KAS write does.
+    """
+    if not write_denies_by_default(tools_settings):
+        return None
+    return _usable_allowed_paths(tools_settings)[:_MAX_ALLOWED_PATHS]
 
 
 def crew_answered_builtins(allowed_tools: Any) -> frozenset[str]:
@@ -357,8 +476,8 @@ def withhold_answered_under_authored_rules(
 #: written under, pinned to the recorded engine registry). This mapping is its
 #: inverse, grouped per kiro-cli name, plus the rows only the hook vocabulary
 #: needs: ``fs_write`` is a KAS id as well as the kiro-cli name (a file create
-#: states it on a permission request), and ``web_fetch`` / ``web_search`` /
-#: ``use_subagent`` reach KAS tools no gate policy names. A matcher in an agent
+#: states it on a permission request), and ``web_fetch`` / ``use_subagent``
+#: reach KAS tools no gate policy names. A matcher in an agent
 #: spec's ``hooks`` names tools in kiro-cli's vocabulary (``execute_bash``,
 #: ``fs_write``). KAS names its own tools differently, and the name it states for
 #: a call is the ``toolId`` of the permission request's ``_meta.kiro``
@@ -377,7 +496,6 @@ def withhold_answered_under_authored_rules(
 #: themselves are for a caller that must go from a kiro-cli name to KAS ids.
 _HOOK_ONLY_ROWS: dict[str, tuple[str, ...]] = {
     "web_fetch": ("web_fetch",),
-    "web_search": ("remote_web_search",),
     "use_subagent": ("invoke_sub_agent",),
 }
 
@@ -1303,6 +1421,11 @@ _TOOLS_SETTINGS_FAMILY: dict[str, str] = {
 #: outside ``.*`` it is a quantifier on the character before it.
 _REGEX_METACHARACTERS = frozenset(".^$*+?()[]{}|\\")
 
+#: Shell redirect operators. KAS matches a shell rule against the command's
+#: words, and a redirect and its target are not among them, so a deny written
+#: to match one never sees it.
+_REDIRECT_CHARACTERS = frozenset("<>")
+
 
 def _regex_to_glob(pattern: str) -> str | None:
     """A kiro-cli regex (anchored ``\\A..\\z``) as a KAS glob, or ``None``.
@@ -1444,9 +1567,10 @@ def tools_settings_to_permissions(
             continue
         # Only shapes run live on KAS are carried: the plain deny lists, and the
         # `subagent` rules below (a deny with an `exclude`, and a name-scoped
-        # allow). The other deny-all-but shapes (`denyByDefault`,
-        # `fallbackAction: "deny"`) match a command or a path, where `exclude`
-        # has not been run, so they are named in the notice instead of guessed at.
+        # allow). The deny-all-but shapes on a command or a path, where
+        # `exclude` has not been run, are enforced by Crew's gate instead: the
+        # shell's `denyByDefault` and the write tool's `fallbackAction: "deny"`
+        # (below).
         handled: set[str] = set()
 
         if family == "shell":
@@ -1455,6 +1579,15 @@ def tools_settings_to_permissions(
                 f"{tool}.deniedCommands", settings.get("deniedCommands"), _regex_to_glob
             )
             rules.extend(_chunked_rules("shell", "deny", denied))
+            # kiro-cli matches the regex over the whole command line; KAS matches
+            # the glob over the command's words, which do not include a redirect
+            # or its target. The deny still travels, since it does stop
+            # the character inside a word, but the entry is named as not carried.
+            if any(set(glob) & _REDIRECT_CHARACTERS for glob in denied):
+                lost.append(f"{tool}.deniedCommands")
+            # No rule either: Crew's gate refuses every shell call the spec's
+            # usable `allowedCommands` do not match (`spec_shell_allowlist`).
+            handled.add("denyByDefault")
             # No rule: Crew answers the shell requests these match itself, at
             # the gate (`crew_answered_commands`). Only an entry it cannot use
             # is named.
@@ -1485,8 +1618,16 @@ def tools_settings_to_permissions(
             rules.extend(_chunked_rules(capability, "deny", denied_paths))
             if family == "write":
                 # `interactive` is the default: nothing is lost by leaving it out.
+                # `deny` travels as no rule: Crew's gate refuses every write the
+                # usable `allowedPaths` do not cover (`spec_write_allowlist`).
+                # `allowedPaths` itself stays named below: a covered write still
+                # prompts on KAS, where kiro-cli runs it unasked.
                 handled.add("fallbackAction")
-                if settings.get("fallbackAction") not in (None, "", "interactive"):
+                if settings.get("fallbackAction") not in (
+                    None,
+                    "",
+                    "interactive",
+                ) and not _write_falls_back_to_deny(settings):
                     lost.append(f"{tool}.fallbackAction")
         elif family == "web_fetch":
             # `trusted` is an allow: not carried, so those fetches keep prompting.

@@ -7,7 +7,7 @@ import { fmtNumber } from '../../../i18n/format'
 import { slotChannelNamespace } from '../../../utils/channelOrigin'
 import { deriveToolCallTitle, parseToolArgs } from '../../../utils/toolCallTitle'
 import { isPrivateMemoryMode } from '../../../utils/sessionRefs'
-import { crewApprovalDecidableHere } from '../../../lib/crewMode'
+import { crewApprovalDecidableHere, crewRootOf } from '../../../lib/crewMode'
 
 export type RunState = 'running' | 'idle' | 'done' | 'blocked' | 'waiting' | 'needs_input' | 'stopped'
 export const APPROVAL_MODE_KEYS: Record<ApprovalModeKey, string> = {
@@ -111,11 +111,20 @@ export interface CommandCenterSources {
   crewWaiting?: Record<string, number>
 }
 
+/** Whether a session that `key` opened is mid-turn right now: a Crew Mode
+ *  worker (`crew_root`) or any session it created (`created_by`). A loop whose
+ *  dispatched workers are running is still moving, so its own idle reply's
+ *  `[OPTIONS:]` line is not a pause that waits on the person. */
+export function openedSessionRunning(slots: readonly ChatSlot[], key: string): boolean {
+  return slots.some(s => s.key !== key && !!s.running && (s.created_by === key || crewRootOf(s) === key))
+}
+
 /** `{root: n}` for each Crew Mode root with n workers whose tool approval waits. */
 export function crewWaitingApprovals(slots: readonly ChatSlot[]): Record<string, number> {
   const out: Record<string, number> = {}
   for (const s of slots) {
-    if (s.crew_root && s.pending_approval) out[s.crew_root] = (out[s.crew_root] ?? 0) + 1
+    const root = crewRootOf(s)
+    if (root && s.pending_approval) out[root] = (out[root] ?? 0) + 1
   }
   return out
 }
@@ -263,8 +272,8 @@ export function buildCommandCenter(source: CommandCenterSources) {
   for (let i = 0; i < attention.length; i++) {
     const item = attention[i]
     const row = rowByKey.get(item.slot)
-    if (item.kind === 'approval' && row?.crew_root && !crewApprovalDecidableHere(row, surface)) {
-      attention[i] = { ...item, crewCard: row.crew_root, native: undefined }
+    if (item.kind === 'approval' && crewRootOf(row) && !crewApprovalDecidableHere(row, surface)) {
+      attention[i] = { ...item, crewCard: crewRootOf(row), native: undefined }
     }
   }
   const crewWaiting = source.crewWaiting || {}

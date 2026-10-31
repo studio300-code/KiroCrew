@@ -339,7 +339,13 @@ After the three gates, each provider has its own precondition and failure frame:
   `stt_native_probe_crashed` ([Native preflight and the load fuse](#native-preflight-and-the-load-fuse)).
 - **apple**: `apple_speech.availability()` decides, and separates "this macOS
   cannot run it" from "the Swift toolchain is missing", because only the second
-  has a fix.
+  has a fix. Past that, `StreamTranscribe.swift` checks the locale against the
+  installed models of the module it builds: `DictationTranscriber` (the default)
+  and `SpeechTranscriber` keep separate inventories, and a host often has a
+  dictation model for en-US only. With no dictation model but a speech model, the
+  helper streams with `SpeechTranscriber`; with neither, it fails before `ready`
+  with an error naming the missing model. A start failure is logged at WARNING as
+  well as sent to the client.
 - **transcribe**: `amazon_transcribe` must be importable, and
   `aws_consent.authorize(SERVICE_TRANSCRIBE, profile, region)` must grant. AWS
   authorizes the stream only when it opens, and the consent gate's
@@ -1371,7 +1377,7 @@ frame and the close, which is what lets a long-running client rotate to a fresh
 socket without loss. `ready` advertises the cap as `max_duration_ms` so that
 client can plan the rotation.
 
-The model fetch gets its own ceiling rather than borrowing the session's because it transfers a catalog entry rather than a dictation. `stt.models` uses a request timeout, while `_prepare_local_with_progress` also bounds how long a WebSocket waits. On the WebSocket timeout the transfer is shielded and left running:
+The model fetch gets its own ceiling rather than borrowing the session's because it transfers a catalog entry rather than a dictation. `stt.models` bounds each socket read with `_NETWORK_STALL_TIMEOUT_SECS`, while `_run_local_session` bounds the whole wait with `_MAX_MODEL_PREPARE_SECS` around `_relay_download_progress`. On the WebSocket timeout the transfer is shielded and left running:
 cancelling it would release the model store's transfer lock while its worker thread
 is still writing the staging file, and the next session would start a second write
 to the same path. Only the socket gives up; the bytes land for the next attempt.

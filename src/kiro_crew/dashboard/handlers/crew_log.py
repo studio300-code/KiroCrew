@@ -573,18 +573,13 @@ def _settle_writes() -> bool:
     return emit.flush(timeout=_SETTLE_SECONDS)
 
 
-def _read_slot_fold(unit_id: str, name: str) -> Any:
-    """One slot-keyed fold for the slot *unit_id*'s header names. Blocking.
+def _read_slot_fold_labelled(unit_id: str, name: str) -> "tuple[Any, int | None]":
+    """One slot-keyed fold for the slot *unit_id*'s header names and, for a delta fold,
+    its ``published_revision``. Blocking.
 
     Takes the resolved UNIT id rather than the caller's spelling, because the slot is
     read off that unit's own header -- a slot key handed straight to the header lookup
     would miss and answer with the empty fold.
-    """
-    return _read_slot_fold_labelled(unit_id, name)[0]
-
-
-def _read_slot_fold_labelled(unit_id: str, name: str) -> "tuple[Any, int | None]":
-    """:func:`_read_slot_fold` and, for a delta fold, its ``published_revision``. Blocking.
 
     ``published_revision`` is the base the next pushed delta applies on. The value and
     the label come from ``eager.read_labelled``, which folds outside the publisher's
@@ -918,6 +913,10 @@ class CrewLogPublisher:
         # land and be broadcast last. When a pass finishes with more work marked,
         # it schedules the next pass itself.
         self._flushing = False
+        # The flush and session-send tasks, held until each finishes: the loop keeps
+        # only a weak reference to a task, and a collected flush would never run
+        # :meth:`_finished`, leaving ``_flushing`` set and the publisher stopped.
+        self._tasks: "set[asyncio.Task[None]]" = set()
         # True while a lineage push is armed on the loop (see :meth:`_mark_tree`).
         self._tree_scheduled = False
 
@@ -1404,6 +1403,8 @@ class CrewLogPublisher:
         if loop is None or not pending:
             return
         task = loop.create_task(self._send_pending(pending))
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
         task.add_done_callback(_report_send_failure)
 
     async def _send_pending(
@@ -1507,8 +1508,9 @@ class CrewLogPublisher:
             return
         self._flushing = True
         task = loop.create_task(self._flush())
-        # Held only so the loop keeps a reference while it runs; the callback
-        # drops it and reports a failure rather than letting it be swallowed.
+        # The callback reports a failure rather than letting it be swallowed.
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
         task.add_done_callback(self._finished)
 
     def _finished(self, task: "asyncio.Task[None]") -> None:

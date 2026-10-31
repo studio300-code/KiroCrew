@@ -38,6 +38,55 @@ logger = logging.getLogger(__name__)
 
 # Deliver target extracted from <!-- deliver:xxx --> in heartbeat entries
 _DELIVER_RE = re.compile(r"<!--\s*deliver:(\S+)\s*-->")
+# The pieces the comment scan reads: a whole deliver tag, an opener, a closer.
+# A deliver tag sits on one line; a comment that spans lines is never one, so
+# its padding is spaces and tabs only, never a newline. HTML also ends a
+# comment at ``--!>``, so the closer accepts it too.
+_COMMENT_TOKEN_RE = re.compile(r"<!--[ \t]*deliver:\S+[ \t]*-->|<!--|--!?>")
+
+
+def _strip_comments(content: str) -> str:
+    """Return *content* with every HTML comment except a bare deliver tag removed.
+
+    One scan, left to right. Outside a comment a deliver tag is kept for the
+    per-line parse. Inside one, a deliver tag is part of the comment, so a task
+    commented out together with its tag stays hidden. A closed comment becomes
+    just its newlines, so text on either side of it keeps its own line. A
+    ``<!--`` with no ``-->`` after it hides only the rest of its own line and
+    logs a warning: hiding every later line would drop those tasks without a
+    word, and the next rewrite would then erase them from the file.
+    """
+    parts: list[str] = []
+    pos = 0
+    while True:
+        opener = next(
+            (m.start() for m in _COMMENT_TOKEN_RE.finditer(content, pos) if m.group() == "<!--"),
+            -1,
+        )
+        if opener == -1:
+            parts.append(content[pos:])
+            return "".join(parts)
+        parts.append(content[pos:opener])
+        closer = next(
+            (
+                m.end()
+                for m in _COMMENT_TOKEN_RE.finditer(content, opener + 4)
+                if m.group() in ("-->", "--!>")
+            ),
+            -1,
+        )
+        if closer == -1:
+            logger.warning(
+                "HEARTBEAT.md line %d opens an HTML comment that is never closed;"
+                " ignoring the rest of that line only",
+                content.count("\n", 0, opener) + 1,
+            )
+            end_of_line = content.find("\n", opener)
+            pos = len(content) if end_of_line == -1 else end_of_line
+            continue
+        parts.append("\n" * content.count("\n", opener, closer))
+        pos = closer
+
 
 # Agent can include this sentinel in its response to signal the task is not done
 _KEEP_SENTINEL = "HEARTBEAT_KEEP"
@@ -55,8 +104,10 @@ _MEMORY_BACKUP_OFFSET = 30
 # Per-task hard deadline for an unattended heartbeat turn. Mirrors cron's
 # _JOB_TIMEOUT_SECS (1800s / 30 min): a heartbeat turn runs without a human
 # present, so it MUST be bounded — otherwise a single non-allowlisted tool
-# approval blocks the whole heartbeat subsystem indefinitely.
+# approval blocks HEARTBEAT.md task processing indefinitely.
 HEARTBEAT_TASK_TIMEOUT_SECS = 1800  # 30 min per heartbeat task
+# How long gateway shutdown waits for cancelled heartbeat tasks to unwind.
+_STOP_DRAIN_SECS = 10
 HEARTBEAT_FILE = "HEARTBEAT.md"
 _HEADER = (
     "# Heartbeat Tasks\n\n<!-- Add tasks below (one per line). "
@@ -179,6 +230,12 @@ class HeartbeatService:
         self._tick = 0
         self._processing = False
         self._task: asyncio.Task | None = None  # type: ignore[type-arg]
+        # HEARTBEAT.md processing runs as its own task so a long agent turn
+        # (up to HEARTBEAT_TASK_TIMEOUT_SECS) does not hold the tick loop:
+        # FTS rebuild, prune and idle consolidation keep their cadence.
+        self._process_task: asyncio.Task | None = None
+        # Loop tasks stop() cancelled, kept so wait_closed() can await them.
+        self._stopped_tasks: list[asyncio.Task] = []
         self._memory_backup_task: asyncio.Task | None = None
         self._memory_backup_stop = threading.Event()
         self._memory_backup_started = False
@@ -199,9 +256,33 @@ class HeartbeatService:
         self._memory_backup_stop.set()
         if self._memory_backup_task is not None:
             self._memory_backup_task.cancel()
+        if self._process_task is not None:
+            self._process_task.cancel()
         if self._task:
             self._task.cancel()
+            self._stopped_tasks.append(self._task)
             self._task = None
+
+    async def wait_closed(self) -> None:
+        """Await the tasks ``stop()`` cancelled, bounded by ``_STOP_DRAIN_SECS``.
+
+        A cancelled heartbeat turn unwinds its ``finally`` blocks (session
+        release, cycle-end recycle) here rather than after the gateway has
+        moved on to closing the sessions those blocks touch.
+        """
+        tasks = [
+            t
+            for t in (*self._stopped_tasks, self._process_task, self._memory_backup_task)
+            if t is not None and not t.done()
+        ]
+        self._stopped_tasks.clear()
+        if not tasks:
+            return
+        _, pending = await asyncio.wait(tasks, timeout=_STOP_DRAIN_SECS)
+        if pending:
+            logger.warning(
+                "Heartbeat: %d task(s) still running %ss after stop", len(pending), _STOP_DRAIN_SECS
+            )
 
     async def _loop(self) -> None:
         while not shutdown_event.is_set():
@@ -237,8 +318,7 @@ class HeartbeatService:
             if self._consolidator:
                 self._consolidator.check_idle_sessions()
             return
-        if not self._processing:
-            await self._process_heartbeat_file()
+        self._schedule_heartbeat_file()
 
         if self._tick % _FTS_REBUILD_TICKS == 0:
             loop = asyncio.get_running_loop()
@@ -282,6 +362,26 @@ class HeartbeatService:
         # Check for idle sessions needing history consolidation (every tick)
         if self._consolidator:
             self._consolidator.check_idle_sessions()
+
+    def _schedule_heartbeat_file(self) -> None:
+        """Start one HEARTBEAT.md pass unless the previous one is still running.
+
+        The tick does not await it: a task turn can run for
+        ``HEARTBEAT_TASK_TIMEOUT_SECS``, and the rest of the beat must not wait
+        that long. A tick that finds a pass in flight skips the file, so two
+        passes never overlap.
+        """
+        if self._processing or (self._process_task is not None and not self._process_task.done()):
+            return
+        self._process_task = asyncio.create_task(self._run_heartbeat_file())
+
+    async def _run_heartbeat_file(self) -> None:
+        # The pass logs its own failure: a raise here must not escape as an
+        # unretrieved task exception.
+        try:
+            await self._process_heartbeat_file()
+        except Exception:
+            logger.warning("Heartbeat task processing failed", exc_info=True)
 
     def _schedule_memory_backup(self) -> None:
         """One owned pass; ticks keep serving while a large store is copied."""
@@ -454,18 +554,9 @@ def _extract_tasks(content: str) -> list[tuple[str, str]]:
     Empty string when absent.
     """
     tasks: list[tuple[str, str]] = []
-    in_comment = False
-    for line in content.splitlines():
+    for line in _strip_comments(content).splitlines():
         stripped = line.strip()
         if not stripped:
-            continue
-        # Track multi-line HTML comments (standalone comment lines)
-        if "<!--" in stripped and "-->" not in stripped:
-            in_comment = True
-            continue
-        if in_comment:
-            if "-->" in stripped:
-                in_comment = False
             continue
         # Standalone comment line (<!-- ... --> on one line, no task text)
         if stripped.startswith("<!--") and stripped.endswith("-->"):

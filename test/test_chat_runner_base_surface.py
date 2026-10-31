@@ -399,7 +399,7 @@ _BASE_SURFACE: dict[str, tuple[tuple[str, str, str], ...]] = {
         (
             "_attach_turn_stats",
             "function",
-            "(slot: \"'_ChatSlot'\", elapsed_ms: 'int', credits: 'float', cost_usd: 'float', turn_boundary: 'int' = 0, model: 'str' = '', ttft_ms: 'int' = 0) -> 'bool'",
+            "(slot: \"'_ChatSlot'\", elapsed_ms: 'int', credits: 'float', cost_usd: 'float', turn_boundary: 'int' = 0, model: 'str' = '', ttft_ms: 'int' = 0, turn_start_mid: 'str | None' = None, retries: 'int' = 0) -> 'bool'",
         ),
         (
             "_context_usage_payload",
@@ -827,7 +827,8 @@ _BASE_SURFACE: dict[str, tuple[tuple[str, str, str], ...]] = {
         (
             "_answer_slash_without_channel",
             "async function",
-            "(state: 'DashboardState', slot: '_ChatSlot', session_key: 'str', command: 'str') -> 'str'",
+            "(state: 'DashboardState', slot: '_ChatSlot', session_key: 'str', command: 'str', "
+            "message: 'str' = '') -> 'str'",
         ),
         (
             "_handle_workflow_command",

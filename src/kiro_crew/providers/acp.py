@@ -554,6 +554,18 @@ class AcpProvider(LLMProvider):
         return value if isinstance(value, str) else ""
 
     @property
+    def kas_registered_agents(self) -> list[dict[str, Any]] | None:
+        """The agent batch this session registered with KAS, or ``None`` with no batch."""
+        value = getattr(self._client, "kas_registered_agents", None)
+        return value if isinstance(value, list) else None
+
+    @property
+    def kas_active_mode_id(self) -> str:
+        """The last mode id KAS reported for this session, or ``""``."""
+        value = getattr(self._client, "kas_active_mode_id", "")
+        return value if isinstance(value, str) else ""
+
+    @property
     def is_codex_backend(self) -> bool:
         """True when this ACP provider talks to codex-acp (vs kiro-cli)."""
         return self._client.backend == ACP_BACKEND_CODEX
@@ -849,6 +861,12 @@ class AcpProvider(LLMProvider):
         if isinstance(self._client, AcpSessionProvider):
             return self._client.native_context_documents
         return {}
+
+    def note_user_message(self, text: str) -> None:
+        # Only the shared runtime's session starts a KAS sign-in; the direct
+        # client gets the engine's own OAuth requests and has no trigger.
+        if isinstance(self._client, AcpSessionProvider):
+            self._sign_in_ask: str = text
 
     @property
     def member_dispatch_mounted(self) -> bool | None:

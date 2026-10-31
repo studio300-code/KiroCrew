@@ -49,6 +49,7 @@ from kiro_crew.config.loader import (  # noqa: F401
     dispatch_kiro_agent,
     published_autocompact_pct,
     resolve_agent_bindings,
+    resolve_effective_model,
 )
 from kiro_crew.config.sections import (  # noqa: F401 -- read by chat_api.slot_settings
     AutocompactPctError,
@@ -231,6 +232,7 @@ from kiro_crew.dashboard.chat_api.slot_create import (  # noqa: F401
     _check_new_slot_assignment,
     _created_slot_row,
     _default_template_stamp,
+    _mate_home_locked_response,
     _persist_app_agent_owner,
     _persist_birth_line,
     _retract_failed_newborn,
@@ -257,6 +259,7 @@ from kiro_crew.dashboard.chat_api.slot_detail import (  # noqa: F401
 )
 from kiro_crew.dashboard.chat_api.slot_effort import (  # noqa: F401
     _configured_backend_for_slot,
+    _own_models_field,
     api_chat_slot_reasoning_effort,
     api_chat_slot_selection_capabilities,
 )
@@ -294,6 +297,7 @@ from kiro_crew.dashboard.chat_api.slot_model import (  # noqa: F401
     _wire_model_id,
     api_chat_slot_model,
     api_chat_slots_model,
+    switch_slot_model,
 )
 from kiro_crew.dashboard.chat_api.slot_note import (  # noqa: F401
     _discard_held_note,
@@ -456,6 +460,11 @@ from kiro_crew.dashboard.handlers._shared import (  # noqa: F401
     cron_mode_refusal,
     cron_slot_creator,
     read_bounded_json,
+    string_field_error,
+)
+from kiro_crew.dashboard.handlers.agents_harness_effort import (  # noqa: F401
+    harness_effort,
+    own_models_backend,
 )
 from kiro_crew.dashboard.handlers.source_providers import is_owner_dashboard_request  # noqa: F401
 from kiro_crew.dashboard.relay_archive import relay_archive_refusal  # noqa: F401

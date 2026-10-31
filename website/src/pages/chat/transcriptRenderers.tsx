@@ -44,7 +44,8 @@ import { ErrorCard, SESSION_START_REPEAT_REFUSAL_AT, capabilityRefusal, isAppAge
 import { isFeatureRequestRow } from '../../prompts/featureRequest'
 import { feedbackTracker } from '../../feedbackTracker'
 import NoticeCard from './NoticeCard'
-import { resolveTransientNotice } from './transientNotice'
+import { resolveGatewayNotice } from './gatewayNotice'
+import CrewDispatchNoticeCard from './CrewDispatchNoticeCard'
 import WorkflowRunCard, { extractWorkflowRunId, isWorkflowRunTool } from './WorkflowRunCard'
 import SubagentRunCard, { extractSpawnRunLaunch, isSpawnRunTool } from './SubagentRunCard'
 import WorkflowCompletionCard, { isWorkflowCompletionMessage } from './WorkflowCompletionCard'
@@ -116,6 +117,13 @@ export interface TranscriptRendererOptions {
   onFileOpen?: (path: string, opts?: { line?: number; endLine?: number }) => void
   /** Open a directory in the host's side panel. Same #3300 blocker. */
   onFolderOpen?: (path: string) => void
+  /** Reveal the Crew (Workers) tab from the Crew Mode dispatch-notice button.
+   *  Host-owned because it must close the find pane (which keeps the dock
+   *  unmounted while open) and rebind a background pane's slot to the active one
+   *  before opening — neither reachable from the card. Absent (a side/embedded
+   *  chat, a crew window) leaves the card's button inert, the same opt-in shape
+   *  as the other host reveals above. */
+  onOpenCrewTab?: (slot: string) => void
   /** "Show in side panel" on a sub-agent completion card. Same #3300 blocker. */
   onOpenSubagentPanel?: (parsed: ParsedSubagentCompletion) => void
   /** Expanded-state map for tool rows, held ABOVE the row: a virtualised or
@@ -387,6 +395,22 @@ export function createTranscriptRenderers(
       roles: ['notice'],
       match: m => m.meta?.kind === 'warm_task_brief_claim',
       render: () => null,
+    },
+    {
+      // The gateway's one-per-turn Crew Mode dispatch notice: a dispatched crew
+      // member is in the Crew (Workers) tab, not the session list, so this row
+      // names that tab and opens it. The gateway decides when it appears; the
+      // card only renders localized copy and the button.
+      id: 'crew_dispatch_notice',
+      roles: ['notice'],
+      match: m => m.meta?.kind === 'crew_dispatch_notice',
+      render: (_m, ctx) => ctx.row(
+        <CrewDispatchNoticeCard
+          key={ctx.key}
+          slot={o.slot}
+          onOpenCrewTab={o.onOpenCrewTab}
+        />,
+      ),
     },
     // ── Shape-matched rows, ahead of anything keyed only by role ──
     {
@@ -667,11 +691,11 @@ export function createTranscriptRenderers(
       id: 'error',
       roles: ['error'],
       render: (m, ctx) => {
-        // A transient-5xx notice the gateway is already retrying against is
-        // routine status, not a failure: localized copy on a soft NoticeCard.
-        // Only its terminal shape ("please try again") stays a red ErrorCard,
-        // with the same localized text.
-        const transient = resolveTransientNotice(m, ctx.messages, ctx.index)
+        // A gateway status row draws localized copy keyed on its notice token.
+        // A transient-5xx retry the gateway is already running is routine
+        // status, not a failure: a soft NoticeCard. Every other family keeps the
+        // red ErrorCard, with the localized text.
+        const transient = resolveGatewayNotice(m, ctx.messages, ctx.index)
         if (transient?.card === 'notice') {
           return ctx.row(<NoticeCard content={transient.text} tone={transient.tone} />)
         }
@@ -713,6 +737,7 @@ export function createTranscriptRenderers(
         return ctx.row(
           <ErrorCard
             content={transient ? transient.text : m.content}
+            resumeContent={transient?.card === 'error' ? transient.resumeText : undefined}
             meta={m.meta}
             // A rejection the backend says no retry can fix never offers Continue,
             // even when this row is the newest and the turn was interrupted:

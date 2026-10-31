@@ -13,6 +13,7 @@ import { ItemCard } from './ItemCard'
 import { SourceGroup, NO_SOURCE } from './SourceGroup'
 import { EmbeddingStatus } from './EmbeddingStatus'
 import { SettingsTab } from './SettingsTab'
+import { useIngestionJobs } from './useIngestionJobs'
 import type { KnowledgeItem, Entity, Source, NamespaceInfo, IngestionJob } from './types'
 
 /**
@@ -89,7 +90,6 @@ function EntityAutocomplete({ query, onSelect }: { query: string; onSelect: (nam
           className="w-full px-3 py-2 text-left text-[13px] hover:bg-bg-hover flex items-center gap-2 bg-transparent border-none cursor-pointer">
           <span className="text-accent text-[11px]">{e.entity_type}</span>
           <span className="text-text">{e.name}</span>
-          {e.mention_count && <span className="text-muted text-[10px] ml-auto">{e.mention_count} {i18nT('pages.knowledge.index.mentions')}</span>}
         </button>
       ))}
     </div>
@@ -190,7 +190,7 @@ export default function KnowledgePage({ embedded = false }: { embedded?: boolean
   const [page, setPage] = useState(1)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [selectedEntity, setSelectedEntity] = useState<string | null>(null)
-  const [ingestionJobs, setIngestionJobs] = useState<IngestionJob[]>([])
+  const ingestion = useIngestionJobs()
   const [showHelp, setShowHelp] = useState(false)
   const [namespaceFilter, setNamespaceFilter] = useState('')
   const [uploadNamespace, setUploadNamespace] = useState('default')
@@ -329,19 +329,25 @@ export default function KnowledgePage({ embedded = false }: { embedded?: boolean
 
   const ingestMutation = useMutation({
     mutationFn: async ({ files, namespace }: { files: File[]; namespace: string }) => {
-      const jobs = files.map(f => ({ name: f.name, status: 'uploading' }))
-      setIngestionJobs(jobs)
-      for (let i = 0; i < files.length; i++) {
-        const fd = new FormData()
-        fd.append('file', files[i])
-        try {
-          await knowledgeApi<{ job_id: string }>(`/ingest?namespace=${encodeURIComponent(namespace)}`, { method: 'POST', body: fd })
-          jobs[i].status = 'done'
-        } catch (e: unknown) { jobs[i].status = `error: ${e instanceof Error ? e.message : 'unknown'}` }
-        setIngestionJobs([...jobs])
-        // Refresh sources/items after each file so they appear immediately
-        queryClient.invalidateQueries({ queryKey: ['knowledge-sources'] })
-        queryClient.invalidateQueries({ queryKey: ['knowledge-items'] })
+      const jobs: IngestionJob[] = files.map(f => ({ name: f.name, status: 'uploading' }))
+      const batch = ingestion.start([...jobs])
+      try {
+        for (let i = 0; i < files.length; i++) {
+          const fd = new FormData()
+          fd.append('file', files[i])
+          try {
+            await knowledgeApi<{ job_id: string }>(`/ingest?namespace=${encodeURIComponent(namespace)}`, { method: 'POST', body: fd })
+            jobs[i] = { name: jobs[i].name, status: 'done' }
+          } catch (e: unknown) {
+            jobs[i] = { name: jobs[i].name, status: 'error', error: e instanceof Error ? e.message : undefined }
+          }
+          ingestion.update(batch, [...jobs])
+          // Refresh sources/items after each file so they appear immediately
+          queryClient.invalidateQueries({ queryKey: ['knowledge-sources'] })
+          queryClient.invalidateQueries({ queryKey: ['knowledge-items'] })
+        }
+      } finally {
+        ingestion.scheduleClear(batch)
       }
       return jobs
     },
@@ -350,7 +356,6 @@ export default function KnowledgePage({ embedded = false }: { embedded?: boolean
       queryClient.invalidateQueries({ queryKey: ['knowledge-stats'] })
       queryClient.invalidateQueries({ queryKey: ['knowledge-namespaces'] })
       queryClient.invalidateQueries({ queryKey: ['knowledge-sources'] })
-      setTimeout(() => setIngestionJobs([]), 5000)
     },
   })
 
@@ -687,7 +692,7 @@ export default function KnowledgePage({ embedded = false }: { embedded?: boolean
         ) : tab === 'settings' ? (
           <SettingsTab />
         ) : (
-          <SourcesList onIngest={handleFiles} uploadNamespace={uploadNamespace} setUploadNamespace={setUploadNamespace} namespaces={namespaces} ingestionJobs={ingestionJobs} uploadAccept={uploadAccept} supportedFormatsDisplay={supportedFormatsDisplay} acceptsNoExtension={acceptsNoExtension} />
+          <SourcesList onIngest={handleFiles} uploadNamespace={uploadNamespace} setUploadNamespace={setUploadNamespace} namespaces={namespaces} ingestionJobs={ingestion.jobs} uploadAccept={uploadAccept} supportedFormatsDisplay={supportedFormatsDisplay} acceptsNoExtension={acceptsNoExtension} />
         )}
       </div>
 

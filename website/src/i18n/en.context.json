@@ -498,7 +498,11 @@
     "pages.schedulePage.confirm_delete_job": "Label of the row's Delete button in its ARMED state: the first click arms, and this string is what a second click/tap will execute. It must state the destructive action by itself (touch users get no hover tooltip) AND stay very short — the fixed-width actions cell fits roughly the width of the English \"Delete?\"; a longer value clips the adjacent menu. Phrase as a terse confirmation question using the same verb as the 'delete' key.",
     "pages.schedulePage.cronFolders.job_count_one": "Singular count label in a cron folder header row — means one scheduled cron job, not employment.",
     "pages.schedulePage.cronFolders.job_count_other": "Plural count label in a cron folder header row — means multiple scheduled cron jobs, not employment.",
+    "pages.schedulePage.delete_n_selected_jobs_one": "Tooltip on the bulk Delete button when one scheduled cron job is checked in the list; 'job' means a scheduled cron job, not employment.",
+    "pages.schedulePage.delete_n_selected_jobs_other": "Tooltip on the bulk Delete button when several scheduled cron jobs are checked in the list; 'job' means a scheduled cron job, not employment.",
+    "pages.schedulePage.details_tab": "Tab label in a cron job's dialog: the job's settings (schedule, message, options). A short noun.",
     "pages.schedulePage.id": "Column header for a record's identifier in a table. Keep it short; it labels a column of opaque id strings.",
+    "pages.schedulePage.logs_tab": "Tab label in a cron job's dialog: the job's past run records. A short noun, not the verb 'to log'.",
     "pages.schedulePage.new": "Verb-like button label: create a new one of these. If the target language needs a noun, name the object being created.",
     "pages.schedulePage.now": "Rendered in place of a countdown (\"in 5m\") when a scheduled job is already due — the time remaining is zero or negative. An adverb of time meaning \"at this moment\", NOT the \"Run now\" button on the same page.",
     "pages.schedulePage.ok": "Status value in a table or log line, meaning the operation succeeded. A state, not the confirmation button.",
@@ -927,6 +931,11 @@
     "crewWorkerKit.current_directions": "Muted line on the behavior-directions row of the Add abilities preview, under the incoming directions. {{directions}} is the crewmate's current directions text, which the incoming directions will overwrite.",
     "crewWorkerKit.done_replaced": "Sentence in the confirmation after an add succeeds, shown when it replaced the crewmate's behavior directions. May follow the \"Added N to NAME.\" sentence or stand alone.",
     "crewEditorNext.band_remove_stale": "Error in the mate abilities view when Remove is refused because the displayed revision changed; nothing was removed, the list refreshes, and the user must check it and press the Remove button again.",
-    "pages.developer.agentBackendTab.pi": "Name of the Pi coding-agent harness, shown wherever an agent harness is named (Settings > Agent Harness, a mate's Harness setting). A product name: keep it in Latin script, unchanged; not the mathematical constant."
+    "pages.developer.agentBackendTab.pi": "Name of the Pi coding-agent harness, shown wherever an agent harness is named (Settings > Agent Harness, a mate's Harness setting). A product name: keep it in Latin script, unchanged; not the mathematical constant.",
+    "components.crewMode.ultra_ms_now": "Right-hand label on a running milestone row on the Ultra Mode Board tab (Status view): the work is happening at this moment. Not a request to act now.",
+    "pages.settings.instancesPanel.not_active_until_restart": "Tail of the sentence \"Remote crew management is enabled\", shown when the setting is on but the app has not restarted yet. Keep the leading dash; agree in gender with the translated subject (\"management\").",
+    "pages.settings.notificationsPanel.priority_critical": "Notification priority level in a per-channel select: the alert always interrupts. Adjective describing a priority, not a severity of a bug.",
+    "pages.settings.notificationsPanel.priority_default": "Notification priority level in a per-channel select: the normal level. Adjective describing a priority.",
+    "pages.settings.notificationsPanel.priority_passive": "Notification priority level in a per-channel select: the alert is only recorded in history, never interrupts and is not counted on the bell. Adjective describing a priority; a word like \"quiet\" is fine."
   }
 }

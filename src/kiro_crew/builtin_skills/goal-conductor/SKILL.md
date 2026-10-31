@@ -98,6 +98,17 @@ Worked example — goal "resolve this repo's open issues":
 | Advise the user on issues nobody can action | Not a task. Run the needs-human checklist (Stop conditions). |
 | Write the summary report | Yours. A fold over the ledger. |
 
+### Worker debate
+
+When one open question — a design, a root cause, a plan, a review — needs
+several workers to argue it before anyone builds on the answer, run a worker
+debate: proposers and single-aspect critics argue in files, you relay and
+referee, and the human rules when it is stuck. Read
+`<this skill's dir>/references/worker-debate.md` and follow it. Its
+participants read each other's files by design, the one exception to
+Independent above, and the ledger carries only a short summary and the path to
+the debate note.
+
 ## The loop
 
 ### Round 0 — one plan, one gate
@@ -481,9 +492,11 @@ Each cycle:
    its session happen together.** When a work item reaches a terminal verdict
    (accepted, rejected, abandoned/void) and its loop is stopped,
    `session_close` that child session in the same cycle — a finished worker
-   has nothing left to re-arm. `session_close` archives (reopenable); it never
-   deletes. Never close a child that still has a pending human question or an
-   unmerged PR it is actively driving. **Closing an item cuts its worker's
+   has nothing left to re-arm. A stuck child (stale, no progress, item
+   abandoned) is `session_stop`ped first, then closed. `session_close` archives
+   (reopenable); it never deletes. Never close a child that waits on a person
+   (a pending approval or an open question to them) or an unmerged PR it is
+   actively driving, and never a session you did not dispatch. **Closing an item cuts its worker's
    report channel**: from then on its `work_report` is refused `item_closed`,
    and it cannot `session_send` to you. The close reply warns when that
    worker's session is still open. If the worker still has work for you,

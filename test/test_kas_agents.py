@@ -233,6 +233,12 @@ class TestTheSpecIsSpelledInKasToolIds:
             "fs_append",
         ]
 
+    def test_web_search_mounts_the_engine_s_remote_tool(self):
+        """KAS serves web search as ``remote_web_search``; the kiro-cli name
+        alone matches no KAS tool, so the agent would have no web search."""
+        out = to_client_custom_agent("a", _spec(tools=["web_fetch", "web_search"]), "p")
+        assert out["tools"] == ["web_fetch", "web_search", "remote_web_search"]
+
     def test_excluded_tools_are_widened_the_same_way(self):
         """The restricting direction: excluding ``fs_read`` for kiro-cli must not
         leave ``read_file`` mounted on KAS."""
@@ -255,9 +261,10 @@ class TestTheSpecIsSpelledInKasToolIds:
         spec can name. A tag (``read``, ``@builtin``) would also match but grants
         by class rather than by tool, so none appears here."""
         registry = Path(__file__).resolve().parent / "fixtures" / "kas_builtin_tool_ids.json"
-        registered = set(json.loads(registry.read_text(encoding="utf-8"))["registered"])
+        reg = json.loads(registry.read_text(encoding="utf-8"))
+        registered = set(reg["registered"]) | set(reg["remote"]["ids"])
         for kiro_cli_name, family in KAS_TOOL_FAMILY_BY_KIRO_CLI_NAME.items():
-            assert kiro_cli_name in {"fs_read", "fs_write", "grep", "glob"}
+            assert kiro_cli_name in {"fs_read", "fs_write", "grep", "glob", "web_search"}
             assert set(family) <= registered, kiro_cli_name
             assert kiro_cli_name not in family, "a family lists the OTHER engine's ids"
 
@@ -682,14 +689,11 @@ class TestPromptResolution:
                 resolve_prompt({"prompt": target}, agent_id="a", agents_dir=tmp_path)
 
     def test_proc_environ_prompt_is_refused(self, tmp_path):
-        # /proc/self/environ would leak the gateway's own environment. It must be
-        # refused either way: on POSIX it is absolute and caught by the pseudo-fs
-        # denylist ("not an allowed location"); on Windows it is not absolute (no
-        # drive letter), so it is treated as a relative prompt and rejected for
-        # escaping the agent directory. Both are fail-closed rejections.
-        with pytest.raises(
-            KasAgentTranslationError, match="not an allowed location|escapes the agent directory"
-        ):
+        # /proc/self/environ would leak the gateway's own environment. On POSIX it
+        # is caught by the pseudo-fs denylist; on Windows it has no drive, so it
+        # resolves to a `<drive>:\proc\...` that does not exist and the read fails.
+        # Both are fail-closed rejections.
+        with pytest.raises(KasAgentTranslationError, match="not an allowed location|unreadable"):
             resolve_prompt(
                 {"prompt": "file:///proc/self/environ"}, agent_id="a", agents_dir=tmp_path
             )
@@ -703,9 +707,15 @@ class TestPromptResolution:
         )
         assert out == "expert prompt"
 
-    def test_relative_prompt_escaping_the_agents_dir_is_refused(self, tmp_path):
-        with pytest.raises(KasAgentTranslationError, match="escapes"):
-            resolve_prompt({"prompt": "file://../../etc/passwd"}, agent_id="a", agents_dir=tmp_path)
+    def test_a_relative_prompt_may_climb_out_of_the_agents_dir(self, tmp_path):
+        # A user reported (0.11.0.3) `file://../prompts/x.md`, which kiro-cli loads,
+        # refused on KAS as escaping the agent directory.
+        agents = tmp_path / "agents"
+        agents.mkdir()
+        (tmp_path / "prompts").mkdir()
+        (tmp_path / "prompts" / "x.md").write_text("shared prompt", encoding="utf-8")
+        out = resolve_prompt({"prompt": "file://../prompts/x.md"}, agent_id="a", agents_dir=agents)
+        assert out == "shared prompt"
 
     @pytest.mark.parametrize("bad", [None, "", "   "])
     def test_a_prompt_less_spec_resolves_to_an_empty_prompt(self, bad, tmp_path):

@@ -633,7 +633,10 @@ pushes whose red jobs included a lint job.
   & Type Check' first" instead of blaming a skipped shard.
 - **Not behind lint:** `lockfile-engines-floor` and `cfn-lint` (10-minute checks,
   so waiting for lint would delay their verdict for no saving), `changes`,
-  `await-fast-gate` and `cancel-superseded-run`.
+  `await-fast-gate` and `cancel-superseded-run`. Neither is `lint-gate` behind
+  the baselined ratchets: `backend-ratchets` and `frontend-ratchets` run beside
+  the heavy jobs, so a ratchet red fails the pull request without skipping
+  them (see the job table).
 - **Push to `main` with the merge queue on** skips `changes`, `await-fast-gate`
   and `lint-gate` together; the macOS boot leg is admitted by its own condition.
   A merge group runs the same chain, so a queued group waits for lint first too.
@@ -662,7 +665,7 @@ yet decided: install from a committed constraints file, or set
 | `await-fast-gate` | Polls the `Fast Gate` run for this exact head commit and **fails closed** in all three ways it can go wrong: a run that never appears (180s budget), one that never completes (720s budget), and one whose conclusion is a decided non-success. `action_required` is not one of them: GitHub reports a fork run still awaiting maintainer approval as `completed`/`action_required`, so the barrier polls it as pending under the 720s budget rather than letting approval order decide whether the matrix runs. A listing read that errors is not a run that never appeared: the error is logged, it spends only the 720s budget, and the barrier fails closed there with a message saying the code was never judged. A run still reading `in_progress` at 720s on its first attempt is checked once against its own jobs first (a rerun's job list leaves out the jobs it did not rerun, so a later attempt fails closed): GitHub can lag minutes behind finished jobs when it rolls them up into the run, so when every job of the attempt is `completed` with `success` or `skipped`, at least one is `success`, and the newest finished at least 60s ago, the barrier releases the matrix with a warning naming the lag; anything else, including an unreadable jobs list, still fails closed. A barrier that passed when it could not read its subject would be worse than none, because the matrix would run anyway and the log would claim it was cleared to. One exception concludes `cancelled` rather than `failure`: on a push to `main`, a Fast Gate run evicted from its concurrency group before it started judged nothing, so when the barrier proves that (the run's attempt has no jobs, and another Fast Gate push run on the branch started between its creation and its cancellation) it waits up to 150s while `cancel-superseded-run` cancels the CI run, the outcome a CI run evicted from its own group gets. It never releases the matrix on that path, and a failed read, an unproven eviction or a cancel that does not land still fails closed. It holds only `actions: read`. One extra ~1-minute job buys the whole matrix the right to not start |
 | `lint-gate` | "Lint Gate". Aggregates `backend-lint` and `frontend-lint` for the heavy jobs (see [Lint first](#lint-first)). Runs when both ended `success` or `skipped`; SKIPPED when either failed or was cancelled, so the lint job is the one red and the heavy jobs skip behind it |
 | `cancel-superseded-run` | "Cancel Superseded Run". Runs only on a push to `main` (and only while `MERGE_QUEUE_ENABLED` is unset, like the barrier), beside `await-fast-gate` rather than behind it. It runs the barrier's script as a probe and, only when that proves this commit's Fast Gate run was evicted before it started, makes the workflow's one write: `POST /actions/runs/{run_id}/cancel` on its own run, so the run concludes `cancelled` instead of `failure`. Any other outcome cancels nothing and exits 0, leaving the verdict to the barrier. It is the only job in `ci.yml` with `actions: write`; pull requests and merge groups never start it. Nothing needs it, so it cannot release the matrix, and a cancelled run is never a green one |
-| `backend-lint` | `isort --check-only`, `flake8`, `mypy` on Python 3.12, plus `scripts/check_black_formatting.py` — black enforced on every file outside `.github/black-baseline.txt`, which can only shrink; on a PR it runs only on the changed `src/` and `test/` Python files (a baseline edit that only deletes entries adds those paths), and an edit to `pyproject.toml` or an added baseline entry forces the whole tree, as does `main-ratchet-audit.yml` — and `scripts/check_subprocess_encoding.py` (self-test first) — no text-mode subprocess call without an explicit `encoding=`, `**UTF8_TEXT`, or a `# subprocess-encoding: locale` marker, outside `.github/subprocess-encoding-baseline.txt`, which can only shrink — and `scripts/check_sync_io_in_async.py` (self-test first) — no blocking db / subprocess / http / `time.sleep` call inside an `async def` under `src/`, outside `.github/sync-io-in-async-baseline.txt`, and no blocking fs call there (`os.stat` / `listdir` / `walk`, `os.path.realpath` / `exists`, bare `open()`, zero-argument `.resolve()` / `.stat()` / `.exists()` and kin, zero-argument `.read_text()` / `.read_bytes()` / `.open()`, one-argument `.write_text()` / `.write_bytes()`) outside `.github/sync-io-in-async-fs-baseline.txt`; each ledger can only shrink. A stall past `dashboard.loop_stall_exit_after_secs` (25s) makes the watchdog kill the gateway and drop every in-flight turn (#3057, #1572); the escape is an offload (`await asyncio.to_thread(...)`, or a named lane from `src/kiro_crew/executors.py`) or a `# on-loop-io-ok: <why it cannot block>` marker whose reason is mandatory — and `scripts/check_file_line_cap.py` (self-test first) — no tracked code file over 2,000 lines outside `.github/file-line-cap-baseline.txt`, which can only shrink; a file the change does not touch is reported as main drift, not failed. All five baselined gates in this job read their diff scope from the one shared resolver in `scripts/ratchet_scope.py`, so they cannot disagree about which lines a change added; the env-base gates (`check_brand_name.py`, `check_harness_parity.py`, `check_focus_cue.py`) share the same diff parsing through its explicit-base entry points while keeping their `*_BASE_REF` base semantics |
+| `backend-lint` | `isort --check-only`, `flake8`, `mypy` on Python 3.12, plus `scripts/check_black_formatting.py` — black enforced on every file outside `.github/black-baseline.txt`, which can only shrink; on a PR it runs only on the changed `src/` and `test/` Python files (a baseline edit that only deletes entries adds those paths), and an edit to `pyproject.toml` or an added baseline entry forces the whole tree, as does `main-ratchet-audit.yml`. Black here and the four scope-resolving gates in `backend-ratchets` read their diff scope from the one shared resolver in `scripts/ratchet_scope.py`, so they cannot disagree about which lines a change added; the env-base gates (`check_brand_name.py`, `check_harness_parity.py`, `check_focus_cue.py`) share the same diff parsing through its explicit-base entry points while keeping their `*_BASE_REF` base semantics |
 | `backend-test` | 8 whole-file shards on Python 3.12, assigned before import, `-n auto` within each; 60-minute job budget includes coverage upload, with the 120-second per-test timeout retained. Large CodeBuild compute with the non-root boundary for eligible actors; hosted fallback |
 | `backend-test-windows` | All 8 whole-file shards use large CodeBuild compute for eligible actors, windows-latest otherwise; `--no-cov`, 180s per-test timeout. On a fork pull request it runs only when the `changes` job finds a Windows path (including `.github/actions/setup-windows-tests/**`, `**/*.ps1`, `**/conftest.py` and the platform shims), an added or removed `*.py` line that branches on Windows, the `ci:windows` label or `ci-full-run` (the label takes effect on the next push); main's own CI always runs it. See the migration contract below |
 | `backend-test-ipv6` | Five native IPv6 cases on hosted Linux and Windows; fail-closed report check, Linux full-run coverage merged with the ordinary shards |
@@ -674,7 +677,9 @@ yet decided: install from a committed constraints file, or set
 | `backend-test-crew-container` | "Backend Tests (crew container)". The only lane that runs the crew container image's suite (`aws_control/crew/runtime/container_tests/`). It is separate from the shards because it installs the image's own runtime pins (`container/requirements.txt`: fastapi, uvicorn, httpx, boto3), which that file's header forbids becoming dependencies of the application, and the shards' environment IS the application's, so there the suite's conftest collects nothing. Sets `CREW_CONTAINER_TESTS_REQUIRED=1`, which turns every reason that conftest would decline to collect into a hard error and checks the collection against the tree: every module and every named test the source declares must yield an item, and the total must be at or above `_MIN_COLLECTED` and no more than `_FLOOR_MARGIN` above it. A declared module or test name that stops yielding an item reds on its own name, with no number involved; the count is what catches a test whose parametrize cases drain while its name is still collected. `_MIN_COLLECTED`'s own comment states what that does and does not catch, and is the only place that bound is spelled out. **Skipped on a frontend-only diff** (`only_frontend`) |
 | `real-adapter-contract` | "Real Adapter Contract Tests". The one lane that INSTALLS the adapters the codex and opencode projections were measured against — `@agentclientprotocol/codex-acp` and `opencode-ai`, `npm ci` from the locked manifest in `test/real_adapters/` (its own manifest, not the product's; Dependabot bumps it weekly so drift shows up in the bump PR) — so the four contract tests that drive a real adapter execute instead of skipping. Everywhere else they skip, which left the element shape, the child environment, the refused transports and the eviction verb resting on one local run. Selects them by the `real_adapter` marker, so one added later is included rather than left out of a list. Sets `KIROCREW_E2E_REQUIRE=1` — the repository's existing "this job declared its preconditions must hold" switch, shared with the E2E suites — which turns an absent adapter into a failure, and then asserts on the junit report that at least the known contracts ran and none was skipped, so a broken install cannot report a green lane that measured nothing |
 | `coverage-combine` then `coverage-gate` | Combines the 3.12 shard data, then enforces the project line-rate floors, plus a per-file floor with a shrink-only baseline (all floors live in the job's `env:` block). **CodeBuild-hosted runner** (pilot, below) except for forks |
-| `frontend-lint` | `tsc -p tsconfig.app.json`, `eslint` under a hard-zero warning ceiling, `jscpd`, `npm run i18n:check`, the find_ui index freshness check (below), and `scripts/check_file_line_cap.py` on a full-history checkout, because `backend-lint` skips a frontend-only diff |
+| `frontend-lint` | `tsc -p tsconfig.app.json` and `eslint` under a hard-zero warning ceiling. These two are the whole job: a type error or a lint failure makes a test result meaningless, so they are what `lint-gate` waits on. The frontend ratchets run in `frontend-ratchets` |
+| `frontend-ratchets` | "Frontend Ratchets & i18n". `jscpd`, `npm run i18n:check`, the find_ui index freshness check and the find_ui goldens that need the real generator, the phantom-classes and `ui/` restyle ratchets, and `scripts/check_file_line_cap.py` on a full-history checkout (its only home on a frontend-only diff, where `backend-ratchets` is skipped). Carries `frontend-lint`'s surface condition verbatim and is NOT in `lint-gate`'s `needs:` — a failure here reds the pull request alongside the heavy matrix rather than skipping it |
+| `backend-ratchets` | "Backend Ratchets & Boundaries". The baselined ratchets that judge a CHANGE rather than a build: `scripts/check_subprocess_encoding.py` (self-test first) — no text-mode subprocess call without an explicit `encoding=`, `**UTF8_TEXT`, or a `# subprocess-encoding: locale` marker, outside `.github/subprocess-encoding-baseline.txt`, which can only shrink — and `scripts/check_sync_io_in_async.py` (self-test first) — no blocking db / subprocess / http / `time.sleep` call inside an `async def` under `src/`, outside `.github/sync-io-in-async-baseline.txt`, and no blocking fs call there (`os.stat` / `listdir` / `walk`, `os.path.realpath` / `exists`, bare `open()`, zero-argument `.resolve()` / `.stat()` / `.exists()` and kin, zero-argument `.read_text()` / `.read_bytes()` / `.open()`, one-argument `.write_text()` / `.write_bytes()`) outside `.github/sync-io-in-async-fs-baseline.txt`; each ledger can only shrink. A stall past `dashboard.loop_stall_exit_after_secs` (25s) makes the watchdog kill the gateway and drop every in-flight turn (#3057, #1572); the escape is an offload (`await asyncio.to_thread(...)`, or a named lane from `src/kiro_crew/executors.py`) or a `# on-loop-io-ok: <why it cannot block>` marker whose reason is mandatory — and `scripts/check_file_line_cap.py` (self-test first) — no tracked code file over 2,000 lines outside `.github/file-line-cap-baseline.txt`, which can only shrink; a file the change does not touch is reported as main drift, not failed; plus `scripts/check_acp_frame_host_data.py`, `scripts/check_agent_sdk_boundary.py` and `scripts/check_lockdown_before_publish.py`. Full-history checkout, because four of them scope themselves by ancestry through `scripts/ratchet_scope.py`. Stdlib only, so no dependency install. Carries `backend-lint`'s surface condition verbatim and is likewise NOT in `lint-gate`'s `needs:` |
 | `electron-test` | The Electron shell's own node:test suite (`website/electron`). NOT diff-gated: the test suite reads `packaging/` paths and `src/kiro_crew/` files classified as backend by the catch-all filter, so any `only_backend` gate would skip it on exactly the backend-only diffs that can break it |
 | `electron-test-windows` | Runs the native Windows port-owner identity tests against real NTFS junction and `Win32_Process` behavior, and `find-bin-real-ssh.test.js`, which resolves the in-box OpenSSH client through the kernel's real `\SystemRoot` link; no npm install is needed because the tested modules use Node's standard library only. NOT diff-gated for the same reason as `electron-test` |
 | `frontend-test` | `vitest run --coverage`. **CodeBuild-hosted runner, `instance-size:large`** (pilot, below) except for forks. A failed shard also prints `free -m` and any kernel OOM-kill or crash line ("Kernel log on a failed shard"), because Vitest 4's "Worker exited unexpectedly" names no signal (#23640) |
@@ -691,10 +696,11 @@ yet decided: install from a committed constraints file, or set
 | `e2e-boot-matrix` | Boots a real fake-backed gateway and pins seven tests on Linux and Windows for PRs; push-to-main runs add `macos-15`. Every leg is fail-closed on missing prerequisites or a collapsed pass count |
 
 `backend-lint` also runs `scripts/check_python_audit.py` (report-only findings,
-fail-closed execution), `scripts/check_acp_frame_host_data.py`,
-`scripts/check_agent_sdk_boundary.py`, and
-`scripts/check_lockdown_before_publish.py`. The Agent SDK boundary check is the
-fourth shrink-only, diff-scoped baseline gate referenced in the table above.
+fail-closed execution). It is on the gate path because it is
+`continue-on-error` -- it cannot red anything -- and `backend-lint` already pays
+for the dependency install it needs, which `backend-ratchets` does not. The Agent
+SDK boundary check in `backend-ratchets` is the fourth shrink-only, diff-scoped
+baseline gate, beside the subprocess-encoding, sync-IO and file line cap gates.
 
 ### The find_ui index is strict only where the PR caused it, and at release
 
@@ -712,9 +718,9 @@ landed a regen commit, so the check depends on where it runs:
 | Where | Stale index | Mechanism |
 |---|---|---|
 | `npm run build` (`make build`, `make frontend`, `build.yml`, the PR build lanes, `main`'s Build, `nightly.yml`) | warns, build goes on | `--check --warn-if-stale` |
-| `frontend-lint` on a PR / merge group, base fresh | **fails**: this PR changed index inputs | `.github/scripts/ui_index_freshness.py` checks the merge ref, then `base.sha` |
-| `frontend-lint` on a PR / merge group, base already stale | warns: `main` is stale, not this PR's to fix | same script |
-| `frontend-lint` on a push to `main` | warns | same script |
+| `frontend-ratchets` on a PR / merge group, base fresh | **fails**: this PR changed index inputs | `.github/scripts/ui_index_freshness.py` checks the merge ref, then `base.sha` |
+| `frontend-ratchets` on a PR / merge group, base already stale | warns: `main` is stale, not this PR's to fix | same script |
+| `frontend-ratchets` on a push to `main` | warns | same script |
 | `release.yml`'s `build-wheel` / `build-desktop` / `build-windows` | **fails** before any lane publishes | `ui_index_strict: true` sets `KC_UI_INDEX_STRICT=1`, which overrides `--warn-if-stale` |
 
 A generator problem (a broken registry, a dangling marker) still fails every
@@ -897,8 +903,10 @@ The CI workflow requires this repository, a push, a merge-group event or an
 `contains(fromJSON(vars.CODEBUILD_ACTOR_IDS || '[]'), github.actor_id)`.
 A `merge_group` run's actor is the person who queued the pull request, so the
 same list admits it without a new entry.
-Other PR activities (reopens, ready-for-review, labels and edits) stay hosted
-even for an admitted actor. The check reads `github.actor_id`, which names the
+Other PR activities (reopens, ready-for-review, labels and edits) stay off the
+fleet even for an admitted actor, and the `changes` resolver sends their Linux
+consumers to the `kirocrew-runners` group instead. The check reads
+`github.actor_id`, which names the
 account that triggered the event, never the accounts that pushed the commits
 on the head, so the gate does not prove who supplied the head code. On
 `synchronize` the actor is the account that pushed the newest commit, and on
@@ -912,8 +920,9 @@ branch or opens a pull request on it is submitting that branch for CI. The
 admitted scope stops at those two events so that reopening, marking ready,
 labelling or editing, which a listed account can do on any same-repository
 pull request it never pushed or opened, does not also start that head on the
-fleet. The cost of the exclusion is that runs on those activities use
-GitHub-hosted runner minutes. Fork pull requests stay hosted either way. The
+fleet. The cost of the exclusion is that `ci.yml`'s Linux matrix runs those
+activities on the `kirocrew-runners` group, whose minutes are billed. Fork pull
+requests never reach the fleet either way, and take that same group. The
 same restriction applies to every inline PR route and both platform resolvers.
 The same actor check covers the existing inline routes, including every
 unconditional Fast Gate. Pages and the main ratchet audit also admit manual
@@ -1059,24 +1068,37 @@ its timeout starts; diagnose or roll back rather than raising that timeout.
 
 ### Larger runners for the review lanes and CodeQL
 
-Twenty-five `runs-on` sites draw on the `kirocrew-runners` larger-runner group
-by `group:` rather than `ubuntu-latest`, and fifteen more reach it conditionally
-by label (see **Five sites reach the group by LABEL**, **Four PR-time sites
-reach the group by LABEL** and **Six `ci.yml` lanes reach the group by LABEL**
-below), so forty sites in all can land on its cap -- which is the figure
-**Capacity** below is about. The twenty-five are the
-six fork review lanes (`fork-opus-review`,
-`fork-gpt-review`, `fork-first-principles-review`, `fork-design-review`,
-`fork-ux-review`, and the three credentialed jobs of
-`fork-security-scope-review` -- `generate`, `validate` and `publish`), the five
-same-repo review lanes (`codex-review`, `claude-review`,
-`first-principles-review`, `design-review`, `ux-review`), `codeql.yml`, both
-`docker-smoke.yml` jobs, five jobs of `release.yml` (`version`,
-`resolve-promotion`, `stable-gate`, `github-release`, `record-promotion`), and
-the four fork helpers (`fork-internal-content-scan`, `fork-pr-description`'s
-`describe`, and `fork-workflow-guard`'s `guard` and `strip-stale-override`).
+Some `runs-on` sites draw on the `kirocrew-runners` larger-runner group by
+`group:` rather than `ubuntu-latest`, and others reach it conditionally by label
+(the label-route sections below name them, along with the matrix legs in
+`denial-differential.yml` and `fork-security-scope-review.yml` covered with
+them). Every one of them can land on the group's cap, which is what
+**Capacity** below is about. `ci.yml`'s `changes` resolver reaches the same group
+a third way, conditionally and by label, and is treated separately throughout
+this section because one resolver output fans out to many consumers: see
+**One site cannot use the group** below.
 
-**Why those five release jobs.** They are the release path's coordination jobs,
+The sites that target the group with `group:` are, by workflow:
+
+- the fork review lanes: `fork-opus-review`, `fork-gpt-review`,
+  `fork-first-principles-review`, `fork-design-review`, `fork-ux-review`, and
+  the credentialed jobs of `fork-security-scope-review` -- `generate`,
+  `validate` and `publish`
+- the same-repo review lanes: `codex-review`, `claude-review`,
+  `first-principles-review`, `design-review`, `ux-review`
+- `codeql.yml`
+- `docker-smoke.yml`, both jobs
+- `release.yml`: `version`, `resolve-promotion`, `stable-gate`,
+  `github-release`, `record-promotion`
+- the fork helpers: `fork-internal-content-scan`, `fork-pr-description`'s
+  `describe`, and `fork-workflow-guard`'s `guard` and `strip-stale-override`
+
+A change that adds or removes a site edits that workflow's own entry and its own
+subsection, never a shared total. Do not reintroduce one: a total in prose is
+checked by no test, so it drifts, and every concurrent change to this section
+collides on it.
+
+**Why those release jobs.** They are the release path's coordination jobs,
 and they are here for capacity rather than isolation. A fleet route is gated on
 the actor appearing in `CODEBUILD_ACTOR_IDS`, so a tagger outside that list
 lands on the shared standard pool, and the tagger rotates with the on-call;
@@ -1106,17 +1128,17 @@ context -- `internal-content-scan.yml`'s header promises any org repository can
 call it at "no repo-specific configuration". Both shapes bar the `group:` form
 only. A label inside a `github.repository == 'kirodotdev/KiroCrew'` conditional
 degrades to the hosted image wherever the group is unreachable, which is how the
-five fleet-fallback sites, the four PR-time sites and the two matrix jobs below
-reach it. The four fork helpers
+fleet-fallback sites, the PR-time sites and the matrix jobs below
+reach it. The fork helpers
 pass both tests outright, each carrying an `if` requiring
 `head.repo.full_name != github.repository` that is false inside a fork, which is
 why they took the `group:` form.
 
 **This test governs what may be ADDED; it does not describe what the group
-already holds.** Thirteen of the sites listed above can be started by a
-personal fork: the five same-repo review lanes, `codeql.yml`'s `analyze` and
+already holds.** Several of the sites listed above can be started by a
+personal fork: the same-repo review lanes, `codeql.yml`'s `analyze` and
 both `docker-smoke.yml` jobs all fire on `pull_request` with no head-repository
-check, and `release.yml`'s five jobs start on a `v*` tag push, which a fork
+check, and `release.yml`'s jobs start on a `v*` tag push, which a fork
 owner can make in their own fork. None of them was admitted under this test,
 and their fork-side queueing is accepted, on the same ground as the fork
 helpers' own narrower gap (a pull request opened from a third repository INTO a
@@ -1149,10 +1171,13 @@ also permanent for an unrelated reason: GitHub's CodeQL default setup, which
 this workflow replaced, is off, so there is no second scan to fall back to.
 
 **Every review lane and CodeQL moved here can hold merges, so treat any stuck
-run as an immediate rollback.** (The five label-routed fallbacks below hold no
-merge: none is polled by `pr-readiness.yml` or `merge-queue-readiness.yml`, and
-none fires on `pull_request` or `merge_group`. The rollback rule still covers
-them.) `pr-readiness.yml` resolves them all through one per-lane loop:
+run as an immediate rollback.** (The label-routed fallbacks below hold no merge,
+apart from `pr-readiness.yml`'s own `readiness` job: the rest are not polled by
+`pr-readiness.yml` or `merge-queue-readiness.yml`, and none fires on
+`pull_request` or `merge_group`. The rollback rule still covers them. The
+`readiness` job does hold every merge -- see **PR Readiness reaches the group by
+LABEL** below, and roll that one back first.)
+`pr-readiness.yml` resolves them all through one per-lane loop:
 `claude-review.yml`, `codex-review.yml`, `design-review.yml`, `ux-review.yml`,
 `first-principles-review.yml` and CodeQL sit in `workflow_specs` on the
 same-repo path, and on a fork pull request the fork lanes are read as
@@ -1164,14 +1189,16 @@ status pending and holds every merge for up to the 24-hour queue timeout.
 CodeQL has no second scan to fall back to either, since GitHub's default setup
 is off. If the group does not admit the repository, or is at its
 `maximum_runners` cap, restore `runs-on: ubuntu-latest` on the affected line at
-once rather than waiting to see whether the queue clears -- for any of the
-twenty-five group-targeted sites, not just CodeQL. The five fleet-fallback label
-sites below are covered by the same rule but have their own recipe, since a
-whole-line replacement there would take the fleet route out with it; the four
-PR-time label sites take the plain replacement, since they carry no fleet route
-to preserve; and of the six `ci.yml` label sites, the four single-OS lanes take
-the plain replacement while the two matrix lanes go back to
-`runs-on: ${{ matrix.os }}`.
+once rather than waiting to see whether the queue clears -- for any
+group-targeted site, not just CodeQL. The fleet-fallback label sites below are
+covered by the same rule but have their own recipe, since a whole-line
+replacement there would take the fleet route out with it; the PR-time label
+sites take the plain replacement, since they carry no fleet route to preserve;
+and among the `ci.yml` label sites, the single-OS lanes take the plain
+replacement while the matrix lanes go back to
+`runs-on: ${{ matrix.os }}`. The `changes` resolver is rolled back in its own
+step rather than on a `runs-on` line; see **One site cannot use the group**
+below.
 
 **Nothing gets faster.** A public-repository `ubuntu-latest` is already 4 vCPU
 and 16 GB, and `kirocrew-linux-4-core` is the same CPU and memory with roughly
@@ -1246,8 +1273,8 @@ reading one leg per pull request off the matrix. A stuck leg rolls back the same
 way as any other site: restore `runs-on: ${{ matrix.os }}` on the affected line,
 which returns all three legs to the hosted images in one edit.
 
-**Five sites reach the group by LABEL instead, because they must choose at run
-time.** `build-wheel.yml`, `dependency-vulnerability.yml`,
+**The fleet-fallback sites reach the group by LABEL instead, because they must
+choose at run time.** `build-wheel.yml`, `dependency-vulnerability.yml`,
 `pr-merge-conflict-label.yml` and both `pages.yml` jobs keep their CodeBuild
 fleet route and changed only what happens when the fleet does not admit the run.
 A conditional cannot name the group: the fleet's runners are REPOSITORY-level
@@ -1293,7 +1320,53 @@ the truth table alone would not catch it: that table derives its expected value
 from the expression under test, so a change editing the constant and the
 workflow together carries the expectation along and passes.
 
-**Four PR-time sites reach the group by LABEL instead, because they can execute
+**PR Readiness reaches the group by LABEL too, and it is the one site whose own
+queueing holds every merge.** `pr-readiness.yml`'s `readiness` job keeps its
+CodeBuild fleet route -- a same-repository `pull_request_target` run from a
+listed actor -- and changed only what happens when the fleet does not admit the
+run, so it carries the same `_GROUP_THEN_HOSTED_TAIL` as the five above and the
+same rename exposure applies to its line. It is the exception to **Why these
+five were kept to a non-PR-time batch**: it fires on `pull_request_target`, and
+it publishes the required `PR Readiness` status itself rather than being polled
+for one, so when it queues there is no other lane to be waiting behind.
+
+It is also the busiest site on the cap. A representative weekday half-hour saw
+585 runs, of which 322 were skipped by the job-level `if` and never asked for a
+runner. The 205 that succeeded put about 410 runner-allocating runs an hour onto
+this line, and that is a FLOOR: 58 more were cancelled, and a run cancelled
+after its job started held a runner while one cancelled from the queue did not,
+so the true rate is between 410 and 526 an hour. Their work is small -- a sampled
+median of 8 seconds of execution, with none of 30 sampled jobs over 60 seconds --
+so this site consumes cap in run COUNT, not in minutes held. Size its occupancy
+from the count, and note that every one of those runs bills a full minute,
+because GitHub rounds a job up to the whole minute.
+
+Its `workflow_run` leg is a trade taken on purpose. That leg carries the
+`in_progress` merge-guard hold, and for as long as the hold is queued for a
+runner the pre-re-run `success` stands over a lane that is running, where armed
+auto-merge can act on it. Nothing else closes that window: the sweep's evidence
+is COMPLETED checks, so it corrects the verdict only after the re-running lane
+finishes, and `merge-queue-readiness.yml` polls neither the review lanes nor
+`Issue Gate` nor `Security Scope Review`. The move does not create that window --
+the hosted route queues too, at a sampled median of 37 seconds and a worst case
+of 156 seconds on this leg -- it changes which queue sets its length. **The
+group's own queue depth for this leg has not been measured**; measure it from the
+jobs API filtered on `runner_group_name` as **Capacity** below asks, and treat a
+lengthening hold window as the rollback trigger rather than waiting for a wrong
+verdict to be acted on.
+
+Rollback is the fleet-preserving recipe the five above use, and **this is the
+line to restore first** when the group is at its cap, because every merge is
+behind it: drop the middle branch so the expression's tail is `|| 'ubuntu-latest'
+}}` again, and in `_CANONICAL_READINESS_EXPR` REPLACE `_GROUP_THEN_HOSTED_TAIL`
+with the literal `"|| 'ubuntu-latest' }}"` -- deleting it rather than replacing
+it leaves the constant ending at `format(...)` with no tail at all.
+Unlike the three `_CANONICAL_PUSH_EXPR` sites, this policy has one site, so the
+revert is per site and per policy at once. `test_readiness_route_truth_table`
+pins all three destinations as literals rather than reading them off the
+expression, so the revert has to edit the expectation on purpose.
+
+**The PR-time sites reach the group by LABEL instead, because they can execute
 somewhere the group does not exist.** `client-py.yml`'s `test`,
 `crew-image-build.yml`'s `build`, `fork-pr-label.yml`'s `label` and
 `internal-content-scan.yml`'s `scan` use
@@ -1328,8 +1401,8 @@ whole-line replacement, since
 these four carry no fleet route to preserve: restore `runs-on: ubuntu-latest` on
 the affected line.
 
-**Six `ci.yml` lanes reach the group by LABEL too, for the same reason.** Six
-jobs in `ci.yml` that were pinned to a default hosted runner now reach the
+**The `ci.yml` lanes reach the group by LABEL too, for the same reason.** Jobs
+in `ci.yml` that were pinned to a default hosted runner now reach the
 group through its `kirocrew-linux-4-core` label instead of through group
 targeting: `wheel-closure`, `native-redaction-gate`,
 `backend-test-kernel-lock-owner`, `e2e-private-namespace`, and the Linux leg of
@@ -1395,6 +1468,39 @@ the `runs-on` of `wheel-closure`, `native-redaction-gate` or
 the fallback from each line in turn reds exactly one test for the first three
 and nothing for the last three.
 
+**One site cannot use the group, and uses the label instead:** `ci.yml`'s
+`changes` resolver, whose `linux_runner` and `linux_runner_large` outputs carry
+the whole PR test matrix. That value has to choose at run time between the
+CodeBuild fleet and this group, and no single `runs-on` can name both, because
+the fleet's runners are REPOSITORY-level self-hosted runners and are not members
+of this organization group. So the resolver emits the definition's label, and
+the rename exposure that group targeting avoids is concentrated in its `Pick the
+Linux runner label` step: **rename this definition and that step must move with
+it.** In exchange, the label appears in one step for eighteen consumers rather
+than once per job.
+
+That step has THREE branches, not two, and the third is load-bearing. A run
+executing in another repository -- a fork running its own CI on its `main` --
+cannot reach an organization runner group, so it stays on `ubuntu-latest`. Give
+it the group's label and every one of the eighteen consumers sits queued in that
+fork until GitHub's pending limit cancels it, and the consumers' own
+`|| 'ubuntu-latest'` cannot rescue it, because that fires only on an EMPTY
+output: a non-empty label no runner carries is worse than none. A fork
+*pull request* against this repository is the opposite case, since it executes
+here, and it is most of what this site moves.
+
+This site adds the PR matrix to the group's `maximum_runners` cap, up to
+eighteen jobs per non-admitted run, so read **Capacity** below before adding
+more. The measured occupancy behind that decision belongs in the pull request
+that makes it, not here, where it would go stale.
+
+Rollback for this site is that step's non-fleet branches back to
+`ubuntu-latest`, with no AWS or runner-group change. The hosted
+`|| 'ubuntu-latest'` on each consumer expression is left in place on purpose: an
+empty resolver output means the `changes` job failed, which is not the same
+condition as a run being found ineligible, and a paid runner is the wrong answer
+to a broken resolver.
+
 **What is deliberately still on `ubuntu-latest`.** `security-scope-review.yml`
 is itself on that lane's own scope surface, so a diff touching it sets
 `in_scope=true` while giving the model no shell, flow or cron surface to propose
@@ -1428,7 +1534,7 @@ wrong shows up as slower merges rather than as a broken check.
 Rollback is per site and needs no AWS or runner-group change: restore
 `runs-on: ubuntu-latest` on the affected line -- except on the two `ci.yml`
 matrix lanes, where the line goes back to `runs-on: ${{ matrix.os }}` instead,
-so the rollback does not send the Windows leg to Linux. The five fleet-fallback
+so the rollback does not send the Windows leg to Linux. The six fleet-fallback
 sites are the exception twice over. It is not a whole-line replacement there, because the
 fleet route has to survive: drop the middle branch so the expression's tail is
 `|| 'ubuntu-latest' }}` again, and drop `_GROUP_THEN_HOSTED_TAIL` from that
@@ -1614,7 +1720,9 @@ Details worth knowing:
   **Backend shards also use large compute**, with the in-job non-root boundary
   described in [Linux and Windows CodeBuild migration](#linux-and-windows-codebuild-migration).
   `test/test_ci_fleet_routing_expression_parity.py` pins each complete resolver
-  consumer expression, including its hosted fallback and OS mapping.
+  consumer expression, including its hosted fallback and OS mapping, and
+  `test/test_ci_windows_canary.py` runs the resolver's own shell to check the
+  value it emits on each path.
   Root semantics and the measured jq/lsof/libpython gaps are handled there;
   namespace enforcement jobs still require their hosted kernel capabilities.
   At peak hours the hosted backend and frontend shards each queue for many
@@ -1627,9 +1735,13 @@ Details worth knowing:
     that runs after `changes` failed (`coverage-gate` fails closed with
     `if: always()`) still gets a runner instead of erroring out before its own
     checks execute: a run in any
-    repository other than `kirodotdev/KiroCrew` (a fork's own CI on its `main`),
-    or a `pull_request` whose head repository is not this one, gets
-    `ubuntu-latest`; every other run still needs the event and actor checks
+    repository other than `kirodotdev/KiroCrew` (a fork's own CI on its `main`)
+    gets `ubuntu-latest`, because an organization runner group is not reachable
+    from a fork and a label it cannot serve would leave every consumer queued.
+    A `pull_request` whose head repository is not this one EXECUTES here, so it
+    gets `kirocrew-linux-4-core`, the `kirocrew-runners` group's own runner
+    label, keeping this matrix off the enterprise-shared standard pool. Every
+    other run still needs the event and actor checks
     in [the migration contract](#linux-and-windows-codebuild-migration) before
     receiving the CodeBuild label. The webhook on the AWS side is
     additionally filtered to runs triggered by accounts that can push to this

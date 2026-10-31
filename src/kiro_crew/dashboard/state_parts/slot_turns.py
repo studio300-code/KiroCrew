@@ -498,6 +498,11 @@ def init_turns_fields(self: _ChatSlot) -> None:
     # ceiling cut the turn (kirocrew.turn.timeout.cause).
     self._last_turn_awaiting_permission = False
     self._last_turn_children_announced = False
+    # No Crew Mode dispatch notice written on this slot yet. Stamped with the
+    # ``_turn_generation`` whenever one is written, so a turn's later dispatches
+    # write no second notice (crew_dispatch_notice.py). -1 never equals a real
+    # generation, so the first dispatch of the first turn always writes.
+    self._crew_dispatch_notice_turn_gen = -1
     # Agent questions this slot has not answered yet, keyed by the ask's
     # identity: ``{card_id: {"ts": float, "blocking": bool}}``, empty when the
     # agent is not waiting on anything.
@@ -697,6 +702,7 @@ def queue_append(
     *,
     directive_user_origin: bool = False,
     directive_channel_origin: bool = False,
+    directive_owner_origin: bool = False,
 ) -> str:
     return self._queue_repository.queue_append(
         self,
@@ -705,6 +711,7 @@ def queue_append(
         meta,
         directive_user_origin=directive_user_origin,
         directive_channel_origin=directive_channel_origin,
+        directive_owner_origin=directive_owner_origin,
     )
 
 
@@ -723,6 +730,7 @@ def queue_insert(
     on_irreversibly_consumed: Callable[[], Awaitable[None] | None] | None = None,
     directive_user_origin: bool = False,
     directive_channel_origin: bool = False,
+    directive_owner_origin: bool = False,
 ) -> str:
     return self._queue_repository.queue_insert(
         self,
@@ -735,6 +743,7 @@ def queue_insert(
         on_irreversibly_consumed,
         directive_user_origin,
         directive_channel_origin,
+        directive_owner_origin,
     )
 
 
@@ -769,6 +778,7 @@ def queue_edit_by_id(
     *,
     directive_user_origin: bool = False,
     directive_channel_origin: bool = False,
+    directive_owner_origin: bool = False,
 ) -> bool:
     return self._queue_repository.queue_edit_by_id(
         self,
@@ -776,6 +786,7 @@ def queue_edit_by_id(
         content,
         directive_user_origin=directive_user_origin,
         directive_channel_origin=directive_channel_origin,
+        directive_owner_origin=directive_owner_origin,
     )
 
 

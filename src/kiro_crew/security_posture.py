@@ -275,6 +275,7 @@ NON_EGRESS_REDACTION_MODULES: frozenset[str] = frozenset(
         "subagent_manager/run_yields.py",
         "subagent_manager/stop_hooks.py",
         "subagent_manager/terminal.py",
+        "subagent_manager/turn_session.py",
         # The other owners composed onto the ``subagent.py`` namespace hold moved
         # redactor calls; they add no transport or audience either.
         "subagent_parts/admission_surface.py",
@@ -676,6 +677,10 @@ NON_EGRESS_REDACTION_MODULES: frozenset[str] = frozenset(
         "dashboard/chat_turn/turn_reply_seams.py",
         "dashboard/chat_turn/turn_spec_hooks.py",
         "dashboard/chat_turn/turn_stats.py",
+        # The /model, /tools and /mcp replies the KAS slash gate in
+        # dashboard/chat_turn/slash_commands.py appends: scrubbed before the gate writes
+        # them as a transcript row, which reaches the browser through the runner's surfaces.
+        "dashboard/kas_local_commands.py",
         "dashboard/chat_nav.py",
         "dashboard/chat_persistence_parts/member_store.py",
         "dashboard/chat_persistence_parts/restore_drivers.py",
@@ -863,6 +868,10 @@ NON_EGRESS_REDACTION_MODULES: frozenset[str] = frozenset(
         "mcp_dashboard_folder_runs.py",
         "mcp_dashboard_references.py",
         "mcp_dashboard_session_runs.py",
+        # The ``crew=`` half of five session tools: re-redacts text the gateway
+        # route (``dashboard/handlers/remote_dispatch_routes.py``, the registered
+        # sink) already scrubbed, on its way into the tool reply.
+        "mcp_session_crew.py",
         "mcp_dashboard_tag_runs.py",
         # Same class again: this stdio server redacts the ledger's own
         # worker-authored prose before returning it, but the egress boundary is

@@ -75,16 +75,21 @@ from kiro_crew.acp.kas_permissions import (
     AUTO_APPROVABLE_CAPABILITIES,
     CREW_ANSWERED_BUILTINS_KEY,
     CREW_ANSWERED_COMMANDS_KEY,
+    CREW_SHELL_ALLOWLIST_KEY,
+    CREW_WRITE_ALLOWLIST_KEY,
     allowed_tools_to_permissions,
     auto_approved_capabilities,
     crew_answered_builtins,
     crew_answered_commands,
     merge_user_permissions,
+    spec_shell_allowlist,
+    spec_write_allowlist,
     tools_settings_to_permissions,
     withhold_answered_under_authored_rules,
     withhold_hook_gated_auto_approval,
     without_allowed_commands,
 )
+from kiro_crew.acp.kas_prompt_paths import is_unsafe_prompt_path as _is_unsafe_prompt_path
 from kiro_crew.agent_discovery import (
     AgentsDirMemo,
     AmbiguousAgentSpecError,
@@ -112,7 +117,6 @@ from kiro_crew.platform.tool_names import (
     expand_kiro_cli_tool_exclusions,
     expand_kiro_cli_tool_names,
 )
-from kiro_crew.security import is_sensitive_path
 from kiro_crew.sel import sel
 from kiro_crew.user_json import copy_json_document
 
@@ -188,8 +192,6 @@ _WRAPPER_MARKERS = ("_kirocrew_mcp_gateway_wrapped", "_mc_mcp_gateway_wrapped")
 #: no-op rather than something to unpick.
 _KAS_DISCARDED_ENTRY_KEYS = ("autoApprove", "cwd", "disabled", "disabledTools")
 
-#: Pseudo-filesystems whose contents are process/kernel state, not documents.
-_PSEUDO_FS_ROOTS = ("/proc", "/sys", "/dev")
 
 #: Spec keys with no slot in KAS's ``ClientCustomAgent`` wire schema.
 #:
@@ -333,21 +335,6 @@ task is fully described in each request.
 _KAS_FALLBACK_PROMPT_AGENTS = frozenset({Path(LITE_AGENT_FILENAME).stem})
 
 
-def _is_unsafe_prompt_path(path: Path) -> bool:
-    """True if *path* must not be read and inlined into a KAS agent prompt.
-
-    The prompt content is shipped to KAS over the wire, so a spec pointing at a
-    credential store or a pseudo-filesystem would exfiltrate it. Blocks the
-    credential/governance locations ``is_sensitive_path`` knows, plus ``/proc``,
-    ``/sys`` and ``/dev`` (which it does not cover) — ``/proc/<pid>/environ`` is
-    the sharp edge, exposing the gateway's own environment.
-    """
-    if is_sensitive_path(str(path)):
-        return True
-    posix = path.as_posix()
-    return any(posix == root or posix.startswith(root + "/") for root in _PSEUDO_FS_ROOTS)
-
-
 def resolve_prompt(
     spec: dict[str, Any],
     *,
@@ -357,14 +344,21 @@ def resolve_prompt(
     """Return the spec's prompt as literal text, reading a ``file://`` URI.
 
     Separated from :func:`to_client_custom_agent` so the projection itself stays
-    pure. Because the resolved content is shipped to KAS over the wire, two
-    safety rules apply to a ``file://`` URI:
+    pure. Because the resolved content is shipped to KAS over the wire, the path
+    of a ``file://`` URI is checked before it is read:
 
     * A RELATIVE path is anchored to *agents_dir* (where the agent config lives,
-      the documented base for ``file://./prompts/x.md``), never the gateway cwd,
-      and may not escape it via ``..``.
-    * The resolved path must not be a credential/governance location or a
-      pseudo-filesystem (see :func:`_is_unsafe_prompt_path`).
+      the documented base for ``file://./prompts/x.md``), never the gateway cwd.
+      It may use ``..`` (``file://../prompts/x.md``), as on kiro-cli: an absolute
+      path reaches the same files, so a containment rule on the relative form
+      fenced nothing.
+    * Relative or absolute, the RESOLVED path (symlinks followed) must not be a
+      credential/governance location or a pseudo-filesystem
+      (:func:`kiro_crew.acp.kas_prompt_paths.is_unsafe_prompt_path`).
+
+    A spec from a project checkout is untrusted and stays inside that checkout's
+    agents directory; that rule is enforced where the checkout's spec is chosen
+    (``acp.harness.kas.resolve_projected_spec``), not here.
 
     A spec with no prompt (missing or blank) resolves to ``""``, which KAS runs
     on its own default prompt alone, as kiro-cli does for the same spec. Crew's
@@ -390,15 +384,7 @@ def resolve_prompt(
         return raw
     ref = raw[len(_PROMPT_FILE_SCHEME) :]
     candidate = Path(ref).expanduser()
-    if candidate.is_absolute():
-        path = candidate.resolve()
-    else:
-        base = agents_dir.resolve()
-        path = (base / ref).resolve()
-        if path != base and base not in path.parents:
-            raise KasAgentTranslationError(
-                f"agent {agent_id!r} relative prompt {ref!r} escapes the agent directory"
-            )
+    path = (candidate if candidate.is_absolute() else agents_dir / candidate).resolve()
     if _is_unsafe_prompt_path(path):
         raise KasAgentTranslationError(
             f"agent {agent_id!r} prompt path {path} is not an allowed location; refusing to inline it"
@@ -1220,6 +1206,19 @@ def to_client_custom_agent(
     answered_commands = crew_answered_commands(spec.get("toolsSettings"))
     if answered_commands and not _allowed_commands_withheld(spec, permissions):
         out[CREW_ANSWERED_COMMANDS_KEY] = answered_commands
+    # `toolsSettings.shell.denyByDefault`: the only commands the shell may run.
+    # A restriction, so recorded whatever the ceiling says; the gate refuses every
+    # other shell call of this agent (`spec-shell-allowlist` tier).
+    shell_allowlist = spec_shell_allowlist(spec.get("toolsSettings"))
+    if shell_allowlist is not None:
+        out[CREW_SHELL_ALLOWLIST_KEY] = shell_allowlist
+    # `toolsSettings.fs_write.fallbackAction: "deny"`: the only paths the write
+    # tool may touch, as the spec wrote them. Recorded whatever the ceiling says,
+    # like the shell's; the gate refuses every other write of this agent
+    # (`spec-write-allowlist` tier).
+    write_allowlist = spec_write_allowlist(spec.get("toolsSettings"))
+    if write_allowlist is not None:
+        out[CREW_WRITE_ALLOWLIST_KEY] = write_allowlist
 
     description = spec.get("description")
     if isinstance(description, str) and description:
@@ -1490,6 +1489,21 @@ def _entry_crew_answered_commands(entry: Any) -> tuple[str, ...]:
     return tuple(p for p in raw if isinstance(p, str) and p)
 
 
+def _entry_shell_allowlist(entry: Any) -> tuple[str, ...] | None:
+    """The :data:`CREW_SHELL_ALLOWLIST_KEY` patterns of one projected entry.
+
+    ``None`` when the entry has no such key (no ``denyByDefault``). A value that is
+    present but not a list of strings reads as ``()``, which allows no command: a
+    restriction is never lifted by a malformed record.
+    """
+    if not isinstance(entry, dict) or CREW_SHELL_ALLOWLIST_KEY not in entry:
+        return None
+    raw = entry[CREW_SHELL_ALLOWLIST_KEY]
+    if not isinstance(raw, list):
+        return ()
+    return tuple(p for p in raw if isinstance(p, str) and p)
+
+
 def _registered_entry(custom_agents: Any, agent_id: str) -> Any:
     entries = [a for a in custom_agents if isinstance(a, dict)] if custom_agents else []
     return next((a for a in entries if a.get("id") == agent_id), None)
@@ -1498,6 +1512,24 @@ def _registered_entry(custom_agents: Any, agent_id: str) -> Any:
 def _switched_entry(custom_agents: Any, mode_id: str) -> Any:
     entries = [a for a in custom_agents if isinstance(a, dict)] if custom_agents else []
     return next((a for a in entries if kas_wire_agent_id(str(a.get("id") or "")) == mode_id), None)
+
+
+def active_registered_entry(
+    custom_agents: Any, agent_id: str, mode_id: str
+) -> dict[str, Any] | None:
+    """The registered entry the session runs now, or ``None`` when Crew registered none for it.
+
+    *mode_id* is the last mode KAS reported (``""`` before any switch); it is
+    matched by wire id, as :func:`switched_auto_approved` matches it, so a KAS
+    built-in mode never reads a crewmate's entry of the same name. Before any
+    switch the entry is the batch's own *agent_id*, matched exactly.
+    """
+    entry = (
+        _switched_entry(custom_agents, mode_id)
+        if mode_id
+        else _registered_entry(custom_agents, agent_id)
+    )
+    return entry if isinstance(entry, dict) else None
 
 
 def projected_crew_answered_commands(custom_agents: Any, agent_id: str) -> tuple[str, ...]:
@@ -1510,6 +1542,17 @@ def switched_crew_answered_commands(custom_agents: Any, mode_id: str) -> tuple[s
     """Those patterns once a KAS mode switch moves the session to *mode_id*,
     matched like :func:`switched_crew_answered`."""
     return _entry_crew_answered_commands(_switched_entry(custom_agents, mode_id))
+
+
+def projected_shell_allowlist(custom_agents: Any, agent_id: str) -> tuple[str, ...] | None:
+    """The ``denyByDefault`` shell allowlist of *agent_id*'s registered entry, or
+    ``None``, matched like :func:`projected_crew_answered_commands`."""
+    return _entry_shell_allowlist(_registered_entry(custom_agents, agent_id))
+
+
+def switched_shell_allowlist(custom_agents: Any, mode_id: str) -> tuple[str, ...] | None:
+    """That allowlist once a KAS mode switch moves the session to *mode_id*."""
+    return _entry_shell_allowlist(_switched_entry(custom_agents, mode_id))
 
 
 def projected_crew_answered(custom_agents: Any, agent_id: str) -> frozenset[str]:

@@ -128,6 +128,9 @@ The instance bootstrap runs `install.sh --voice` on both its initial attempt and
 retry. This installs the existing `voice` extra (`boto3` and
 `amazon-transcribe`) before the gateway first imports its Transcribe provider;
 installing those SDKs after startup would otherwise require a gateway restart.
+Like every `install.sh` run it also downloads the pinned KAS engine into the
+instance's data home (`kirocrew kas install`); a failed download only warns, and
+`agent.kas_bundle` stays off.
 
 When the installed module belongs to a valid source checkout, the launcher
 packages that checkout and uploads it to a launcher-owned bucket
@@ -714,8 +717,12 @@ pointer -- which `kirocrew cloud list` can rediscover from the real stacks anywa
     create-once for the launcher: it still has no `iam:CreatePolicyVersion`. A
     launch that finds the exact document this launcher created before the
     edition statements existed (`iam.previous_boundary_documents`,
-    `previous_kms_boundary_documents`) is refused with
-    `kirocrew cloud iam-boundary --upgrade` named (`--upgrade --ssm-kms` for
+    `previous_kms_boundary_documents`) runs `source.upgrade_boundary` itself and,
+    when it succeeds, prints one line saying the boundary was upgraded and
+    continues. That succeeds only from a terminal whose credentials hold
+    `iam:CreatePolicyVersion`; a launcher-only credential, an agent session or a
+    policy at its five-version limit gets the refusal naming
+    `kirocrew cloud iam-boundary --upgrade` (`--upgrade --ssm-kms` for
     the KMS boundary, whose upgrade needs that flag). That admin step
     (`source.upgrade_boundary`, refused in an agent session) re-versions the
     boundary only when it holds that earlier document, sets the new version as

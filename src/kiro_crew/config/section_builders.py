@@ -58,6 +58,7 @@ from kiro_crew.config.integration_sections import (
     _resolve_stub_servers,
 )
 from kiro_crew.config.memory_sections import (
+    HISTORY_IDLE_HOURS_MIN,
     STARTUP_RECALL_TIMEOUT_MAX_SECS,
     KnowledgeConfig,
     MemoryConfig,
@@ -243,6 +244,35 @@ def _work_ledger_max_depth(work_ledger_data: dict) -> int:
 # ---------------------------------------------------------------------------
 
 
+def _history_idle_hours(section: SectionReader) -> float:
+    """``memory.history_idle_hours`` as a finite number of hours, never below the floor.
+
+    Consumers multiply it by 3600, so a stored string repeats and ``None`` raises.
+    A number read from an older file (``"3"`` included) is kept; one that is not a
+    positive finite number takes the default, and a positive one below
+    ``HISTORY_IDLE_HOURS_MIN`` is raised to it. Either change is logged.
+    """
+    raw = section.get("history_idle_hours")
+    default = float(section.default("history_idle_hours"))
+    hours = _safe_float(raw, -1.0)  # -1 is below zero, so an unreadable value is refused
+    if hours <= 0:
+        logger.warning(
+            "Config: memory.history_idle_hours %r is not a positive number; using %s",
+            raw,
+            default,
+        )
+        return default
+    if hours < HISTORY_IDLE_HOURS_MIN:
+        logger.warning(
+            "Config: memory.history_idle_hours %r is below %s; using %s",
+            raw,
+            HISTORY_IDLE_HOURS_MIN,
+            HISTORY_IDLE_HOURS_MIN,
+        )
+        return HISTORY_IDLE_HOURS_MIN
+    return hours
+
+
 def _build_memory_config(memory_data: dict) -> MemoryConfig:
     section = SectionReader(MemoryConfig, memory_data)
     return MemoryConfig(
@@ -258,6 +288,7 @@ def _build_memory_config(memory_data: dict) -> MemoryConfig:
         embedding_idle_evict_secs=section.read(
             "embedding_idle_evict_secs", _safe_int, 0, 365 * 24 * 3600
         ),
+        embedding_weight_repack=section.read("embedding_weight_repack", _safe_bool),
         embedding_child_process=section.read("embedding_child_process", _safe_bool),
         embed_model_url=section.get("embed_model_url"),
         embed_model_path=section.get("embed_model_path"),
@@ -282,7 +313,7 @@ def _build_memory_config(memory_data: dict) -> MemoryConfig:
             else section.default("decay_rates")
         ),
         semantic_keys=section.get("semantic_keys"),
-        history_idle_hours=section.get("history_idle_hours"),
+        history_idle_hours=_history_idle_hours(section),
         history_max_days=section.read("history_max_days", _safe_nonnegative_int),
         backup_enabled=section.read("backup_enabled", _safe_bool),
         backup_keep=section.read("backup_keep", _safe_int, 1, None),
@@ -505,6 +536,7 @@ def _build_instances_config(
     section = SectionReader(InstancesConfig, instances_data)
     return InstancesConfig(
         enabled=bool(section.get("enabled")),
+        crew_reads_enabled=bool(section.get("crew_reads_enabled")),
         warm_set_cap=section.read("warm_set_cap", _safe_int),
         default_destination=clean_crew_ref(section.get("default_destination")),
         tunnel_base_port=section.read("tunnel_base_port", _safe_int),

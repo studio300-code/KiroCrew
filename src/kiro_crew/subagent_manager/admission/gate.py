@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from typing import Any
 
     from ...subagent import (
+        _MAX_SPAWN_DEPTH,
         AGENT_NOT_AVAILABLE_CODE,
         MEMORY_CAUSE_CGROUP_USAGE_UNREADABLE,
         MEMORY_CAUSE_READ_UNANSWERED,
@@ -67,6 +68,8 @@ class _GateMixin(ManagerComponent):
         WINDOW_ENTRY_RECOVERING: str
         MEMORY_WAIT_UNTIL_KEY: str
         MEMORY_CAUSE_LANE_SHARE: str
+
+        def track_store_task(self, task: "asyncio.Task[Any]") -> "asyncio.Task[Any]": ...
 
     # Each name below IS its owner module's function, whose first parameter is ``self``:
     # ``_hoist_impls`` and ``bind_component_globals`` see a bound ``*_impl`` exactly as
@@ -123,6 +126,7 @@ class _GateMixin(ManagerComponent):
         _recovering_row: bool = False,
         _stop_before_memory_read: bool = False,
         _memory_reading: "tuple[float, str] | None" = None,
+        _depth: int | None = None,
     ) -> "SubagentInfo | PreparedSpawn | ClaimPoint | MemoryReadPoint | None":
         """Spawn a subagent for *task*.
 
@@ -309,7 +313,75 @@ class _GateMixin(ManagerComponent):
         # A nested spawn (its parent is a subagent): the child reserve below lets
         # it take the reserved slots, and the kernel memory-pressure hold never
         # applies to it.
-        _is_child = bool(self._manager._admission.taskq_parent_id_for(parent_session_key))
+        _parent_run_id = self._manager._admission.taskq_parent_id_for(parent_session_key)
+        _is_child = bool(_parent_run_id)
+        # Lineage depth: the deeper of the depth carried in (the queued params
+        # of a drained row, a retry's or a continuation's recorded depth) and
+        # the depth the spawning parent proves now (its live record's depth + 1,
+        # or the one sub-agent level its key proves when the record is gone).
+        # Carrying it keeps a drain, retry or continuation at its real depth
+        # after the parent's record was dismissed, cancelled or lost to a
+        # restart; taking the deeper means a carried value can only raise it.
+        # The parent is the run the key names plus every running continuation
+        # of it, which has its own id but runs on the original run's
+        # ``conversation_key``; after a restart the continuation is the only
+        # one live. A finished continuation is left out: its record lingers
+        # until eviction and would charge a later, shallower turn its depth.
+        _parent_depths = [
+            int(getattr(a, "depth", 1) or 1)
+            for a in (self._manager._agents.values() if _parent_run_id else ())
+            if a.id == _parent_run_id
+            or (
+                not a.done
+                and (getattr(a, "conversation_key", "") or f"subagent:{a.id}") == parent_session_key
+            )
+        ]
+        if _parent_depths:
+            _proven_depth = max(_parent_depths) + 1
+        elif _is_child:
+            _proven_depth = 2
+        else:
+            _proven_depth = 1
+        _carried_depth = _depth if type(_depth) is int else 0
+        _depth = max(_carried_depth, _proven_depth)
+        # The second half of a claimed dispatch is never refused for depth: its
+        # first half already was checked, and a refusal here would return the
+        # claimed row to the store as claimable work the caller was told was
+        # refused.
+        if _depth > _MAX_SPAWN_DEPTH and not _dispatch_now:
+            logger.warning(
+                "Subagent spawn refused: depth %d exceeds the cap of %d (parent=%s)",
+                _depth,
+                _MAX_SPAWN_DEPTH,
+                parent_session_key,
+            )
+            try:
+                sel().log_tool_invocation(
+                    session_key=parent_session_key or "",
+                    source="subagent",
+                    tool_name="spawn_run",
+                    outcome="rejected_depth_cap",
+                    metadata={"agent": agent, "depth": _depth, "cap": _MAX_SPAWN_DEPTH},
+                )
+            except Exception:
+                logger.debug("SEL audit failed for depth-cap rejection", exc_info=True)
+            return _refuse_row(
+                SubagentInfo(
+                    id=agent_id,
+                    task=_redacted_task,
+                    agent=agent,
+                    parent_session_key=parent_session_key,
+                    done=True,
+                    error=(
+                        f"spawn refused: a sub-agent at depth {_depth} would exceed the "
+                        f"nesting cap of {_MAX_SPAWN_DEPTH}; do this work in the current "
+                        "run instead of delegating it further"
+                    ),
+                    batch_id=batch_id,
+                    batch_total=max(0, int(batch_total)),
+                    depth=_depth,
+                )
+            )
 
         # Freeze before queueing or awaiting approval; a replacement parent must
         # not change the mode of work already admitted under its predecessor. A
@@ -576,6 +648,7 @@ class _GateMixin(ManagerComponent):
             "_parent_project_dirs": _parent_project_dirs,
             "crew": crew,
             "_memory_mode": _memory_mode,
+            "_depth": _depth,
             # Same rule for the asking turn: `spawn_async` re-enters from this
             # dict (prepare -> write -> re-enter), so a follow-up whose asking
             # ordinal was pinned by its watcher would otherwise be re-read from
@@ -1462,6 +1535,7 @@ class _GateMixin(ManagerComponent):
             memory_store=memory_store or "",
             crew=crew,
             memory_mode=_memory_mode,
+            depth=_depth,
             **run_fields,
         )
         info._start_price_gb = candidate_price
@@ -1491,11 +1565,13 @@ class _GateMixin(ManagerComponent):
             self._manager._seen_batches.add(batch_id)
             try:
                 loop = asyncio.get_event_loop()
-                loop.create_task(
-                    self._manager._fire_event(
-                        "spawn_batch_started",
-                        info,
-                        {"batch_id": batch_id, "count": info.batch_total},
+                self.track_store_task(
+                    loop.create_task(
+                        self._manager._fire_event(
+                            "spawn_batch_started",
+                            info,
+                            {"batch_id": batch_id, "count": info.batch_total},
+                        )
                     )
                 )
             except RuntimeError:

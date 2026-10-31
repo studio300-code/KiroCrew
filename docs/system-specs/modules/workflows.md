@@ -542,7 +542,9 @@ Static rejections:
   (`ast.literal_eval`; both `META = {...}` and `META: dict = {...}` are accepted),
   and an `async def workflow(ctx)` entrypoint whose first parameter is named `ctx`
   (positional-only `def workflow(ctx, /)` is fine). A plain `def workflow` is
-  rejected with a specific error.
+  rejected with a specific error. The runner calls `workflow(ctx)` only, so any
+  further parameter, positional or keyword-only, must have a default
+  (`*args` / `**kwargs` are fine); one without is refused by name.
 - **Size:** `MAX_SCRIPT_BYTES` = 262144 bytes of UTF-8.
 - **Undefined names** (`_check_undefined_names`, via `symtable`): any referenced
   global that is not a safe builtin, not `ctx`, and not bound at module level is
@@ -894,6 +896,11 @@ Properties that matter:
   `redact_exfiltration_urls` then `redact_credentials`, recursively. Mapping keys
   are retained as-is by `WorkflowRunStore`; the HTTP and chat response redactors
   independently cover both keys and values on the way out.
+- **Strict JSON:** a non-finite float (`inf`, `-inf`, `nan`) is written as `null`,
+  both to disk and in every `/api/workflows` response, because a bare `Infinity`
+  token fails the browser's `JSON.parse`. A script reaches one through
+  `ctx.budget.remaining()` on a run without a budget. A run file that already holds
+  a bare `Infinity` still loads, and the response redactor nulls it.
 - **Injective paths:** a `run_id` is sanitized to alphanumerics plus `_`/`-` so a
   malformed id cannot traverse out of the runs dir. Because sanitizing is lossy,
   when it changes the id a 12-hex-char sha256 prefix of the original is appended,
@@ -1531,6 +1538,14 @@ the redacted event plus the run's `session_key`, and the frontend
 budget snapshot. On a terminal state, `dashboard/workflow_inject.py` posts the
 result into the originating chat slot and starts (or queues) an agent turn so the
 user gets a synthesized answer rather than a raw blob.
+
+A finished run's message carries its result as a `json` block when the serialized
+result is at most `_MAX_RESULT_CHARS` (4,000) characters. A longer result is cut to
+that many characters and shown in a `text` block, after a line that says it was
+truncated, gives both sizes and names the `result` field of
+`workflow_result('<run_id>')` as the complete value. A cut JSON document is not JSON,
+so a preview is never labelled `json`. A result `json.dumps` cannot serialize is shown
+as its `str()` form, in a `text` block too.
 
 An agent the run ends before it finishes has no `agent_finished`: `_RunContext.agent()`
 records that event only after its call returns, and a cancel leaves the call by

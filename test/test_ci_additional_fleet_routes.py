@@ -196,10 +196,12 @@ def test_actor_and_event_truth_table(
         # A same-repository PR head from a listed actor uses the fleet.
         ("pull_request_target", _REPO, _REPO, "", "101", _ACTORS, True),
         ("pull_request_target", _REPO, _REPO, "", "202", _ACTORS, True),
-        # A fork head stays hosted; the workflow_run field never stands in.
+        # A fork head misses the fleet and takes the group; the workflow_run
+        # field never stands in.
         ("pull_request_target", _REPO, _FORK, "", "101", _ACTORS, False),
         ("pull_request_target", _REPO, "", _REPO, "101", _ACTORS, False),
-        # The merge-guard hold path stays hosted, same-repo head or not.
+        # The merge-guard hold path misses the fleet and takes the group,
+        # same-repo head or not.
         ("workflow_run", _REPO, "", _REPO, "202", _ACTORS, False),
         ("workflow_run", _REPO, _REPO, _REPO, "101", _ACTORS, False),
         ("workflow_run", _REPO, "", _FORK, "101", _ACTORS, False),
@@ -226,7 +228,20 @@ def test_readiness_route_truth_table(event, repo, pr_head, run_head, actor, acto
         "github.run_id": "456",
         "github.run_attempt": "3",
     }
-    expected = "codebuild-kirocrew-gha-linux-456-3" if eligible else "ubuntu-latest"
+    # Pinned here as literals, deliberately NOT read off the expression under
+    # test the way the policy table above does it. This lane publishes the
+    # repository's one required status and its workflow_run leg carries the
+    # merge-guard hold, so moving any of these destinations has to be done on
+    # purpose in two places; deriving the expectation from the constant would
+    # let a future edit to both carry its own expectation along. Only a run
+    # executing OUTSIDE this repository reaches the hosted image, because a
+    # fork's own copy cannot reach an organization runner group.
+    if eligible:
+        expected = "codebuild-kirocrew-gha-linux-456-3"
+    elif repo == _REPO:
+        expected = "kirocrew-linux-4-core"
+    else:
+        expected = "ubuntu-latest"
     assert _evaluate(parity._CANONICAL_READINESS_EXPR, context) == expected
 
 
@@ -243,6 +258,54 @@ def test_readiness_never_checks_out_pr_code():
             "${{ github.event.repository.default_branch || github.ref_name }}"
         )
         assert step["with"]["persist-credentials"] is False
+
+
+@pytest.mark.parametrize(
+    "event,repo,pr_head,actor,actors,admitted",
+    [
+        # A same-repository head from a listed actor uses the fleet, and the
+        # review event is admitted too: this policy names no event.
+        ("pull_request", _REPO, _REPO, "101", _ACTORS, True),
+        ("pull_request_review", _REPO, _REPO, "202", _ACTORS, True),
+        # Executing here but not admitted. On a review event the actor is the
+        # REVIEWER, who is commonly outside the list, so this is the ordinary
+        # path rather than an edge case.
+        ("pull_request", _REPO, _REPO, "999", _ACTORS, False),
+        ("pull_request_review", _REPO, _REPO, "999", _ACTORS, False),
+        ("pull_request", _REPO, _REPO, "101", "", False),
+        ("pull_request", _REPO, _REPO, "101", "[]", False),
+        # A fork pull request against this repository executes HERE, so the
+        # group is reachable even though the head is a fork's.
+        ("pull_request", _REPO, _FORK, "101", _ACTORS, False),
+        # A fork running this workflow in its OWN repository cannot reach an
+        # organization group. Dropping the middle branch's repository guard
+        # fails these two rows, which is the point: a job asking there for a
+        # label no runner carries waits out GitHub's pending limit.
+        ("pull_request", _FORK, _FORK, "101", _ACTORS, False),
+        ("pull_request_review", _FORK, _FORK, "101", _ACTORS, False),
+    ],
+)
+def test_sensitive_change_review_route_truth_table(event, repo, pr_head, actor, actors, admitted):
+    context = {
+        "github.repository": repo,
+        "github.event_name": event,
+        "github.event.pull_request.head.repo.full_name": pr_head,
+        "github.actor_id": actor,
+        "vars.CODEBUILD_ACTOR_IDS": actors,
+        "github.run_id": "456",
+        "github.run_attempt": "3",
+    }
+    # Read off the policy's own expression, the same way the shared truth table
+    # above does, so rolling this policy back to the hosted tail needs no edit
+    # here -- and so a dropped fork branch still fails the fork rows.
+    moved = parity._GROUP_THEN_HOSTED_TAIL in parity._CANONICAL_BASE_ONLY_PR_EXPR
+    if admitted:
+        expected = "codebuild-kirocrew-gha-linux-456-3"
+    elif moved and repo == _REPO:
+        expected = "kirocrew-linux-4-core"
+    else:
+        expected = "ubuntu-latest"
+    assert _evaluate(parity._CANONICAL_BASE_ONLY_PR_EXPR, context) == expected
 
 
 @pytest.mark.parametrize("shape", ["no-actor", "wrong-fork", "literal-array", "folded"])

@@ -7,7 +7,7 @@ Each function here whose first parameter is ``self`` is an ``AcpProvider`` metho
 class binds it by name, so it reads and writes the session's own state on the instance,
 and a patch of the method on the class or on an instance reaches every caller.
 
-Instance fields written: ``_compact_result``.
+Instance fields written: ``_compact_result``, ``_sign_in_ask``.
 
 Instance fields read: ``_client``, ``essential_delivery``.
 """
@@ -94,6 +94,13 @@ def _to_llm_event(e: Any) -> LLMEvent:
         spec_granted_builtins=e.spec_granted_builtins,
         # Same row: dropping this would leave every allowedCommands match prompting.
         spec_granted_commands=e.spec_granted_commands,
+        # Dropping this would let a `denyByDefault` spec's unlisted command run on
+        # this surface: the gate's spec-shell-allowlist row reads it.
+        spec_shell_allowlist=e.spec_shell_allowlist,
+        # Same for a `fallbackAction: "deny"` spec's unlisted write: the gate's
+        # spec-write-allowlist row reads this.
+        spec_write_allowlist=e.spec_write_allowlist,
+        spec_write_cwd=e.spec_write_cwd,
         # Dropping this would refuse every deepseek read on a side turn.
         deepseek_tool_name=e.deepseek_tool_name,
         # Dropping this would let a READ_ONLY turn on an unproved dsh
@@ -165,10 +172,16 @@ async def _ready_confirmed_session(self: AcpProvider) -> None:
 async def stream(
     self: AcpProvider, message: str, timeout: float | None = None, *, allow_image: bool = True
 ) -> AsyncIterator[LLMEvent]:
+    ask, self._sign_in_ask = getattr(self, "_sign_in_ask", ""), ""
     # The direct client can respawn in ensure_ready; resolve that BEFORE
     # comparing receipts so a recycled conversation receives the full text.
     await self._ready_confirmed_session()
     send = self._client.stream_events
+    if ask:
+        from kiro_crew.acp.session_provider import AcpSessionProvider
+
+        if isinstance(self._client, AcpSessionProvider):
+            send = functools.partial(self._client.stream, sign_in_ask=ask)
     if not allow_image:
         send = functools.partial(send, allow_image=False)
     if timeout is not None:
@@ -181,6 +194,7 @@ async def stream(
 
 
 async def stream_command(self: AcpProvider, command: str) -> AsyncIterator[LLMEvent]:
+    _, self._sign_in_ask = getattr(self, "_sign_in_ask", ""), ""
     # _kiro.dev/commands/execute is a kiro extension, so only
     # ACP_BACKENDS_KIRO_SLASH_COMMANDS members can be sent it. Everyone else
     # routes through session/prompt, which an adapter interprets natively for

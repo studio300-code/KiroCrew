@@ -313,6 +313,7 @@ class _ChatSlot:
         "_acp_client",
         "_last_turn_awaiting_permission",
         "_last_turn_children_announced",
+        "_crew_dispatch_notice_turn_gen",
         "_steer_segment_cut",
         "_owed_segment_cut",
         "_native_subagent_tracker",
@@ -323,9 +324,11 @@ class _ChatSlot:
         "_steer_send_ids",
         "_steer_user_origin",
         "_steer_channel_origin",
+        "_steer_owner_origin",
         "_turn_channel_narrowed",
         "_turn_channel_origin",
         "_turn_user_sent",
+        "_turn_owner_sent",
         "_steer_admissions",
         "_steer_decision_strips",
         "_steer_possibly_delivered",
@@ -547,6 +550,12 @@ class _ChatSlot:
     _acp_client: None
     _last_turn_awaiting_permission: bool
     _last_turn_children_announced: bool
+    #: The ``_turn_generation`` a Crew Mode dispatch notice was last written for
+    #: (``crew_dispatch_notice``). One notice per person turn: the first
+    #: successful ``session_create`` of a turn stamps this, and the rest of that
+    #: turn's dispatches see the generation already stamped and write nothing.
+    #: ``-1`` means none written yet; in-memory only, so a restart starts fresh.
+    _crew_dispatch_notice_turn_gen: int
     _question_pending: dict[str, dict]
 
     # Initialised by state_parts/slot_ladder.py.
@@ -613,9 +622,11 @@ class _ChatSlot:
     _steer_send_ids: dict[str, str]
     _steer_user_origin: dict[str, bool]
     _steer_channel_origin: dict[str, bool]
+    _steer_owner_origin: dict[str, bool]
     _turn_channel_narrowed: bool
     _turn_channel_origin: bool
     _turn_user_sent: bool
+    _turn_owner_sent: bool
     _steer_admissions: dict[str, dict]
     _steer_decision_strips: dict[str, dict]
     _steer_possibly_delivered: set[str]

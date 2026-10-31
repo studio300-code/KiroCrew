@@ -81,6 +81,7 @@ from kiro_crew.dashboard.handlers._shared import (  # noqa: F401
     pip_extra_install_command,
     read_bounded_json,
     spawn_parent_claim,
+    string_field_error,
 )
 from kiro_crew.dashboard.handlers.browser_view_relay import ROUTE_PREFIX  # noqa: F401
 from kiro_crew.dashboard.handlers.core import _hot_apply_after_write  # noqa: F401
@@ -329,6 +330,7 @@ from kiro_crew.messaging.transport import (  # noqa: F401
     delivery_confirmed,
     sole_direct_target,
 )
+from kiro_crew.milestones import record_when as record_milestone_when  # noqa: F401
 from kiro_crew.notifications.bus import (  # noqa: F401
     NotificationPayload,
     NotificationValidationError,

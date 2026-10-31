@@ -6,7 +6,8 @@ and blocks until shutdown; and the post-bind session-start sizing log.
 
 Orchestrator fields read: ``_background_tasks``, ``_bot_token``, ``_cfg``,
 ``_cron_injecting``, ``_json_ready``, ``_no_crons``, ``_no_dashboard``, ``_no_open``,
-``_owner_id``, ``_port_override``, ``_slack_enabled``, ``_test_mode``,
+``_owner_id``, ``_port_override``, ``_runner_admission_adopted``, ``_slack_enabled``,
+``_test_mode``,
 ``_tracking_channels``, ``autonudge_svc``, ``cron_svc``, ``subagent_mgr``.
 Orchestrator fields written: ``_configured_host``, ``_dashboard_port``,
 ``_dashboard_runner``, ``_feature_video_task``, ``_local_only``, ``_marker_write_task``,
@@ -859,9 +860,10 @@ async def run(self: GatewayOrchestrator) -> None:
     except RuntimeError:
         logger.warning("sandbox warm_backend skipped (thread exhaustion); cache stays cold")
 
-    # Enterprise build only: no kiro login, no Crew. Checked before any service
-    # starts and long before the HTTP server binds; a failure exits non-zero.
-    # After the sandbox warm-up because the probe runs kiro-cli in the sandbox.
+    # Enterprise build only: no kiro sign-in, no Crew. Checked before any service
+    # starts and long before the HTTP server binds; a failure exits non-zero. The
+    # check reads the one enterprise sign-in (Crew's vault sign-in) and
+    # always hands back None, so start_dashboard builds its own setup service.
     from kiro_crew.enterprise_boot import require_kiro_login
 
     self._boot_kiro_service = await require_kiro_login(assume_ready=self._test_mode)
@@ -1108,6 +1110,10 @@ async def run(self: GatewayOrchestrator) -> None:
         # it while the probe is missing -- which would let the repair close a
         # child that is still running.
         self._register_child_liveness()
+    # Past the store-ready pass: with no adoption sweep armed, none will
+    # decide the runs a restart recovered, so fair admission stops holding them.
+    if self.task_runner is not None and not self._runner_admission_adopted:
+        self.task_runner.end_recovery_wait()
 
     # Persisted Crew work and legacy channel agents can dispatch providers
     # immediately when resumed, so start them only after the shared memory

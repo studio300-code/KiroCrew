@@ -181,7 +181,6 @@ src/kiro_crew/frontend.py
 src/kiro_crew/imaging.py
 src/kiro_crew/knowledge/agent_source.py
 src/kiro_crew/knowledge/artifact_ingest.py
-src/kiro_crew/knowledge/chunker.py
 src/kiro_crew/knowledge/connectors/__init__.py
 src/kiro_crew/knowledge/dedup.py
 src/kiro_crew/knowledge/extractor.py
@@ -248,7 +247,6 @@ test/metrics/test_watchdog_metrics.py
 test/test_acp_metadata_fields.py
 test/test_acp_offload.py
 test/test_acp_prompt_blocks.py
-test/test_acp_tool_search.py
 test/test_acp_true_provider_error.py
 test/test_agent_discovery.py
 test/test_agent_source_ownership_durability.py
@@ -392,7 +390,6 @@ test/test_dashboard_cron_concurrent_create.py
 test/test_dashboard_file_io.py
 test/test_dashboard_files_coverage.py
 test/test_dashboard_no_legacy.py
-test/test_dashboard_route_table.py
 test/test_dashboard_sessions_memory.py
 test/test_dashboard_sessions_search.py
 test/test_dashboard_themes_coverage.py
@@ -612,7 +609,6 @@ test/test_papyrus_routes.py
 test/test_papyrus_store.py
 test/test_papyrus_tectonic.py
 test/test_parse_options.py
-test/test_parse_time_string_tz.py
 test/test_pending_skill_notification_content.py
 test/test_perf_memory_quickwins.py
 test/test_perf_sampler.py
@@ -780,7 +776,6 @@ test/test_windows_sim.py
 test/test_worker_pool.py
 test/test_workflow_permissions.py
 test/test_workflows_dsl.py
-test/test_workflows_invariants.py
 test/test_workflows_resilience.py
 test/test_workflows_run_bounds.py
 test/test_workflows_store.py
