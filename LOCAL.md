@@ -11,19 +11,21 @@ editable into `~/.kiro/crew-venv`, so the running gateway loads the code from
 
 ## Layout
 
-- `main` = upstream **main** (v0.12.0) + the local commits on top.
+- `main` = upstream **main** + the local commits, joined by merge commits (no
+  rebase; local hashes stay stable).
 - `origin` = `https://github.com/kirodotdev/KiroCrew.git`.
-- `fork` = `https://github.com/studio300-code/KiroCrew.git` — our fork; `main` tracks `fork/main` and pushes there, while `origin` stays the upstream for updates.
+- `fork` = `https://github.com/studio300-code/KiroCrew.git` — our fork; `main`
+  tracks `fork/main` and pushes there, while `origin` stays the upstream for
+  updates.
 - `src/kiro_crew/static/dist/` is the built dashboard, `.gitignore`d. Rebuild it
   from `website/` when the UI changes:
   `cd website && npm ci && npm run build`, then
   `~/.kiro/crew-venv/bin/python -m kiro_crew.frontend stage .`.
 
-Local commits:
-
-1. `feat(whatsapp): archive every message and answer the musone wake word`
-2. `feat(whatsapp): pair a device with an 8-character phone code`
-3. `docs: record the local fork install and update workflow`
+The fork carries roughly 86 local commits on top of upstream: the WhatsApp
+archive and "musone" wake word, phone-code pairing, the STT/orukeet work,
+OpenCode 2 ACP support, and the Docker appliance under `deploy/opencode/`. The
+old note about three local commits is obsolete.
 
 The opencode reasoning-effort patch that used to be local is **upstream** since
 0.10: `ACP_BACKENDS_EFFORT_VIA_CONFIG_OPTION` and
@@ -31,8 +33,8 @@ The opencode reasoning-effort patch that used to be local is **upstream** since
 
 ## Updating
 
-`main` is a normal branch on top of `origin/main`; the local commits rebase onto
-it. The built-in updater stays off (`"auto_update": false` in
+`main` is a normal branch on top of `origin/main`; upstream is **merged** into
+it, never rebased. The built-in updater stays off (`"auto_update": false` in
 `~/.kiro/crew/config.json`) because it would install a wheel into a separate
 versioned venv and bypass this checkout.
 
@@ -40,12 +42,14 @@ versioned venv and bypass this checkout.
 cd ~/repositories/kirocrew
 git fetch origin
 git status --porcelain            # must be empty
-git rebase origin/main            # replay the local commits onto the new main
+git merge --no-edit origin/main   # one merge commit, local history intact
 ```
 
-Resolve conflicts in the three touched areas (`whatsapp/`, `messaging/`,
-`dashboard/handlers/whatsapp_setup.py`), then rebuild the dashboard if
-`website/` changed and restart:
+Resolve conflicts where the local work overlaps upstream (today `whatsapp/`
+and `src/kiro_crew/dashboard/stt_stream.py`). `rerere` is enabled
+(`rerere.enabled` and `rerere.autoupdate`), so a conflict already resolved once
+is replayed automatically on the next identical merge. Then rebuild the
+dashboard if `website/` changed and restart:
 
 ```bash
 cd website && npm ci && npm run build && cd ..
@@ -59,13 +63,18 @@ local commit instead of resolving against new code.
 ## Nightly update
 
 A systemd user timer (`kirocrew-selfupdate.timer`) runs the skill's
-`selfupdate.sh apply` every night at 03:00. It refuses a dirty checkout or a
-conflicting rebase, creates a `selfupdate-backup-<timestamp>` tag, and rolls
-back if the gateway does not come healthy.
+`selfupdate.sh apply --with-opencode` every night at 03:00. It merges
+`origin/main` when it moved, updates OpenCode when a newer CLI is published
+(gateway stopped for both), creates a `selfupdate-backup-<timestamp>` tag, and
+rolls back if the gateway does not come healthy. A conflicted merge does not
+block OpenCode: `last-run.json` records `kirocrew: "skipped-conflict"` and the
+merge retries the next night. The old `harness-opencode-update.timer` at 03:50
+is disabled.
 
 ```bash
 systemctl --user list-timers kirocrew-selfupdate.timer
 journalctl --user -u kirocrew-selfupdate.service -n 50 --no-pager
+cat ~/.kiro/crew/selfupdate/last-run.json
 ```
 
 ## Reinstalling the venv
