@@ -36,7 +36,7 @@ image.
 
 ## Current evidence
 
-- Image: `kirocrew-opencode:0.12.2` / `:test`, 2.97 GB, built 2026-10-31.
+- Image: `kirocrew-opencode:0.12.3` / `:test`, 2.97 GB, built 2026-10-31.
 - `deploy/opencode/scripts/smoke.sh` passed: healthy, OpenCode 2.2.4, ffmpeg,
   LibreOffice 25.2.3 (`libreoffice-convert-ok`, DOCX → PDF), neonize,
   pywhispercpp, sandbox off, seeded model/effort, skill learning on with
@@ -49,7 +49,7 @@ image.
 - Telegram: token stored, `telegram.enabled=true`, doctor reports
   "enabled, credentials present". An actual inbound reply still needs a person
   with the Telegram account.
-- Export: `dist/kirocrew-opencode-0.12.2.tar.gz`, 742 MB.
+- Export: `dist/kirocrew-opencode-0.12.3.tar.gz`, 742 MB.
 - Document delivery: the WhatsApp skill now says to convert with
   `libreoffice --headless --convert-to pdf` and send with the MCP `file_send`
   tool; `ssh`/`wa_send.py` remain denied. The `file_send` description now names
