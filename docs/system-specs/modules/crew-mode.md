@@ -31,6 +31,7 @@ The person sees the chat; the crew it dispatched is the chat's to show.
 | Every conductor is Crew Mode: `conductor_agents` is the shipped conductor templates plus the configured one and the deprecated names that resolve to it; the catalog lists them as `conductor_agents` and names `crew_mode_agent`, and masks both for a non-owner | `crew_mode.conductor_agents`, `handlers/agent_catalog.py` |
 | A chat that turned Crew Mode on carries the stamp `crew_mode_agent` (the slot field, persisted with the slot's own metadata), so a root on a custom conductor absent from the config stays Crew Mode | `crew_mode.STAMP_FIELD`, `slot_persistence/metadata_codec.py` |
 | A **Crew Mode root** is a root session (nothing dispatched it) running a conductor as a template. Every session it dispatched, directly or through another, is its **crew member**: the slot list stamps `crew_mode_root: true` on the root and `crew_root: <root key>` on each member, following the persisted lineage past closed sessions, so a member whose root's tab closed after this gateway saw the root, or one reopened from History while its root is known, keeps its root. The known roots are in memory: a root still closed when the gateway starts is not remembered until it is reopened (the migration part reads closed roots from saved metadata) | `crew_mode.stamp_rows`, `state_parts/slots_frame.py`; the lineage patch frame carries the two stamps when they change (`state_parts/slots_push.py`) |
+| A **mate thread** (slot `mode` `member`) is a root of its own kind, kept apart from Crew Mode: the same walk stamps `mate_root: <mate thread key>` and `mate_dispatched_by: <direct creator>` on each session it dispatched, directly or through another, stopping at the nearest root of either kind, and a mate thread this gateway saw holds its sessions after its tab closes. No row gains `crew_root` from it. Inert: no list or client reads the two fields yet ([RFC](../../request-for-change/rfc-crewmate-workers-under-the-crewmate.md), Design 1) | `crew_mode.stamp_rows`, `crew_mode.live_stamp_rows`, `state_parts/slots_frame.py`; the lineage patch frame carries the two stamps when they change (`state_parts/slots_push.py`) |
 | **The person's session list leaves crew members out.** `GET /api/chat/slots` drops `crew_root` rows for a person; `?crew=all` keeps them (the dashboard reads this and filters on the client); a read with `internal_auth` (an agent's folder, status and lineage tools) keeps every row | `crew_mode.list_view`, `chat_api/slot_detail.py` |
 | A Crew Mode chat and its crew are filed in no folder: `session_create` and `session_fork` from inside the tree leave the child unfiled and say so, `chat_folder_file_self` is a no-op | [session-control](session-control.md) § `session_create`'s folder |
 | A new chat born on a conductor counts once in `kirocrew.crew_mode.turned_on`; every new chat counts once in `kirocrew.crew_mode.new_chats` with `crew_mode` true or false; no attribute carries a key, a title or an agent name | `metrics/crew_mode.py`, [metrics](metrics.md) |
@@ -78,7 +79,7 @@ which restates what a member's DM session carries in its context.
 | `website/src/components/crew/crewEditorSections.ts` | The `CrewPaneKey` names and section facts `useCrewEditor` keeps for its deep links and dirty tracking. No dashboard editor renders a Routing, template or Capabilities pane from it, so `triggers` has no editing surface |
 | `website/src/components/CrewWakeSection.tsx` | "What wakes this agent" — schedules, deliberately distinct from `triggers` |
 | `website/src/components/chat/crewmateBubbles.ts` | A mate's chat: what the transcript draws (`filterCrewmateChat`) and the run / corner rule for its bubbles (`crewmateRunPosition`, `crewmateBubbleClass`) |
-| `src/kiro_crew/dashboard/warm_task_brief.py` | Owner-return trigger, 30-minute away time from the in-memory last-on-screen time with a durable chat-history fallback, durable task-fingerprint claims, one ordinary mate message (a fixed quiet line, or one bounded background call over sectioned inputs from `warm_task_brief_inputs.py`), and stale-result suppression |
+| `src/kiro_crew/dashboard/warm_task_brief.py` | Owner-return trigger, 30-minute away time from the in-memory last-on-screen time with a durable chat-history fallback, durable task-fingerprint claims, one ordinary mate message (a fixed quiet line, or one bounded background call over sectioned inputs from `warm_task_brief_inputs.py` with a bounded live PR read), and stale-result suppression |
 | `website/src/pages/chat/CrewmateMessage.tsx` | One mate message in its chat: the bubble alone, placed by its run position (no author line, no avatar gutter) |
 
 Crew creation reports `409 agent_exists` for both an existing name and a
@@ -3052,7 +3053,8 @@ tool and its `GET /api/members/{slug}/panel` read; no surface on this page draws
 it. Files is the standard SidePanel browser scoped
 to the workspace rule above, labelled **Workspace** on this page's strip (the
 Profile card's word for the same directory; `SidePanel.viewTitles` changes the
-title only, the tab id stays `files`). Dashboard and Files are the only
+title only, the tab id stays `files`). The browser's own header carries the same
+`viewTitles` word, so tab and header agree (#28031). Dashboard and Files are the only
 STANDING tabs. Side Chat remains available dynamically through selection Ask
 and the plus menu; it is not a standing entry — and the plus menu offers
 Terminal, Browser and app-contributed tabs, bound to the member's slot
@@ -3887,7 +3889,16 @@ runs the agent it recorded. A `template` record (a worker included) stays exact
   servers Crew launches (`mate_worker.conductor_mcp_servers`, the keys of
   `agent._MANAGED_MCP_SERVERS`), `includeMcpJson` is off, and no `tools` or
   `allowedTools` ref to any other server survives, so the user's own servers
-  reach the crewmate's worker only, through its file. Computer use
+  reach the crewmate's worker only, through its file. On top of that filter
+  it mounts the work ledger, `kirocrew-work`, which `build_agent_config()`
+  skips as an `opt_in` server (`service_agents._mount_work_ledger`, the entry
+  built by `managed_mcp._managed_opt_in_entry("mcp-work")` so it keeps
+  `"type": "registry"` and the `KIROCREW_HOME` pin): `@kirocrew-work` in
+  `tools` and the ledger conductor's grants
+  (`agent._LEDGER_CONDUCTOR_WORK_GRANTS`, `work_ledger_read` /
+  `work_ledger_record` among them) in `allowedTools`, through the governance
+  ceiling, so a withheld verb stays mounted and prompts. Every crewmate gets
+  it (`test/test_mate_work_ledger_mount.py`). Computer use
   (`@kirocrew-computer`) and the browser tool stay, and so does `cron_add`,
   scripted jobs included. A crewmate's
   scheduled AGENT turn does not run on the conductor at all: at every fire,
@@ -3927,8 +3938,39 @@ runs the agent it recorded. A `template` record (a worker included) stays exact
   member working protocol (`context_assembly.member._MEMBER_HOW_YOU_WORK_COMMON`)
   hand research and long work to a worker session for the same reason, and
   they, the operating-mode block (`operating_mode_block`) and the heartbeat
-  prompt all dispatch and END the turn rather than waiting, polling or arming a
-  monitor loop: the worker's report wakes the thread.
+  prompt all dispatch and END the turn rather than waiting or polling: for a
+  quick single task the worker's report wakes the thread, and no monitor loop is
+  armed. **Ledger-tracked work is the one exception**, and only where the
+  conductor's chat spec mounts `kirocrew-work` and grants `work_ledger_record`
+  after the governance ceiling
+  (`member_mate_tools.binding_has_ledger_tools`). There the tracking sentence
+  names `work_ledger_record` / `work_ledger_read` (`conductor.tracking_ledger`
+  in place of `conductor.tracking`), and the operating-mode block appends
+  `conductor.patrol`. That piece teaches the dispatch for work with more than one
+  item, or work the user asked to track. It opens by sending the crewmate to the
+  `goal-conductor` skill before planning such work, and to follow it for
+  dispatch, patrol, verdicts and worker debate, as the conductor's own charter
+  does. Then: record the goal, then per item
+  `work_ledger_record action=create`, `session_create`, `work_ledger_record
+  action=bind`, `session_send`, binding before the seed. It also teaches the
+  patrol: a self-armed `monitor_start` with `watch="work-ledger"`, `gate` left at
+  its default (never `gate:false`), `interval_secs` within 300..900, and
+  `patrol_budget.py renew` when the budget line ends `10% or less left`. The
+  band and renew wording are copied from the conductor's `## Patrol`
+  (`agent_parts/spec_prompts.py`). A spec that does not mount and grant the
+  ledger keeps the text above unchanged, and no loop is taught. The mate
+  conductor maps the `goal-conductor` skill (so `patrol_budget.py` is in its
+  skill scope) and the `dashboard` skill its prompt names only when its spec
+  passes the same check after the governance ceiling. That mapping is ADDED
+  to the trees the conductor inherits (`~/.kiro/skills` and a trusted
+  workspace `.kiro/skills`), never put in their place. The rule lives in one
+  function, `skill_scope.mate_conductor_scope`: `agent_skill_globs` returns
+  through it on every path whatever `inherit_defaults` its caller passes (the
+  session scope, the injection plan, the per-turn triggered-skill filter), and
+  KAS's `deny skill` rule (`acp/kas_skill_scope._spec_globs`) calls it too, so
+  the user's own skills stay offered on both harnesses; without it the spec
+  maps no skill and keeps the skills it inherits (`test_crewmate_prompts.py`,
+  `test_mate_conductor_agent.py`).
 - **The worker**, `kirocrew-mate-worker`, is what the conductor hands work to:
   its `session_create` opens the worker template on the crewmate's own
   workspace, store and member identity whatever `agent` it names, because the
@@ -3936,7 +3978,12 @@ runs the agent it recorded. A `template` record (a worker included) stays exact
   another crewmate keeps that crewmate's resolution, which refuses it
   (session-control.md, "What a created child inherits"). The worker's own
   unnamed children inherit the worker, and it has no request tool ("What the
-  worker lacks" below). Both specs are written from
+  worker lacks" below). It mounts `kirocrew-work` the same way as the
+  conductor, granting only the worker's verbs (`agent._WORKER_WORK_GRANTS`:
+  `work_brief`, `work_report`), so a worker bound to an item in its
+  crewmate's ledger can read its brief and report on it; it is a base server,
+  so a crewmate's file cannot replace its entry (a switch-off is still a
+  restriction, below). Both specs are written from
   `build_agent_config()` on every gateway start
   (`service_agents._install_mate_conductor_agent` /
   `_install_mate_worker_agent`) into `~/.kiro/mates/agents/`, beside the

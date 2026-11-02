@@ -25,7 +25,6 @@ src/kiro_crew/apps/builtins/auto_improvement/tests/test_spine_scope_cov80.py
 src/kiro_crew/apps/builtins/auto_research/handlers.py
 src/kiro_crew/apps/builtins/auto_research/subquestion_queue.py
 src/kiro_crew/apps/builtins/auto_research/workflow_template.py
-src/kiro_crew/apps/builtins/code_review_sage/__init__.py
 src/kiro_crew/apps/builtins/code_review_sage/backend/routes.py
 src/kiro_crew/apps/builtins/code_review_sage/sage_lib/adapters.py
 src/kiro_crew/apps/builtins/code_review_sage/sage_lib/blast_radius.py
@@ -70,7 +69,6 @@ src/kiro_crew/apps/builtins/crew_companion/store.py
 src/kiro_crew/apps/builtins/crew_companion/tests/test_break_not_postponed.py
 src/kiro_crew/apps/builtins/crew_companion/tests/test_fire_at_validation.py
 src/kiro_crew/apps/builtins/crew_companion/tests/test_manifest.py
-src/kiro_crew/apps/builtins/crew_companion/tests/test_reminders.py
 src/kiro_crew/apps/builtins/crew_companion/tests/test_routes.py
 src/kiro_crew/apps/builtins/crew_companion/tests/test_store.py
 src/kiro_crew/apps/builtins/crew_companion/tests/test_write_failures.py
@@ -118,7 +116,6 @@ src/kiro_crew/apps/cron_sdk.py
 src/kiro_crew/apps/dependencies.py
 src/kiro_crew/apps/dependency_ledger.py
 src/kiro_crew/apps/module_loader.py
-src/kiro_crew/apps/route_registry.py
 src/kiro_crew/apps/scaffold.py
 src/kiro_crew/apps/teardown.py
 src/kiro_crew/artifact_source.py
@@ -243,7 +240,6 @@ test/metrics/test_watchdog_metrics.py
 test/test_acp_metadata_fields.py
 test/test_acp_offload.py
 test/test_acp_prompt_blocks.py
-test/test_acp_true_provider_error.py
 test/test_agent_discovery.py
 test/test_agent_source_ownership_durability.py
 test/test_ai_agent_runner_coverage.py
@@ -391,7 +387,6 @@ test/test_dashboard_sessions_search.py
 test/test_dashboard_themes_coverage.py
 test/test_dashboard_worktree_coverage.py
 test/test_dashboard_ws_offloop_fanout.py
-test/test_dashboard_ws_task_tracking.py
 test/test_dashboard_yolo_startup.py
 test/test_delete_message.py
 test/test_denied_commands_api.py
@@ -423,7 +418,6 @@ test/test_deploy_round29_fixes.py
 test/test_deploy_round2_fixes.py
 test/test_deploy_round30_fixes.py
 test/test_deploy_round32_fixes.py
-test/test_deploy_round34_fixes.py
 test/test_deploy_round35_fixes.py
 test/test_deploy_round37_fixes.py
 test/test_deploy_round38_fixes.py
@@ -607,7 +601,6 @@ test/test_pending_skill_notification_content.py
 test/test_perf_memory_quickwins.py
 test/test_perf_sampler.py
 test/test_persist_off_loop.py
-test/test_persistence_probe.py
 test/test_personal_shopper_no_purchase_capability.py
 test/test_playwright_e2e.py
 test/test_pod_e2e_video_guard.py
@@ -631,7 +624,6 @@ test/test_publish_sync.py
 test/test_queue_during_subagents.py
 test/test_quick_send.py
 test/test_read_bounded_json.py
-test/test_recovery_card_parity.py
 test/test_redact_meta_snapshot.py
 test/test_redaction_mirror_parity.py
 test/test_refresh_tokens.py

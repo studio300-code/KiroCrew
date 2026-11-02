@@ -310,6 +310,16 @@ _GATEWAY_SINKS: tuple[tuple[str, str, str], ...] = (
         "through the shared credential + exfiltration-URL chain before serialization.",
     ),
     (
+        "Bedrock Knowledge Base retrieval queries",
+        "knowledge/connectors/bedrock_kb.py",
+        "The user's knowledge-search query text as sent to the AWS Bedrock "
+        "Retrieve API -- an off-host egress boundary. A query pasted with a "
+        "credential-shaped token or an exfiltration-shaped URL would land in "
+        "a third-party service's request log, so the query runs the shared "
+        "credential + exfiltration-URL chain immediately before the client "
+        "call, once per remote search.",
+    ),
+    (
         "Managed-venv update failures",
         "platform/wheel_apply.py",
         "The failure text a managed-venv shadow update shows an operator -- "
@@ -871,5 +881,12 @@ _GATEWAY_SINKS: tuple[tuple[str, str, str], ...] = (
         "label, which are slices of transcript rows: each passes exfiltration-URL "
         "and credential redaction (the display battery for timeline labels) "
         "before it reaches the browser.",
+    ),
+    (
+        "Remote session Git views",
+        "coder/session_browse.py",
+        "Git status, log and diff output and error text pass the shared "
+        "exfiltration-URL and credential redactor at the gateway before reaching "
+        "the dashboard, preserving record separators and patch framing.",
     ),
 )

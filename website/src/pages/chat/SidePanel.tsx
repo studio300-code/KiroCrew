@@ -51,6 +51,7 @@ import { AppPanelTabBody, AppPanelTabsErrorNotice, McpAppTabBody, TabBody } from
 import { useSidePanelSize } from './useSidePanelSize'
 import { crewModeRoot, crewRootOf } from '../../lib/crewMode'
 import { useCrewMode } from '../../hooks/usePreviewFlag'
+import { pathBasename, stripTrailingSeparators } from '../../utils/pathBasename'
 
 // The panel's parts live in sibling owners that never import this module:
 // `SidePanelAddMenu.tsx` (the + menu's catalog and gates), `SidePanelTabChip.tsx`
@@ -1032,9 +1033,11 @@ export default function SidePanel({
           }
           // A remote chat's files live in its workspace. These tabs read and write
           // the GATEWAY's copy, so a remote chat gets a pointer to its Files tab
-          // instead; the tab and any draft it holds stay, unrendered.
+          // instead; the tab and any draft it holds stay, unrendered. The Git tab
+          // is not one of them: ActivityViewer gives a remote chat the guest's
+          // Git view (RemoteGitPanel), never the gateway checkout.
           if (remoteEnvironment && (
-            t.kind === 'git' || t.kind === 'file' || t.kind === 'diff' || t.kind === 'wtdiff' || t.kind === 'folder'
+            t.kind === 'file' || t.kind === 'diff' || t.kind === 'wtdiff' || t.kind === 'folder'
           )) {
             if (!isActive) return null
             return (
@@ -1098,6 +1101,7 @@ export default function SidePanel({
                 <FilesHomePanel
                   active={isActive && !panelHidden}
                   projectDir={projectDir ?? ''}
+                  title={viewTitles?.files}
                   // A diff open from the Changed segment opens the working-tree
                   // diff as its OWN tab (coexisting with any plain file tab for
                   // the same path, #9695) when the host supplies the opener;
@@ -1148,6 +1152,7 @@ export default function SidePanel({
                   onArtifactOpen={onArtifactOpen}
                   pins={pins} pinsLoading={pinsLoading} onJumpToPin={onJumpToPin} onUnpin={onUnpin}
                   slotTitle={slotTitle} chatMode={chatMode}
+                  remoteEnvironmentName={remoteEnvironment?.name}
                   navLinks={navLinks} navResolving={navResolving}
                 />
               </div>
@@ -1168,7 +1173,7 @@ export default function SidePanel({
                 onDiskContent={(c, binary, partial) => patchTab(t.id, { content: c, savedContent: c, ...(binary === undefined ? {} : { binary }), ...(partial === undefined ? {} : { partial }) })}
                 onDiffModeChange={(diffMode) => patchTab(t.id, { diffMode })}
                 onRevealConsumed={() => patchTab(t.id, { revealLine: undefined })}
-                onPathChange={(p) => patchTab(t.id, { path: p, title: p.replace(/\/+$/, '').split('/').pop() || p })}
+                onPathChange={(p) => patchTab(t.id, { path: p, title: pathBasename(stripTrailingSeparators(p)) || p })}
                 onFileSave={onFileSave}
                 onFileOpen={onFileOpen}
                 // A folder opened from a file tab keeps that tab's origin chat.
