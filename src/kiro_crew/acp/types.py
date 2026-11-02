@@ -26,6 +26,7 @@ from kiro_crew.acp_backends import (  # noqa: F401 - re-exported for existing im
     ACP_BACKEND_LAUNCH,
     ACP_BACKEND_OPENCODE,
     ACP_BACKEND_PI,
+    ACP_BACKEND_STRANDS,
     ACP_BACKENDS_ACP_RUNTIME,
     ACP_BACKENDS_ADVERTISED_MODEL_SELECTION,
     ACP_BACKENDS_CLIENT_META_SETTINGS,
@@ -50,11 +51,13 @@ from kiro_crew.acp_backends import (  # noqa: F401 - re-exported for existing im
     ACP_BACKENDS_MATE_WORKER_PROMPT_IN_CONTEXT,
     ACP_BACKENDS_MATE_WORKER_TOOL_LIMITS,
     ACP_BACKENDS_MCP_CONFIG_HOT_RELOAD,
+    ACP_BACKENDS_MCP_RELAUNCH_RELOAD,
     ACP_BACKENDS_MCP_WIRE_REINJECT,
     ACP_BACKENDS_MEMBER_CAPABILITIES,
     ACP_BACKENDS_MEMBER_DISPATCH,
     ACP_BACKENDS_MEMBER_PANEL,
     ACP_BACKENDS_MEMBER_TOOL_LIMITS,
+    ACP_BACKENDS_MODEL_AT_LAUNCH,
     ACP_BACKENDS_MODEL_EFFORT_PAIR_IDS,
     ACP_BACKENDS_MODEL_VIA_CONFIG_OPTION,
     ACP_BACKENDS_OPEN_EXTERNAL_URL,
@@ -237,11 +240,13 @@ METHOD_SESSION_FORK = "session/fork"
 # grows without bound as sessions accumulate. Handler: acp_agent.rs -> Session
 # ManagerRequestData::TerminateSession (self.sessions.remove + handle.shutdown).
 METHOD_SESSION_TERMINATE = "_kiro.dev/session/terminate"
-#: KAS's equivalent. Its extension namespace is ``_kiro/`` (no ``.dev``), and it
-#: has no evict-only verb: this disposes the resident session AND removes its
-#: persisted record. Both are wanted here — the disposal is the memory reclaim
-#: ``terminate`` exists for, and the record is what would otherwise accumulate.
-#: Takes the same ``{"sessionId": ...}`` params and is idempotent.
+#: KAS's equivalent. Its extension namespace is ``_kiro/`` (no ``.dev``). It
+#: disposes the resident session AND removes its persisted record. Both are wanted
+#: on an ordinary teardown — the disposal is the memory reclaim ``terminate``
+#: exists for, and the record is what would otherwise accumulate. Takes the same
+#: ``{"sessionId": ...}`` params and is idempotent: an unknown id answers success.
+#: An engine that advertises ``sessionCapabilities.close`` also has the evict-only
+#: ``session/close`` below, which keeps the record (``KasHarness.release``).
 METHOD_KAS_SESSION_DELETE = "_kiro/session/delete"
 #: KAS's manual compaction verb. A REQUEST with ``{"sessionId": ...}`` params,
 #: answered ``{"success": bool}`` once the summary is committed; a successful run
@@ -271,6 +276,12 @@ METHOD_KAS_CHECKPOINT_REVERT = "_kiro/checkpoint/revertMultiple"
 #: ``test_codex_session_mcp.py::test_real_codex_acp_session_close_evicts`` re-runs
 #: that measurement on every install that has the adapter, and the lane pins
 #: its release in ``test/real_adapters/package.json``.
+#:
+#: KAS serves it from an engine that advertises ``sessionCapabilities.close``: it
+#: disposes the session in memory and keeps the record, which a later
+#: ``session/load``, from a restarted process too, replays (KAS 0.66.22 and 0.66.26
+#: through kiro-cli 2.27.1 and 2.29.0; captured within one process, KAS 0.66.62
+#: through kiro-cli 2.34.0, in ``test/fixtures/acp_frames/kas/mcp-live-apply-live.jsonl``).
 METHOD_SESSION_CLOSE = "session/close"
 METHOD_COMPACTION_STATUS = "_kiro.dev/compaction/status"
 METHOD_CLEAR_STATUS = "_kiro.dev/clear/status"
@@ -437,6 +448,7 @@ PROVIDER_LABEL_GOOSE = "goose"
 PROVIDER_LABEL_DEEPSEEK = "deepseek"
 PROVIDER_LABEL_COPILOT = "copilot"
 PROVIDER_LABEL_MUSE = "muse_code"
+PROVIDER_LABEL_STRANDS = "strands"
 
 #: Backend id -> its label. The mapping is what ``provider_label`` resolves
 #: through, so a harness's label and the answer a session persists under are one
@@ -450,6 +462,7 @@ PROVIDER_LABEL_MUSE = "muse_code"
 PROVIDER_LABEL_BY_BACKEND: dict = {
     ACP_BACKEND_KIRO: PROVIDER_LABEL_DEFAULT,
     ACP_BACKEND_KAS: PROVIDER_LABEL_KAS,
+    ACP_BACKEND_STRANDS: PROVIDER_LABEL_STRANDS,
     ACP_BACKEND_CLAUDE: PROVIDER_LABEL_CLAUDE,
     ACP_BACKEND_CODEX: PROVIDER_LABEL_CODEX,
     ACP_BACKEND_OPENCODE: PROVIDER_LABEL_OPENCODE,
@@ -1188,6 +1201,10 @@ class AcpEvent:
     #: launch did not prove stock dsh registers the read tools. Set only on a
     #: deepseek permission event; empty once proved and on every other backend.
     deepseek_read_only_issue: str = ""
+    #: Why a Side Chat READ_ONLY turn refuses this request before any gate tier
+    #: could approve it. Set only on a Strands side session's event, for every call
+    #: that is not the harness's own proven file read; empty everywhere else.
+    side_read_only_refusal: str = ""
     # Diff content block fields — authoritative before/after text from kiro-cli
     # for write tools. Used by chat_runner to derive the "before" snapshot
     # without a racy disk read (the write has already landed by the time the

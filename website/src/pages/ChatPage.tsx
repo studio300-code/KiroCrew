@@ -1,5 +1,7 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import { useAnchoredTriggerRect } from '../hooks/useAnchoredTriggerRect'
+import { useSessionPalette } from '../hooks/useSessionPalette'
+import { resolveSessionColor, headerBandStyle } from '../utils/sessionColors'
 import { useAppSelector, store, type AppDispatch } from '../store'
 import {
   switchSlot, openActivityPanel, openActivityToTab, selectSubagent, mcpAppKey,
@@ -23,7 +25,8 @@ import { useComposerDraftState, ComposerDraftSync, useComposerIntakeRefs, useMai
 import { useModelPickerModels, useNewSessionPicks, useSessionChoices, useSlotSelectionCapabilitiesQuery } from './chat/page/sessionPicks'
 import { useCrewModeSwitch } from './chat/page/crewModeSwitch'
 import UltraModeEffect from '../components/crew/UltraModeEffect'
-import { crewRootOf, runsCrewMode } from '../lib/crewMode'
+import { crewModeRoot, crewRootOf, runsCrewMode } from '../lib/crewMode'
+import { useCrewMode } from '../hooks/usePreviewFlag'
 import { useCrewRoot } from '../components/crew/useCrewRoot'
 import { useSteerDelivery, useRefusedPress, useRegenerate } from './chat/page/turnActions'
 import { useTranscriptScrollRefs, useTranscriptPaging } from './chat/page/transcriptPaging'
@@ -53,6 +56,8 @@ import ChatEmptyState from './chat/page/ChatEmptyState'
 import ChatTitleOverlay from './chat/page/ChatTitleOverlay'
 import ChatTranscriptView from './chat/page/ChatTranscriptView'
 import ComposerDockView from './chat/page/ComposerDockView'
+import { useComposerTypingLock } from './chat/shared-crew/useComposerTypingLock'
+import { useComposerEditWithTyping } from './chat/shared-crew/typingSignal'
 import ChatSidePanels from './chat/page/ChatSidePanels'
 import { slotBusySteer } from '../components/chat-input/busySend'
 import { useSessionAutomation } from './chat/page/sessionAutomation'
@@ -156,7 +161,7 @@ export default function ChatPage({ mode, embedded, embedMode, popout, noUrlSync 
       // singleton, which a test harness does not mount) so unrelated chat
       // updates do not re-run the effect.
       const payload = boundStore.getState().chat.mcpApps?.[mcpAppKey(activeSlot, id)]
-      tabsCtlRef.current?.openApp(id, mcpAppTabTitle(payload, i18nT('pages.chatPage.mcp_app_tab_title')), activeSlot)
+      tabsCtlRef.current?.openApp(id, mcpAppTabTitle(payload, i18nT('pages.chatPage.mcp_app_tab_title')), activeSlot, { automatic: true })
     }
   }, [mcpAppPanel, activeSlot, appToolCallIds, dispatch, boundStore])
   const {
@@ -180,6 +185,7 @@ export default function ChatPage({ mode, embedded, embedMode, popout, noUrlSync 
     messages, slotRunning, slotLoading, sendingRef, knowledgeFetch, pendingQuestion, history,
   })
   const pendingInput = useAppSelector(s => s.chat.pendingInput)
+  const pendingInputSend = useAppSelector(s => s.chat.pendingInputSend)
   const mainComposerAppend = useAppSelector(s => s.chat.mainComposerAppend)
 
   const [chatConfig, setChatConfig] = useState<ChatConfig>(loadChatConfig)
@@ -297,6 +303,8 @@ export default function ChatPage({ mode, embedded, embedMode, popout, noUrlSync 
   // Text that reaches the composer from outside a keystroke (see launchIntake).
   usePendingInputIntake({
     pendingInput,
+    pendingInputSend,
+    connected,
     activeSlot,
     embedded,
     searchParams,
@@ -392,7 +400,15 @@ export default function ChatPage({ mode, embedded, embedMode, popout, noUrlSync 
   })
 
   const memorySwitchingRef = useRef(false) // Held true while a memory-mode switch runs (see usePanelLayout).
+  // An Ultra Mode chat (a crew root or one of its workers, the same test the
+  // side panel uses to put the Board first): only a person moves its focus.
+  const crewModePreview = useCrewMode()
+  const boardFirst = useAppSelector(st => {
+    const row = activeSlot ? st.dashboard.slots.find(r => r.key === activeSlot) : undefined
+    return crewModeRoot(row) || !!crewRootOf(row)
+  }) && crewModePreview
   const resources = useChatPageResourcesController({
+    boardFirst,
     activeSlot,
     activeSlotRef,
     messages,
@@ -613,10 +629,12 @@ export default function ChatPage({ mode, embedded, embedMode, popout, noUrlSync 
   const {
     followUpOptions, followUpSourceKey, followUpMulti,
     followUpPicked, followUpPickedRef, toggleFollowUpOption,
-    composerRootChange, composerUserEdit,
+    composerRootChange, composerUserEdit: followUpUserEdit,
   } = useFollowUpChips({
     messages, isStreaming, turnRunning: !!slotRunning, pendingQuestion, activeSlot, inputRef, setInput, prefillEdited, setPrefillEdited,
   })
+  // Shared Crew typing presence: the user's own edit happened, never what it was.
+  const composerUserEdit = useComposerEditWithTyping(followUpUserEdit)
   const {
     dashCfg, splitFeatureEnabled, linkPreviewsOn, socialShareOn, jevAutoConsented, connectionsUiOn, openActivePopout, focusActivePopout, returnSelfToMain, activePoppedOut, planTaskId,
   } = usePageFlags({
@@ -667,6 +685,15 @@ export default function ChatPage({ mode, embedded, embedMode, popout, noUrlSync 
   })
 
   const currentSlot = slots.find(s => s.key === activeSlot)
+  // The thread header carries the same session colour as the sidebar row, read
+  // from the same display roster so a scope switch does not blank it.
+  const headerPalette = useSessionPalette()
+  const headerColor = resolveSessionColor(
+    currentSlot,
+    headerPalette.paletteColors,
+    currentSlot?.agent ? sidebarAgents.find(a => a.name === currentSlot.agent)?.session_color : null,
+  )
+  const headerColorStyle = headerColor ? headerBandStyle(headerColor, headerPalette.boost, headerPalette.boostFor) : undefined
   // Unknown counts as sent: while the transcript is still loading the mark does not
   // offer to turn Crew Mode off, since the server refuses that once a message was
   // sent (`crew_mode_locked`) and the loaded rows are the only way to know.
@@ -992,6 +1019,11 @@ export default function ChatPage({ mode, embedded, embedMode, popout, noUrlSync 
   })
 
   // The band ChatInput renders above the composer, and the session-control chips.
+  // Send now after a lost send race: a new, deliberate send of the draft the
+  // race handed back, at the session's current revision. It never steers.
+  const sendNowAfterRace = useCallback((slot: string) => { void send(undefined, slot, false, false, true) }, [send])
+  // Someone else typing in this shared session locks the composer read-only.
+  const typingLock = useComposerTypingLock(activeSlot)
   const composerAbove = useComposerAboveBand({
     langGen,
     controls: sessionControlState,
@@ -1006,6 +1038,7 @@ export default function ChatPage({ mode, embedded, embedMode, popout, noUrlSync 
     projectLocked,
     activeTip,
     dismissTip,
+    onSendNow: sendNowAfterRace,
   })
   const composerSessionControls = useSessionControlChips({ sessionControls, openSessionControl, activeSlot, sessionControlStatuses })
 
@@ -1106,7 +1139,7 @@ export default function ChatPage({ mode, embedded, embedMode, popout, noUrlSync 
               activityOpen={activityOpen} setActionError={setActionError} showActionError={showActionError} onPinCollapsedHeight={onPinCollapsedHeight} pinCardRef={pinCardRef}
               pinExpanded={pinExpanded} pinFoldRef={pinFoldRef} pinned={pinned} scrollToPinnedPrompt={scrollToPinnedPrompt} scrollTranscriptBy={scrollTranscriptBy} setPinExpanded={setPinExpanded}
               activePoppedOut={activePoppedOut} focusActivePopout={focusActivePopout} openActivePopout={openActivePopout} returnSelfToMain={returnSelfToMain} splitFeatureEnabled={splitFeatureEnabled}
-              currentSlot={currentSlot} effectiveMode={effectiveMode} title={title} activeIsSplitAnchor={activeIsSplitAnchor} editingTitle={editingTitle} enterSplit={enterSplit}
+              currentSlot={currentSlot} headerColorStyle={headerColorStyle} effectiveMode={effectiveMode} title={title} activeIsSplitAnchor={activeIsSplitAnchor} editingTitle={editingTitle} enterSplit={enterSplit}
               setEditingTitleSlot={setEditingTitleSlot} setSidebarPinned={setSidebarPinned} sidebarAutoHidden={sidebarAutoHidden} sidebarPinned={sidebarPinned} sidePanelDock={sidePanelDock}
               splitAnchorForActive={splitAnchorForActive} toggleAct={toggleAct} openSidebar={openSidebar} sidebarOnScreen={sidebarOnScreen} sidebarOpen={sidebarOpen}
               sidePanelWantsMount={sidePanelWantsMount} mobileNewSessionItem={mobileNewSessionItem} mobileSessionsToggle={mobileSessionsToggle} popOutTip={popOutTip} activityTip={activityTip}
@@ -1164,7 +1197,7 @@ export default function ChatPage({ mode, embedded, embedMode, popout, noUrlSync 
               // memory-mode chip nor the Crew Mode chip is offered. Until the first
               // message the composer mark turns it off and both come back; after
               // that the chat stays on the conductor.
-              showComposerMemoryChip={showComposerMemoryChip && !crewModeChosen} switchMemoryMode={switchMemoryMode} composerAbove={composerBand} composerSessionControls={composerSessionControls}
+              showComposerMemoryChip={showComposerMemoryChip && !crewModeChosen} switchMemoryMode={switchMemoryMode} composerAbove={composerBand} typingLock={typingLock} composerSessionControls={composerSessionControls}
               // Beside the memory chip on the welcome state only, and not while the chat
               // is still loading: drawn alone first, the Crew Mode chip would slide
               // across the memory chip arriving beside it.

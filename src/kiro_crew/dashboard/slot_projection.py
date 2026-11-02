@@ -8,6 +8,7 @@ from collections.abc import Callable, Sequence
 from typing import Any
 
 from kiro_crew.dashboard.slot_preparing import is_preparing
+from kiro_crew.history_schema import transcript_sort_key
 from kiro_crew.safety_override import safety_override, yolo_policy_permits
 from kiro_crew.session_lifecycle import STOP_DECLINED_ESCALATION_SECS
 from kiro_crew.shared_crew.attribution import public_attribution_of_slot
@@ -45,6 +46,21 @@ def stop_declined_armed(slot: Any, now: float | None = None) -> bool:
         return False
     current = time.monotonic() if now is None else now
     return current - at < STOP_DECLINED_ESCALATION_SECS
+
+
+OPTIONS_WAITING_MAX_AGE_SECS = 7 * 24 * 3600
+"""How long a reply ending in ``[OPTIONS:]`` keeps its session in Waiting."""
+
+
+def options_ending_is_stale(options_ts: str, now: float) -> bool:
+    """Whether an ``[OPTIONS:]`` reply stamped *options_ts* is too old to count as waiting.
+
+    An unreadable stamp is never stale: the session stays in Waiting, as before.
+    """
+    bucket, at = transcript_sort_key(options_ts)
+    if bucket != 0:
+        return False
+    return now - at > OPTIONS_WAITING_MAX_AGE_SECS
 
 
 def resolved_row_identity(slot: Any) -> str:
@@ -277,10 +293,16 @@ class SlotProjection:
         # must not answer (the artifact freshness nudge).
         last_agent_ts = ""
         found_conv = False
+        # A goal-loop cycle's prompt is a ``nudge`` row, and a cycle that ends with
+        # ``nothing_to_do`` writes no reply after it. The loop has run past an
+        # ``[OPTIONS:]`` ask older than that row, so that ask does not hold it.
+        cycle_after_reply = False
         for message in reversed(rows):
             role = message.get("role")
             msg_meta = message.get("meta") or {}
             notice = is_system_notice(role, msg_meta)
+            if role == "nudge" and not found_conv and not notice:
+                cycle_after_reply = True
             if not last_activity_ts and role not in transient_roles and not notice:
                 last_activity_ts = message.get("ts") or ""
             if (
@@ -295,7 +317,7 @@ class SlotProjection:
                     if not found_conv:
                         found_conv = True
                         last_conv_role = role
-                        if role == "assistant":
+                        if role == "assistant" and not cycle_after_reply:
                             options = parse_options(text)
                             has_options = bool(options)
                             if has_options:
@@ -313,6 +335,13 @@ class SlotProjection:
             # is set `last_activity_ts` is too.
             if found_conv and last_msg and last_agent_ts:
                 break
+
+        # An options ending older than the cutoff does not count as waiting.
+        # `has_options` feeds the Waiting lane and the Needs-you list, and
+        # nothing else lets a finished session leave them. `options` and
+        # `options_ts` stay, so the reply itself is unchanged.
+        if has_options and options_ending_is_stale(options_ts, time.time()):
+            has_options = False
 
         # A send queued behind a busy turn is user input with no transcript row
         # yet. The dashboard bumps `last_activity_ts` on `queue_push`, so the

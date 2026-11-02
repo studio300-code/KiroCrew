@@ -71,6 +71,19 @@ def _fresh_reexec_environment(_floor_monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _fresh_released_sessions_warning(_floor_monkeypatch):
+    """Start every test with the stranded-records warning not yet given.
+
+    ``released_sessions.sweep`` warns once per process about records that wait on a
+    backend that is not selected, so a test that drives that warning would
+    otherwise silence it for every later test on the same worker.
+    """
+    from kiro_crew import released_sessions
+
+    _floor_monkeypatch.setattr(released_sessions, "_stranded_warned", False)
+
+
+@pytest.fixture(autouse=True)
 def _approve_every_mcp_launch(request, _floor_monkeypatch):
     """Treat every gatewayd launch as operator-approved, except where it is the subject.
 
@@ -295,6 +308,21 @@ def _forget_enterprise_profile_pin():
     forget()
     yield
     forget()
+
+
+@pytest.fixture(autouse=True)
+def _forget_legacy_auth_sweep_clean_roots(_floor_monkeypatch):
+    """Forget which roots the legacy auth-store temp sweep has found clean.
+
+    ``sandbox_staging._LEGACY_AUTH_SWEEP_CLEAN`` remembers, for the process lifetime, a
+    root a sweep listed and found no legacy temp in, so later spawns skip the listing.
+    Each test's data home is a fresh path, so a stale entry cannot match today; a fresh
+    dict per test keeps that true for a test that reuses a fixed path, which would
+    otherwise find its planted orphan skipped by an earlier test's clean pass.
+    """
+    from kiro_crew import sandbox_staging
+
+    _floor_monkeypatch.setattr(sandbox_staging, "_LEGACY_AUTH_SWEEP_CLEAN", {})
 
 
 @pytest.fixture(autouse=True)

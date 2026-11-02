@@ -28,6 +28,7 @@
  * is also in the 40px-friendly menu, so the 18px pin badge is a shortcut,
  * not the only path.
  */
+import { useRef } from 'react'
 import { ArrowUp, Check, ExternalLink, Info, MoreHorizontal, Pin, PinOff, Plus, Power, PowerOff, RefreshCw, Trash2 } from 'lucide-react'
 import AppIconTile from '../../components/appstore/AppIconTile'
 import { appDisplayName } from '../../components/appstore/appManifest'
@@ -70,8 +71,10 @@ export default function LaunchpadTile({
   actionLoading: string | null
   /** Flip this app's sidebar visibility (page persists via the appNavHidden module). */
   onTogglePin: (name: string) => void
-  /** Management verb dispatch — the page owns the hooks behind it. */
-  onAction: (name: string, action: LaunchpadAction) => void
+  /** Management verb dispatch — the page owns the hooks behind it. `opener`
+   *  is the ⋯ trigger for a verb that opens a dialog, so the page can hand
+   *  focus back to it when that dialog closes. */
+  onAction: (name: string, action: LaunchpadAction, opener?: HTMLElement | null) => void
   /** Open the app (page decides route vs openCommand). */
   onOpen: () => void
   /** Navigate to the app's detail page. */
@@ -82,6 +85,10 @@ export default function LaunchpadTile({
   // Uninstall opens the page's confirm dialog, which takes focus once. Keep
   // the closing menu from handing focus back to the ⋯ trigger behind it.
   const menuFocus = useMenuOpensDialog()
+  // With that restore suppressed, the dialog is what hands focus back, and by
+  // the time it opens the menu item holding focus is gone. So the trigger
+  // travels with the verb.
+  const menuTriggerRef = useRef<HTMLButtonElement>(null)
   const m = app.manifest
   const name = app.name
   const display = appDisplayName(app)
@@ -211,7 +218,7 @@ export default function LaunchpadTile({
               type="button"
               // What a "choose the app" step outlines on this card: the
               // control that makes the pick, not the whole card.
-              {...guidePickControl('app_tile_menu_open')}
+              {...guidePickControl('app_tile_menu_open', menuTriggerRef)}
               aria-label={i18nT('pages.libraryPage.tile_more_actions', { name: display })}
               className="flex items-center text-[11px] px-1.5 py-1 rounded-md transition-colors bg-transparent border-0 cursor-pointer text-muted hover:text-text hover:bg-bg-elevated"
             >
@@ -219,7 +226,9 @@ export default function LaunchpadTile({
             </button>
           </DropdownMenuTrigger>
           {/* The menu is drawn outside the card: it names the app it is for,
-              so a guide about one app never points into another's menu. */}
+              so a guide about one app never points into another's menu.
+              Every management verb below is locked while ANY action on this
+              app runs (`actionInFlight`), since they all change the same app. */}
           <DropdownMenuContent align="center" onCloseAutoFocus={menuFocus.onCloseAutoFocus} {...guidePickOf(display)}>
             <DropdownMenuItem onSelect={onDetail} {...uiLocation('apps.library.tile-details')}>
               <Info size={12} aria-hidden /> {i18nT('pages.libraryPage.tile_details')}
@@ -233,7 +242,7 @@ export default function LaunchpadTile({
             )}
             {app.updateAvailable && !disabled && (
               <DropdownMenuItem
-                disabled={actionLoading === `${name}:update`}
+                disabled={actionInFlight}
                 onSelect={() => onAction(name, 'update')}
               >
                 <ArrowUp size={12} aria-hidden /> {i18nT('components.appstore.installedAppCard.update')}
@@ -241,7 +250,7 @@ export default function LaunchpadTile({
             )}
             {app.lifecycle === 'gateway' && !app.updateAvailable && !disabled && (
               <DropdownMenuItem
-                disabled={actionLoading === `${name}:update`}
+                disabled={actionInFlight}
                 title={i18nT('pages.appDetailPage.sync_app_from_its_source_directory')}
                 onSelect={() => onAction(name, 'update')}
               >
@@ -251,14 +260,14 @@ export default function LaunchpadTile({
             <DropdownMenuSeparator />
             {disabled ? (
               <DropdownMenuItem
-                disabled={actionLoading === `${name}:enable`}
+                disabled={actionInFlight}
                 onSelect={() => onAction(name, 'enable')}
               >
                 <Power size={12} aria-hidden /> {i18nT('components.appstore.installedAppCard.enable')}
               </DropdownMenuItem>
             ) : (
               <DropdownMenuItem
-                disabled={actionLoading === `${name}:disable`}
+                disabled={actionInFlight}
                 onSelect={() => onAction(name, 'disable')}
                 {...uiLocation('apps.library.tile-disable')}
               >
@@ -268,8 +277,8 @@ export default function LaunchpadTile({
             {canUninstall && (
               <DropdownMenuItem
                 className="text-danger focus:text-danger"
-                disabled={actionLoading === `${name}:uninstall`}
-                onSelect={() => menuFocus.openLayer(() => onAction(name, 'uninstall'))}
+                disabled={actionInFlight}
+                onSelect={() => menuFocus.openLayer(() => onAction(name, 'uninstall', menuTriggerRef.current))}
                 {...uiLocation('apps.library.tile-uninstall')}
               >
                 <Trash2 size={12} aria-hidden /> {i18nT('components.appstore.installedAppCard.uninstall')}

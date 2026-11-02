@@ -40,6 +40,7 @@ from kiro_crew.acp_backends import (
     ACP_BACKEND_KIRO,
     ACP_BACKEND_OPENCODE,
     ACP_BACKEND_PI,
+    ACP_BACKEND_STRANDS,
 )
 from kiro_crew.providers.mirrors.base import AgentConfigMirror
 from kiro_crew.providers.mirrors.claude_code import ClaudeCodeMirror
@@ -49,6 +50,7 @@ from kiro_crew.providers.mirrors.deepseek import DeepSeekMirror
 from kiro_crew.providers.mirrors.goose import GooseMirror
 from kiro_crew.providers.mirrors.muse import MuseMirror
 from kiro_crew.providers.mirrors.opencode import OpenCodeMirror
+from kiro_crew.providers.mirrors.strands import StrandsMirror
 
 
 class ProjectionKind(str, Enum):
@@ -228,6 +230,7 @@ MIRRORS: dict[str, type[AgentConfigMirror]] = {
     ACP_BACKEND_DEEPSEEK: DeepSeekMirror,
     ACP_BACKEND_COPILOT: CopilotMirror,
     ACP_BACKEND_MUSE: MuseMirror,
+    ACP_BACKEND_STRANDS: StrandsMirror,
 }
 
 #: Every backend this build can spell, and how its MCP surface is reached.
@@ -405,6 +408,19 @@ PROJECTIONS: dict[str, McpProjection] = {
         # The ACP element has no per-tool disable slot and Muse's permission frames
         # carry no stable server/tool identity Crew can match, so a narrowed server
         # is withheld whole.
+        per_tool_deny=PerToolDeny.WHOLE_SERVER,
+    ),
+    ACP_BACKEND_STRANDS: McpProjection(
+        kind=ProjectionKind.MIRROR,
+        reason="strands.py -- the session's projected mcpServers array, mounted from the "
+        "launch instead of the wire: the Strands CLI refuses a non-empty session/new array "
+        "in its Python-project mode and mounts the servers its --mcp-config file names, so "
+        "the spawn writes the whole array to an owner-only launch file "
+        "(acp/harness/strands.py) with the CLI's own MCP discovery off. Measured end to end "
+        "in test/fixtures/acp_frames/strands/mcp-stdio-mount-live.jsonl (the call gated by "
+        "session/request_permission first)",
+        # No per-call deny path is verified for this harness, so a narrowed server is
+        # withheld whole, the direction that cannot leave a switched-off tool reachable.
         per_tool_deny=PerToolDeny.WHOLE_SERVER,
     ),
 }

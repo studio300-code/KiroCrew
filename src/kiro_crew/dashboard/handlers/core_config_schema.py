@@ -51,7 +51,10 @@ from kiro_crew.config.sections import (
     FOLDER_SORT_MODES,
     JUDGE_PROVIDERS,
     SESSION_SORT_MODES,
+    SHARED_CREW_BOUNDS,
+    STRANDS_PROVIDER_CHOICES,
     TITLE_REFRESH_EVERY_TURNS_MAX,
+    validate_strands_env_patch,
 )
 from kiro_crew.config.service_sections import ON_BATTERY_MODES
 from kiro_crew.context_management import RESULT_FILE_MAX_BYTES
@@ -116,6 +119,21 @@ _EDITABLE_CONFIG: dict[str, dict] = {
     # against the one code owner, so this cannot drift from what ``AcpProvider``
     # will actually serve.
     "agent.acp_backend": {"type": "enum", "values_fn": _acp_backend_patch_values},
+    # The Strands harness's provider settings, written whole by Settings > Agent
+    # Harness. Names are the CLI's own and values `secret://` references only; the
+    # card stores each value in the vault and maps the reference here.
+    "agent.strands_env": {"type": "normalized", "normalize": validate_strands_env_patch},
+    # The CLI's provider ids, the one list the setting and the harness both read.
+    "agent.strands_provider": {"type": "enum", "values": list(STRANDS_PROVIDER_CHOICES)},
+    # A model id for that provider (its own '<provider>/' prefix is accepted once). Wider than
+    # `_MODEL_PIN_PATTERN` because Bedrock and Ollama ids carry a ':' (a version
+    # suffix, a tag); "auto" or empty passes no --model. Empty, or one token with
+    # no space or control character.
+    "agent.strands_model": {
+        "type": "str",
+        "max_len": 200,
+        "pattern": r"(?:[A-Za-z0-9][A-Za-z0-9._:/@\-\[\]]*)?\Z",
+    },
     # The KAS bundle route switch (Settings → Agent Harness → KAS). Boot-only on the
     # schema; the card says so after a save. No install is implied by turning it on:
     # a true value with nothing installed refuses the next KAS spawn by name.
@@ -378,15 +396,42 @@ _EDITABLE_CONFIG: dict[str, dict] = {
     # need for roaming, and the loader resolves anything non-boolean back to the
     # bound default — so a malformed write cannot reopen the replay path.
     "dashboard.tailscale.bind_refresh_chains": {"type": "bool"},
+    # Shared Crew's advanced settings (Settings > People). The integer bounds are
+    # the loader's own (SHARED_CREW_BOUNDS), so the gate admits exactly the domain
+    # the loader accepts rather than a second copy. Without the Feature preview
+    # the gateway reads every one of these as its default
+    # (``shared_crew.preview``), so a stored value waits for the preview.
+    # ``tailnet_direct`` takes effect on the next gateway start. ``hard_limits``
+    # and ``containment_enabled`` stay config-file-only: they refuse work or
+    # start per-person cgroup slices, which this surface does not offer.
+    "dashboard.shared_crew.admission_enabled": {"type": "bool"},
+    "dashboard.shared_crew.tailnet_direct": {"type": "bool"},
+    "dashboard.shared_crew.principal_concurrency": {
+        "type": "int",
+        "min": SHARED_CREW_BOUNDS["principal_concurrency"][0],
+        "max": SHARED_CREW_BOUNDS["principal_concurrency"][1],
+    },
+    "dashboard.shared_crew.crew_concurrency": {
+        "type": "int",
+        "min": SHARED_CREW_BOUNDS["crew_concurrency"][0],
+        "max": SHARED_CREW_BOUNDS["crew_concurrency"][1],
+    },
+    "dashboard.shared_crew.typing_idle_seconds": {
+        "type": "int",
+        "min": SHARED_CREW_BOUNDS["typing_idle_seconds"][0],
+        "max": SHARED_CREW_BOUNDS["typing_idle_seconds"][1],
+    },
     # Local OTEL metric collection — the Privacy panel's recording switch. Safe
     # to expose where beacon_endpoint is not: turning this on writes JSONL under
     # ~/.kiro/crew/metrics. It is NOT unconditionally local, though —
     # `_build_recorder` attaches an OTLP reader for every destination the active
-    # telemetry provider supplies (the default provider supplies one when
-    # `telemetry.otlp_endpoint` is set) — so the PATCH route's gate refuses the ENABLE on a
-    # host where egress would start, which is what keeps the switch's local-only
-    # promise true for every state it can reach. The endpoint itself stays
-    # config-file-only, so a
+    # telemetry provider supplies (the default provider supplies one for
+    # `telemetry.otlp_endpoint` and one per `telemetry.otlp_endpoints` entry, and
+    # an edition may return its own), so the PATCH route's
+    # gate refuses the ENABLE on a host where egress would start, which is what
+    # keeps the switch's local-only promise true for every state it can reach.
+    # Both endpoint keys stay config-file-only (deliberately absent from this
+    # table, so a PATCH to either is refused "field not editable"), so a
     # dashboard caller can neither choose a destination nor start sending to one.
     "telemetry.enabled": {"type": "bool"},
     # SSO login flags for an edition that supplies a real sso_login_handler.

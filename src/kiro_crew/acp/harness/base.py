@@ -146,6 +146,8 @@ class ProcessSession(Protocol):
     _deepseek_gate_nonce: str
     _deepseek_read_only_issue: str
     _copilot_mcp_config_path: str
+    _launch_mcp_servers: list[Any] | None
+    _mcp_relaunch_pending: bool
 
     def _agent_env_for_spawn(self) -> dict[str, str]:
         """``agent.env`` for the spawn in progress, read at most once per spawn: a
@@ -666,6 +668,19 @@ class HarnessAdapter(LaunchAdapter):
     @abc.abstractmethod
     def teardown(self) -> TeardownPolicy:
         """How one session ends, and whether ending it destroys the record."""
+
+    def release(self, agent_capabilities: Mapping[str, Any] | None) -> TeardownPolicy | None:
+        """The verb that frees a session from the process and KEEPS its record.
+
+        Asked only by a caller that wants the record to outlive the session for
+        a while, and deletes it later with :attr:`teardown`. ``None`` means this
+        host has no such verb distinct from its teardown, and the caller ends the
+        session with :attr:`teardown` as it always did. That is the answer for a
+        host whose teardown already keeps the record, and for one whose process
+        did not advertise the verb: the handshake is passed in so a host can
+        refuse when its running engine is older than the verb.
+        """
+        return None
 
     # How a live session's model changes, and how privileged tools are made to
     # ask, are deliberately NOT asked here. Both answers already live in a

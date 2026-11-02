@@ -118,7 +118,6 @@ src/kiro_crew/apps/builtins/workflows/server.py
 src/kiro_crew/apps/cron_sdk.py
 src/kiro_crew/apps/dependencies.py
 src/kiro_crew/apps/dependency_ledger.py
-src/kiro_crew/apps/manifest.py
 src/kiro_crew/apps/module_loader.py
 src/kiro_crew/apps/route_registry.py
 src/kiro_crew/apps/scaffold.py
@@ -190,7 +189,6 @@ src/kiro_crew/knowledge/kiroignore.py
 src/kiro_crew/knowledge/readers.py
 src/kiro_crew/knowledge/retrieval.py
 src/kiro_crew/knowledge/spend.py
-src/kiro_crew/knowledge/store.py
 src/kiro_crew/knowledge/sync.py
 src/kiro_crew/knowledge/watcher.py
 src/kiro_crew/mcp_gateway/app_call.py
@@ -211,7 +209,6 @@ src/kiro_crew/mcp_gateway/spill.py
 src/kiro_crew/mcp_gateway/stub.py
 src/kiro_crew/mcp_gateway/transport.py
 src/kiro_crew/mcp_gateway/verdict_cache.py
-src/kiro_crew/mcp_tools/apps.py
 src/kiro_crew/mcp_tools/artifacts.py
 src/kiro_crew/metrics/http_metrics.py
 src/kiro_crew/metrics/recorder.py
@@ -488,10 +485,8 @@ test/test_handlers_channel_clear_context.py
 test/test_handlers_channel_presets.py
 test/test_handlers_files_upload.py
 test/test_handlers_mcp_coverage.py
-test/test_heartbeat_atomic_merge.py
 test/test_heartbeat_prompt_deliver.py
 test/test_heartbeat_retention.py
-test/test_heartbeat_sel_prune_offload.py
 test/test_history.py
 test/test_history_atomic_rewrite.py
 test/test_history_race.py
@@ -647,7 +642,6 @@ test/test_remote_artifacts.py
 test/test_resolve_skill_root_package.py
 test/test_resource_health_endpoint.py
 test/test_resource_pressure_notify.py
-test/test_restart_command.py
 test/test_reveal_in_file_manager.py
 test/test_reveal_path.py
 test/test_review_driver_loopback.py

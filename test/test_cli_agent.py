@@ -147,6 +147,44 @@ class TestAgentCreate:
         assert (data_home() / "workspace-member-research").is_dir()
         assert "Workspace: member-research" in out
 
+    def test_create_defaults_to_the_name_seeded_icon(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A headless CLI create gets the same name-seeded ICON the UI posts for
+        the name, never an empty override (which renders the trait ghost)."""
+        from kiro_crew.crew_avatar_seed import default_icon_avatar
+
+        cfg_path = _write_config(tmp_path, _base_config())
+        with (
+            unittest.mock.patch("kiro_crew.config.loader.config_path", return_value=cfg_path),
+            unittest.mock.patch("sys.argv", ["kirocrew", "agent", "create", "--name", "research"]),
+        ):
+            main()
+        saved = json.loads(cfg_path.read_text(encoding="utf-8"))
+        avatar = saved["agents"]["research"]["avatar"]
+        assert avatar == default_icon_avatar("research")
+        assert avatar["kind"] == "icon"
+
+    def test_create_free_form_name_seeds_the_icon_from_the_label(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A free-form name is kept as the display label; its icon seeds from that
+        shown label, matching the UI preview and the API create path."""
+        from kiro_crew.crew_avatar_seed import default_icon_avatar
+
+        cfg_path = _write_config(tmp_path, _base_config())
+        with (
+            unittest.mock.patch("kiro_crew.config.loader.config_path", return_value=cfg_path),
+            unittest.mock.patch(
+                "sys.argv", ["kirocrew", "agent", "create", "--name", "Release Writer"]
+            ),
+        ):
+            main()
+        saved = json.loads(cfg_path.read_text(encoding="utf-8"))
+        agent = saved["agents"]["release-writer"]
+        assert agent["display_name"] == "Release Writer"
+        assert agent["avatar"] == default_icon_avatar("Release Writer")
+
     def test_create_can_share_a_declared_workspace(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
@@ -1027,3 +1065,74 @@ class TestRefusalHintsMatchTheirGrammar:
         assert "at most 256 characters" in MODEL_NAME_HINT
         assert _MODEL_NAME_RE.match("a/" + "b" * 254)
         assert not _MODEL_NAME_RE.match("a/" + "b" * 255)
+
+
+class TestAgentUpdateWorkspace:
+    """``kirocrew agent update <name> --workspace``: blank keeps, unknown warns."""
+
+    @pytest.mark.parametrize("blank", ["", "   "])
+    def test_blank_keeps_the_current_workspace(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str], blank: str
+    ) -> None:
+        data = _labelled_config()
+        data["workspaces"]["research-ws"] = {"dir": "research"}
+        data["agents"]["research"]["workspace"] = "research-ws"
+        cfg_path = _write_config(tmp_path, data)
+
+        _run_agent_cli(cfg_path, "update", "research", "--workspace", blank)
+
+        saved = json.loads(cfg_path.read_text(encoding="utf-8"))["agents"]["research"]
+        # A stored "" resolves to the shared default tree, so it is never saved.
+        assert saved["workspace"] == "research-ws"
+        captured = capsys.readouterr()
+        assert "Updated agent: research" in captured.out
+        assert "blank --workspace ignored" in captured.err
+
+    def test_blank_beside_another_field_saves_only_that_field(self, tmp_path: Path) -> None:
+        from kiro_crew.memory_stores import persist_member_config
+
+        data = _labelled_config()
+        data["workspaces"]["research-ws"] = {"dir": "research"}
+        data["agents"]["research"]["workspace"] = "research-ws"
+        cfg_path = _write_config(tmp_path, data)
+
+        def publish(*args, **kwargs):
+            assert kwargs["changed_fields"] == {"model"}
+            return persist_member_config(*args, **kwargs)
+
+        with unittest.mock.patch(
+            "kiro_crew.cli_commands.persist_member_config", side_effect=publish
+        ):
+            _run_agent_cli(
+                cfg_path, "update", "research", "--workspace", "", "--model", "test-model-1"
+            )
+
+        saved = json.loads(cfg_path.read_text(encoding="utf-8"))["agents"]["research"]
+        assert saved["workspace"] == "research-ws"
+        assert saved["model"] == "test-model-1"
+
+    def test_unknown_workspace_saves_with_a_warning(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        cfg_path = _write_config(tmp_path, _labelled_config())
+
+        _run_agent_cli(cfg_path, "update", "research", "--workspace", "nowhere")
+
+        saved = json.loads(cfg_path.read_text(encoding="utf-8"))["agents"]["research"]
+        assert saved["workspace"] == "nowhere"
+        captured = capsys.readouterr()
+        assert "Updated agent: research" in captured.out
+        assert "Warning: workspace 'nowhere' is not configured" in captured.err
+
+    def test_configured_workspace_saves_quietly(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        data = _labelled_config()
+        data["workspaces"]["research-ws"] = {"dir": "research"}
+        cfg_path = _write_config(tmp_path, data)
+
+        _run_agent_cli(cfg_path, "update", "research", "--workspace", "research-ws")
+
+        saved = json.loads(cfg_path.read_text(encoding="utf-8"))["agents"]["research"]
+        assert saved["workspace"] == "research-ws"
+        assert capsys.readouterr().err == ""

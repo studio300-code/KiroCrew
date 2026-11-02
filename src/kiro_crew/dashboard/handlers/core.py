@@ -262,8 +262,11 @@ async def logo(request: web.Request) -> web.StreamResponse:
         if _h.is_sensitive_path(cfg.dashboard.avatar):
             return web.Response(status=404)
         validated = validate_file_path(cfg.dashboard.avatar)
-        if validated and Path(validated).is_file():
-            return web.FileResponse(validated)
+        # Two ifs, not `validated and await ...`: mypy infers the right operand of
+        # `and` in the left operand's type (str | None), which rejects is_file's bool.
+        if validated:
+            if await asyncio.to_thread(Path(validated).is_file):
+                return web.FileResponse(validated)
     # The DEFAULT logo is channel-aware: nightly builds serve the night-sky
     # variant so the whole in-app surface -- sidebar logo, browser favicon,
     # and native-notification avatar all resolve through /logo.png -- matches
@@ -277,7 +280,7 @@ async def logo(request: web.Request) -> web.StreamResponse:
         names.insert(0, "kirocrew-logo-nightly.png")
     for name in names:
         path = _h._STATIC_DIR / name
-        if path.is_file():
+        if await asyncio.to_thread(path.is_file):
             return web.FileResponse(path)
     return web.Response(status=404)
 
@@ -289,11 +292,19 @@ async def api_branding(request: web.Request) -> web.Response:
     # direct-local (loopback, no proxy) caller. The dashboard reads it to gate
     # OS-desktop file actions (open/reveal); any future consumer of origin
     # posture should reuse this flag rather than invent a second home.
+    #
+    # `desktop_launcher` is the other half of that gate: whether this host can
+    # open a file manager right now (the launcher those actions start, and on
+    # Linux a desktop session for it). Without that, `/api/reveal` can only
+    # answer a clipboard copy, so the dashboard does not offer them. It is a
+    # fact about this gateway process, read in a worker thread (a stat of a
+    # fixed system path), and no part of the request decides it.
     return web.json_response(
         {
             "bot_name": cfg.dashboard.bot_name or "Kiro Crew",
             "avatar": "/logo.png",
             "direct_local": is_direct_local_request(request),
+            "desktop_launcher": await asyncio.to_thread(platform_compat.desktop_launcher_available),
         }
     )
 
@@ -608,7 +619,11 @@ async def pwa_file(request: web.Request) -> web.StreamResponse:
     path = _DIST_DIR / name
     # Resolve both sides so a symlinked _DIST_DIR (dev-backend.sh points it
     # at KiroCrewWebsite/dist) still passes the traversal guard.
-    if path.is_file() and _DIST_DIR.resolve() in path.resolve().parents:
+    if (
+        await asyncio.to_thread(path.is_file)
+        and await asyncio.to_thread(_DIST_DIR.resolve)
+        in (await asyncio.to_thread(path.resolve)).parents
+    ):
         return web.FileResponse(path)
     raise web.HTTPNotFound()
 
@@ -689,6 +704,7 @@ if TYPE_CHECKING:  # every owner-defined name in _EXPORTS, for type checkers and
         _changed_paths_need_restart,
         _hot_apply_after_write,
         _mask_agent_free_text,
+        _mask_strings,
         _masked_config_dict,
         api_kirocrew_config,
     )

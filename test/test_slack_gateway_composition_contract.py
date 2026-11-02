@@ -490,7 +490,7 @@ _BASE_SURFACE: dict[str, tuple[tuple[str, str, str], ...]] = {
         (
             "_persist_turn_row",
             "async function",
-            "(client: 'Any', session_key: 'str', *, provider: 'str', surface: 'str', agent_fallback: 'Callable[[], str]', t0: 'float', usage: 'AgentTurnUsage | None' = None) -> 'None'",
+            "(client: 'Any', session_key: 'str', *, provider: 'str', surface: 'str', agent_fallback: 'Callable[[], str]', t0: 'float', trigger: 'str' = 'other', usage: 'AgentTurnUsage | None' = None) -> 'None'",
         ),
         ("_HEARTBEAT_KEEP_INJECTION", "value", "'str'"),
     ),
@@ -559,6 +559,12 @@ _BASE_SURFACE: dict[str, tuple[tuple[str, str, str], ...]] = {
     "cron_fire": (
         ("_init_cron", "async method", "(self, *, arm: 'bool' = True) -> 'None'"),
         ("_cron_capture", "async method", "(self, job: 'CronJob') -> '_CronCapture'"),
+        ("_record_bound_script_failure", "async method", "(self, job: 'CronJob') -> 'None'"),
+        (
+            "_alert_cron_timeout",
+            "async method",
+            "(self, job: 'CronJob', detail: 'str') -> 'None'",
+        ),
         (
             "_resolve_cron_agent",
             "method",
@@ -608,6 +614,12 @@ _BASE_SURFACE: dict[str, tuple[tuple[str, str, str], ...]] = {
         ("_CRON_MSG_LIMIT", "value", "'int'"),
     ),
     "cron_failure": (
+        (
+            "_failure_alert_due",
+            "function",
+            "(job: 'CronJob', streak: 'int', *, denied: 'bool' = False) -> 'bool'",
+        ),
+        ("_log_held_alert", "function", "(job: 'CronJob') -> 'None'"),
         (
             "_failure_alert_is_duplicate",
             "method",
@@ -711,6 +723,11 @@ _BASE_SURFACE: dict[str, tuple[tuple[str, str, str], ...]] = {
             "(job: 'CronJob', _run_provider: 'object | None') -> 'tuple[bool, bool]'",
         ),
         ("_charge_failure", "function", "(job: 'CronJob', _hand_over_streak: 'bool') -> 'None'"),
+        (
+            "_streak_after_charge",
+            "function",
+            "(job: 'CronJob', charges: 'bool', _hand_over_streak: 'bool') -> 'int'",
+        ),
         (
             "_inject_with_retry",
             "async method",

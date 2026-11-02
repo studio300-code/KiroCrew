@@ -391,6 +391,31 @@ def test_mcp_wire_reinject_is_opt_in() -> None:
     assert "provider_reinjects_mcp" in marker
 
 
+def test_mcp_relaunch_reload_is_opt_in() -> None:
+    """H6: the THIRD way a dashboard MCP write skips the reset is its own membership.
+
+    Strands reads its MCP servers once, at launch, so Crew relaunches the process and
+    loads the same session. The declaration and the mark read the set, and the
+    writer's gate and marker both consult the relaunch declaration.
+    """
+    from kiro_crew import mcp_hot_reload
+    from kiro_crew.acp import relaunch_reload
+    from kiro_crew.agent_sdk.backends import ACP_BACKEND_STRANDS, ACP_BACKENDS_MCP_RELAUNCH_RELOAD
+
+    assert ACP_BACKENDS_MCP_RELAUNCH_RELOAD == frozenset({ACP_BACKEND_STRANDS})
+    assert not (ACP_BACKENDS_MCP_RELAUNCH_RELOAD & ACP_BACKENDS_MCP_CONFIG_HOT_RELOAD)
+    assert not (ACP_BACKENDS_MCP_RELAUNCH_RELOAD & ACP_BACKENDS_MCP_WIRE_REINJECT)
+    declaration = inspect.getsource(relaunch_reload.mcp_config_relaunch_reload)
+    assert "in ACP_BACKENDS_MCP_RELAUNCH_RELOAD" in declaration
+    assert "mcp_config_relaunch_reload(client)" in inspect.getsource(
+        relaunch_reload.mark_mcp_config_changed
+    )
+    gate = inspect.getsource(mcp_hot_reload.live_sessions_apply_mcp_live)
+    assert "provider_relaunches_for_mcp" in gate
+    marker = inspect.getsource(mcp_hot_reload.mark_reinjecting_providers)
+    assert "provider_relaunches_for_mcp" in marker
+
+
 def test_steer_capability_declares_its_stamp() -> None:
     """H15: a provider that can steer must also report WHEN it steered.
 
@@ -1102,9 +1127,10 @@ def test_added_line_gate_self_test_passes() -> None:
     test makes a local ``pytest`` run catch a broken rule too.
     """
     result = subprocess.run(
-        [sys.executable, _GATE_PATH, "--test"],
+        [sys.executable, "-X", "utf8", _GATE_PATH, "--test"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         cwd=_REPO_ROOT,
     )
     assert result.returncode == 0, result.stdout + result.stderr
@@ -1119,9 +1145,10 @@ def test_added_line_gate_reports_without_enforcing() -> None:
     """
     env = {k: v for k, v in os.environ.items() if k != "HARNESS_BASE_REF"}
     result = subprocess.run(
-        [sys.executable, _GATE_PATH],
+        [sys.executable, "-X", "utf8", _GATE_PATH],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         cwd=_REPO_ROOT,
         env=env,
     )

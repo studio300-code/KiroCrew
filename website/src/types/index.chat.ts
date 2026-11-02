@@ -5,7 +5,25 @@
 // content blocks; notifications and their channels; approvals; history session
 // rows. Consumers import them from `types/index.ts`.
 import type { WebAppMetadata } from './index.artifacts'
+import type { SessionAttribution } from './index.sharedCrew'
 import type { SourceProviderId } from './index.sources'
+
+/** One open ledger item that does not name a person (`crew_work.items`). */
+export interface CrewWorkItemFacts {
+  /** The bound worker's slot key; `''` for a remote or unbound worker. */
+  worker: string
+  /** Epoch ms it is stale from while its worker's turn is not running
+   *  (`work_ledger.is_stale`, read by the gateway); `0` for never. */
+  stale_at_ms: number
+}
+
+/** A conductor's work ledger in brief (`crew_work` on its slot row). */
+export interface CrewWorkFacts {
+  open: number
+  /** Open items waiting on a person (`reason` approval / needs_human). */
+  person: number
+  items: CrewWorkItemFacts[]
+}
 
 export interface TodoTask {
   id: string
@@ -241,6 +259,8 @@ export interface ChatSlot extends TurnIdentityFields {
    * (written at birth, rehydrated), so it is the one link from a crew member's
    * DM thread to the worker sessions it drives — the Crew Members drawer
    * filters the live slots on it. */
+  /** Shared Crew creator (`shared_crew.attribution`), public shape. Display only. */
+  attribution?: SessionAttribution | null
   created_by?: string
   /** True on a Crew Mode root: a root session running a conductor template
    *  (`crew_mode.stamp_rows`). The session list styles and filters on it. */
@@ -292,7 +312,7 @@ export interface ChatSlot extends TurnIdentityFields {
    * the creator in `slot`, which the backend resolves when the creator itself has
    * closed: the row nests where the run is owned and keeps citing its closed
    * creator. */
-  parent?: { slot: string; key: string | null; ancestor?: boolean } | null
+  parent?: { slot: string; key: string | null; ancestor?: boolean; title?: string } | null
   /** Artifact companion binding: slug of the artifact this slot is a companion
    * chat for. Set at slot create and persisted in the history meta line, so the
    * binding survives a gateway restart and a History-page resume. */
@@ -306,6 +326,11 @@ export interface ChatSlot extends TurnIdentityFields {
    * reconcile `chat.subagentQueued` on a `slots` push; absent from a
    * `slot_patch` and from an older gateway. */
   subagents_queued?: number
+  /** This session's work ledger in brief, when it conducts one: open items, the
+   * ones that name a person, and per other open item what tells moving from
+   * stalled (`lib/crewWork.ts`). Absent before the gateway has folded the board
+   * and from an older gateway, which leaves the row on its live-state reading. */
+  crew_work?: CrewWorkFacts
   /** An unanswered question card the turn is parked on, so the row would
    * otherwise read "Thinking…" with nothing able to advance it. Narrower than
    * `waiting_for_input` (true of every finished turn, and therefore no signal)

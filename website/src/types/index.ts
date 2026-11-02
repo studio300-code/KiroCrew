@@ -92,6 +92,8 @@ export type {
   SubagentInfo,
   SessionInfo,
   CrewWorker,
+  CrewWorkFacts,
+  CrewWorkItemFacts,
   CrewTimeline,
   CrewTimelineHandoff,
   CrewTimelineLane,
@@ -133,3 +135,12 @@ export type {
   WebAppTeardown,
   WebAppMetadata,
 } from './index.artifacts'
+export type {
+  PrincipalKind,
+  DisplaySnapshot,
+  PublicPrincipal,
+  AttributionAvailability,
+  SessionTriggerKind,
+  SessionTrigger,
+  SessionAttribution,
+} from './index.sharedCrew'

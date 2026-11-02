@@ -594,6 +594,12 @@
       "hint": "When off, a double-click on your message selects a word as in any text."
     },
     {
+      "id": "chat.exact-threshold",
+      "label": "Exact Threshold (%)",
+      "tab": "chat",
+      "route": "/settings/chat/advanced?highlight=chat.exact-threshold"
+    },
+    {
       "id": "chat.fallback-model",
       "label": "Fallback model",
       "tab": "chat",
@@ -1095,6 +1101,13 @@
       "description": "Earlier messages of yours and of the agent go with the question, newest first, up to this many characters. Tool output is never sent. Zero sends the message on its own, which is what the main Jev switch was agreed for, so a larger number sends more off the machine."
     },
     {
+      "id": "developer.explore",
+      "label": "Explore",
+      "tab": "developer",
+      "route": "/settings/developer/feature-previews?highlight=developer.explore",
+      "description": "Adds Explore to the top bar: features to try, your progress, and a Try today card on a new chat."
+    },
+    {
       "id": "developer.folder-conductor",
       "label": "Folder conductor",
       "tab": "developer",
@@ -1142,6 +1155,13 @@
       "tab": "developer",
       "route": "/settings/developer/feature-previews?highlight=developer.session-environments",
       "description": "Shows the Session Environments settings. Existing chats stay on this machine; a chat moves only if you pick a profile for it before its first message."
+    },
+    {
+      "id": "developer.shared-crew",
+      "label": "Shared Crew",
+      "tab": "developer",
+      "route": "/settings/developer/feature-previews?highlight=developer.shared-crew",
+      "description": "People tab, invites and shared sessions"
     },
     {
       "id": "developer.ultra-mode",
@@ -1216,6 +1236,14 @@
       "hint": "Render programming ligatures (=>, !=, ->) when the custom font has them. Code and diffs in messages are unaffected."
     },
     {
+      "id": "display.explore",
+      "label": "Explore",
+      "tab": "display",
+      "route": "/settings/display/view?highlight=key%3Adashboard.milestones_enabled",
+      "hint": "Show Explore in the top bar and a Try today card on a new chat.",
+      "configKey": "dashboard.milestones_enabled"
+    },
+    {
       "id": "display.external-terminal-app",
       "label": "External terminal app",
       "tab": "display",
@@ -1286,11 +1314,23 @@
       "hint": "Light or dark appearance for the dashboard"
     },
     {
+      "id": "display.overlays",
+      "label": "Overlays",
+      "tab": "display",
+      "route": "/settings/display/theme?highlight=display.overlays"
+    },
+    {
       "id": "display.palette",
       "label": "Palette",
       "tab": "display",
       "route": "/settings/display/sidebar?highlight=display.palette",
       "hint": "Choose a color palette for your sidebar sessions."
+    },
+    {
+      "id": "display.persona",
+      "label": "Persona",
+      "tab": "display",
+      "route": "/settings/display/theme?highlight=display.persona"
     },
     {
       "id": "display.reuse-the-current-terminal",
@@ -1306,6 +1346,12 @@
       "tab": "display",
       "route": "/settings/display/sidebar?highlight=key%3Adashboard.show_unread_dot",
       "configKey": "dashboard.show_unread_dot"
+    },
+    {
+      "id": "display.sounds",
+      "label": "Sounds",
+      "tab": "display",
+      "route": "/settings/display/theme?highlight=display.sounds"
     },
     {
       "id": "display.theme",

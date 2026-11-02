@@ -69,7 +69,7 @@ from kiro_crew.dashboard import (  # noqa: F401
     tailnet,
     tailnet_serve,
 )
-from kiro_crew.dashboard.approval_posture import trust_carries  # noqa: F401
+from kiro_crew.dashboard.approval_posture import trust_reaches_subagents  # noqa: F401
 from kiro_crew.dashboard.chat_utils import (  # noqa: F401
     effective_session_key,
     wire_session_subagent_probe,
@@ -360,10 +360,12 @@ from kiro_crew.dashboard.server_runtime.safety_grants import (  # noqa: F401
 from kiro_crew.dashboard.server_runtime.security_headers import (  # noqa: F401
     _apply_security_headers,
     _asset_cache_control,
+    _embed_parent_port,
     _extra_frame_ancestors,
     _finalize_asset_cache_control,
     _install_asset_cache_control_finalizer,
     _vendor_preflight_handler,
+    parent_port_frame_ancestors,
 )
 from kiro_crew.dashboard.server_runtime.security_middleware import (  # noqa: F401
     _audit_denied,

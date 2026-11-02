@@ -59,6 +59,7 @@ legacy metadata do not override a canonical execution.
 | `messaging/transport.py` | **Layer 1** — `MessagingTransport` ABC + the `TransportCapabilities`, `InboundMessage`, and `ConfiguredChannelTarget` value objects (stdlib-only) |
 | `messaging/attachments.py` | Channel-neutral attachment classification, bounded streaming download, extraction/redaction, opaque-file preservation, temp ownership, and SEL audit |
 | `messaging/driver.py` | **Layer 2** — `TurnDriver` (channel-neutral turn loop), approval-mode constants, `_redact` helper |
+| `messaging/script_hooks.py` | `ScriptHookTurn` and the Hooks page's `UserPromptSubmit` / `Stop` fire for a channel turn. See "Script hooks" under Layer 2 |
 | `messaging/dashboard_live.py` | `DashboardLiveRenderer` + `TeeRenderer`: a channel turn shown live in its dashboard tab. See [Live dashboard view of a channel turn](#live-dashboard-view-of-a-channel-turn-dashboard_livepy) |
 | `messaging/empty_turn_copy.py` | The sentences a turn that ended with no assistant text owes the user — the empty-turn verdict's wording, shared by the channel driver and the dashboard runner (`chat_runner`) so a channel thread mirrored into the dashboard reads one story. Two remedies, spelled once: a turn that did no work is told to resend; a turn whose tool already ran is told to continue from where it stopped, never to resend (a resend runs the side effect twice). Stdlib-only leaf, no `kiro_crew` imports |
 | `messaging/renderer.py` | **Layer 2b** — `Renderer` ABC, `OutputEvent`, output-kind constants + `OUTPUT_KINDS`, `chunk_text` helper, `chunk_for_transport` (splits into the transport's own unit: the byte path through `split_markdown_bytes` with a grade-and-re-split loop that falls back to a collapse-clean body, the char path through the credential-aware `split_markdown_safe` plus `bounded_for_delivery`; its optional `redactor` defaults to `_default_redactor`, and a composed host passes its own `redact_via_context`), `session_provenance_tag` (stable callback affinity without exposing session keys), `apply_options_cap`/`cap_choices`/`format_overflow` (`max_buttons` enforcement), `split_options_trailer` (the ONE `[OPTIONS:]` parse — see below; it, `slack/format.py` and the WhatsApp renderer first recover a trailing `[OPTIONS:]` marker glued onto the last line through `constants.relocate_glued_tail_marker`), and `render_options_as_text` — the whole-trailer path for a send with no widget, which numbers every choice through `format_overflow` whatever `max_buttons` says (Weixin, iMessage and Feishu call it, WeCom has its own streaming copy; WhatsApp declares `max_buttons=0` and strips the trailer instead, so a `0` alone does not promise the list survives). The proactive legs in `dashboard/messaging_api/channel_delivery.py` (owner DM, the session's own conversation, a configured target) the cross-surface reply mirror (`dashboard/chat_turn/recipient.py::_deliver_cross_surface_reply`) and the mirror-link backfill of past answers (`dashboard/chat_mirror.py`) call it on every channel, after the display pass: `transport.send_message` takes no choices, so those sends show the choices as a numbered list rather than the raw marker. Also `credential_redaction_notice(count)` — the one sentence a channel sends when credential redaction rewrote text it already delivered, so the reader learns a pasted command will not run. Shared so the wording cannot fork per channel and each spelling need its own audit for leaked bytes; it carries only the count, never secret bytes, and is plain text with no markup or emoji because one string ships to platforms that render different dialects (or none). `redaction_notice(cred_count, url_count)` is the by-kind superset every channel delivery surface now posts through: it delegates to `credential_redaction_notice` byte-for-byte when `url_count` is zero, and otherwise names the suspicious-URL rewrite (`security.EXFILTRATION_REDACTION_TAG_PREFIX`, counted by prefix because the tag interpolates the domain) with the URL remedy — re-check the link against a trusted source — because telling a reader whose URL was rewritten to "supply the secret" names a remedy that cannot help them. Zero/zero is a `ValueError`, never an empty message. `count_redaction_tags(text)` is the shared two-kind tally beside it — exact-match over `CREDENTIAL_REDACTION_TAGS`, prefix-match for the URL tag — so a surface cannot adopt half the count and post a notice worded for the wrong remedy; every counting site routes through it. The notice itself is posted IN-RENDERER at every channel delivery surface, one best-effort follow-up message per turn: each renderer counts the text IT actually delivered — which can differ from the driver's accumulated view, because several renderers run a second display-form redaction pass at their own egress (Slack, Telegram, Teams and Discord re-redact against what the platform RENDERS, so their delivered form can carry placeholders the driver's byte-level stream scan never wrote) — and a failed notice send is logged, never raised, because the answer is already out. It is never folded into the answer text: renderers refuse text once finalized, and prose after an `[OPTIONS:]` trailer breaks the trailer parsers, which require it to END the text. Discord and Telegram tally per LANDED message across seals, recovery re-posts and the posted reasoning (streaming edits supersede each other, so only sealed forms count); Slack counts the final display-safe body plus the posted 💭 reasoning in one tally; WeCom tallies at `on_done` but posts from `close()`, where its deferred-overflow delivery finally settles, consumed on the first call so a second `close()` cannot post twice; `SilentRenderer` posts nothing because it delivers nothing |
@@ -214,6 +215,8 @@ Consumes a provider's `AcpEvent` stream and emits abstract `OutputEvent`s to a p
 The dashboard does **not** flow through `TurnDriver`; it remains unchanged as the authoritative transcript surface. Direct channel paths that bypass the driver are sanitized at source: Discord's explicit five-message resume replay strips legacy steering frames and summary-bearing compaction notices, shortens each entry to the shared splitter's first (sealed) chunk so a replayed code block cannot arrive with its fence cut in half, and puts the role icon on its own line so the body's first line still starts where the fence grammar needs it; direct compact commands publish only terse receipts. Stored transcripts remain intact for audit.
 
 **Session-directive consumption** — an optional `directive_consumer` callback (`(kind, args) -> awaitable`, whose awaited value `True` is the structured terminal-turn signal — see "The empty-turn verdict") makes the driver the channel-side consumer of the stateless session-directive protocol (`session_directive.py`): the trusted `_meta.kiro` identity is resolved by the shared forgery-gate predicate (`session_directive.directive_tool_for(mcp_server_name, tool_name)`, the same single spelling the dashboard consumer uses) and recorded at `EVENT_TOOL_CALL`, and the matching `EVENT_TOOL_RESULT`'s marker is decoded and handed to the consumer — single-consume across result frames, forged markers under any other tool ignored, `encode()` refusals logged, a lost marker on the final frame logged at WARNING. A tool call announced as a NATIVE sub-agent's (`EVENT_SUBAGENT_ACTIVITY` with a `tool_call_id`) is refused with a SEL `denied` audit rather than applied — a child session must never arm/mutate its parent, mirroring the dashboard consumer's isolation. Dispatchers inject `messaging.dispatch.build_directive_consumer(session_key=…, sessions=…, dispatcher=…)`, which funnels into the same `apply_session_directive` core the dashboard consumer uses with `slot=None` (so card-producing dashboard-only directives stay refused for channel turns). Channel `set_project` writes the durable per-conversation project/CWD override; because its tool result arrives while the current provider still owns the turn semaphore, the provider is not killed in place. The next claimant acquires the old semaphore, replaces that provider, and cold-starts in the new CWD before sending its prompt. Legacy prompt loops take effect where the session is nudge-able (`slack:`/`discord:`/`webex:`). Structured monitor creation is narrower: dashboard, Slack, and Discord have typed dispatch plus completion correlation, while Webex is refused before a structured record is armed. On the other seven transports (Telegram, iMessage, Teams, WeCom, Weixin, WhatsApp, Feishu) the applier likewise answers "not supported from this session type" — logged and SEL-audited instead of the old silent drop. Being on either list takes both an admitted binding and the matching fire contract; otherwise a loop can report itself healthy before dying on its first cycle. Without a consumer, directive markers are inert exactly as before.
+
+**Script hooks** — a caller that passes `script_hooks=ScriptHookTurn(session_key, prompt)` gets the Hooks page's script hooks on its turn, from the same global store the dashboard's `_fire` uses. `UserPromptSubmit` fires with the sender's own text after `renderer.on_turn_start()` and before the monitor claim check, so no await lands between that check and the stream. It therefore means "a message arrived": a wake the check refuses, or a turn the closing gate refuses, has still fired it, and a Stop pressed while it runs cancels the pending turn before the provider stream opens, without firing a `Stop` hook. Both callers snapshot the session's Stop generation on acquisition (the shared pipeline keeps the first snapshot across retries) and bind a synchronous `ScriptHookTurn.cancelled` predicate. After the hook context and monitor authorization awaits, the driver checks it in the yield-free pre-stream gate; a changed generation emits `DONE` with `cancelled`, records that terminal reason, and returns no reply without registering a turn. It runs once per inbound message: the shared pipeline builds one `ScriptHookTurn` per message, and a replay after a failed compaction reuses its recorded context; an exit-0 hook's stdout and an exit-2 hook's `BLOCKED:` line go into a `[Hook context]` block ahead of the prompt, with structural markers neutralized. `Stop` fires with the channel-safe reply after a turn whose stop reason classifies `succeeded`, so a cancelled, refused, errored or unfinished turn fires none. The shared pipeline (`dispatch.drive_turn`) and Telegram pass it; Slack does not yet. The shared pipeline passes it only for the operator's own conversation: a `deny_all_tools` (guest) or `minimal_context` (a room others read) turn runs no operator hook. Telegram's transport admits only `telegram.allowed_user_ids` senders. The sender's text reaches a hook only as data (stdin JSON `prompt`, `KIROCREW_HOOK_CONTEXT`); the command is the saved one. A hook that times out has its process tree killed, and the cleanup that follows (draining its pipes, reaping it) is itself bounded by `hooks._HOOK_REAP_SECS`, so a child that left the killed group cannot hold the turn past its timeout plus that bound. Only the store's hooks run here: an agent spec's own hooks stay with their backend, and a Stop hook's continuation request is not acted on.
 
 **`run(message) -> str`** — calls `renderer.on_turn_start()`, then translates each provider event into a dispatched `OutputEvent` and returns the accumulated (redacted) assistant text:
 
@@ -1330,6 +1333,18 @@ kernel-attests against the peer's own process ancestry — never the body, which
 tool argument could name. The governance vet and the delivery key therefore
 resolve the same principal, on the `channel_type`/`target_id` leg and the
 channel-`session` leg alike.
+
+**Every egress leg also re-asks the calling app's own messaging grant.** The MCP
+tool's `capabilities.messaging` vet runs in `kirocrew-core`, which knows no app,
+so a per-app profile that revokes messaging never reaches it. The gateway does
+know the app (`effective_request_app`: the attested token's claim, or the owner of
+the calling session), and `channel_delivery._vet_app_messaging` asks that grant,
+fail-closed, before the configured-target leg resolves its target and before the
+owner-DM, session-conversation or Slack leg in `_deliver_send_message_fallback`
+sends. A refusal sends on none of them and answers 403 `channel_not_permitted`,
+the code a refused owner DM already answers. A caller no app owns is the person,
+whose surface profile the MCP tool already vets, so it is not re-asked; the
+dashboard notification is not an egress leg and is not gated.
 
 `"slack"` is deliberately **not** a legal `channel_type`: Slack is absent from
 `state.channel_transports` on purpose, so the shared ladder skips it and accepting
@@ -2915,11 +2930,18 @@ and composed onto it.
   other path: a flagged row is never removed, however complete the transcript
   header, because the sync gates hydrate from the map alone and a transcript can
   be deleted or recreated apart from its row. `SessionMap.stamp_privacy_headers` --
-  awaited by `start_pool` right after `prune`, the header probes on a worker
-  thread, the map-lock-held half touching no file, each row re-read and stamped
-  under the session's durable-write lock (`_serialized`, below) so a release
-  landing after its snapshot is never re-stamped -- only ensures each flagged
-  row's existing transcript header carries the mode.
+  awaited by `start_pool` right after `prune`, its locked per-row walk hosted in
+  `privacy_mode.stamp_flagged_headers` (beside the lock), the header probes on a
+  worker thread, the map-lock-held half touching no file, each row re-read and
+  stamped under the session's durable-write lock (`_serialized`, below) so a
+  release landing after its snapshot is never re-stamped -- only ensures each
+  flagged row's existing transcript header carries the mode. A row whose stamp
+  FAILS -- an existing transcript whose header still reads weaker than its flag
+  after the write (the write raised, or was deferred on a read that failed and
+  then recovered), a legacy message-first transcript excepted, since no writer
+  can stamp it -- does not stop the walk, but the sweep then raises
+  `PrivacySweepIncomplete`, which the pool logs; the next `start_pool` sweeps
+  again and retries the repair.
   The transcript header's `memory_mode` is the record the memory readers
   consult: `apply_mode` stamps it through `_persist_transcript_mode`
   (`ConversationLog.update_metadata_if` on the default `ConversationLog`, off the
@@ -2960,12 +2982,27 @@ and composed onto it.
   a header write that fails, or returns with the header NOT recording the mode,
   is the same refusal as a row that cannot land. The writer's answer is consumed
   and read past: `update_metadata_if` has two silent no-write answers -- `False`
-  for a damaged first line it cannot read (the same answer as "already at least
-  this strict") and `True` for a first line that is valid JSON but not the
-  metadata record (a legacy message-first transcript), which it skips -- so the
+  for a first line it CANNOT read (a read that failed, which it reports
+  `METADATA_LINE_TRANSIENT` and a retry might yet clear; the same answer as
+  "already at least this strict") and `True` for a first line that is valid JSON
+  but not the metadata record (a legacy message-first transcript), which it
+  skips -- so the
   stamp reads the header back and raises `HeaderNotRecorded` unless it carries
-  at least the mode. Either way the
-  row is taken back (`_land` to the value it had BEFORE the commit, never forced
+  at least the mode. A first line whose bytes are not UTF-8 JSON
+  (`METADATA_LINE_CORRUPT`) is NOT one of those: no retry will ever read it, so
+  rather than refuse forever `_persist_transcript_mode` HEALS it when the
+  read-back shows a too-weak header (`_heal_corrupt_header`): under the
+  transcript's own lock it re-tests the line, and only a line STILL corrupt is
+  rebuilt -- the data layer's corrupt-line rewrite drops the bad bytes and folds
+  the mode to `STRICTEST_MEMORY_MODE`, and a second write in the same critical
+  section records the REQUESTED mode on that fresh header, so an `!incognito`
+  thread stays Incognito rather than silently becoming Temporary. A line a
+  concurrent writer (a reservation release, an End) healed first is left as that
+  writer wrote it, never loosened; the read-back then decides on that header. The
+  mode is applied, where once it refused with `persist_failed`
+  forever under a "try again" remedy no retry could clear. Either way a row
+  whose stamp genuinely did not land
+  is taken back (`_land` to the value it had BEFORE the commit, never forced
   off: after a restart a re-sent modifier commits over a row already on disk,
   and clearing it would erase the thread's one durable private record) and the message is
   NOT processed; only then the in-memory mark, the audit
@@ -3067,7 +3104,7 @@ and composed onto it.
   (**`_serialized`**, refcounted, made on first use and dropped with its last
   user) shared by `_commit_mode`'s two durable steps, `_release_mode`'s
   whole sequence and the startup sweep's per-row re-read and stamp
-  (`SessionMap.stamp_privacy_headers`, which otherwise re-stamped a mode a
+  (`privacy_mode.stamp_flagged_headers`, which otherwise re-stamped a mode a
   release had taken back after its snapshot): two modes on one key are two groups, and two releases
   interleaved each read the other's mode as a standing claim (tracker and group
   retire only after the header write), each wrote the other mode into the
@@ -3658,7 +3695,10 @@ pure-aiohttp Discord Gateway WebSocket client (`client_gateway.py`): identify wi
 also request `GUILD_MESSAGES` and privileged `MESSAGE_CONTENT`. Heartbeat uses
 the server interval with jitter,
 resume via `resume_gateway_url`/sequence tracking, exponential-backoff
-reconnect, and hard stop on non-recoverable close codes (4004/4010-4014).
+reconnect (every close that means to reconnect — op-7, op-9, a missed or failed
+heartbeat — sends close code `4000`, because Discord ends the session on a
+`1000`/`1001` close and the RESUME would fail; only `DiscordClient.close()`
+shuts down with `1000`), and hard stop on non-recoverable close codes (4004/4010-4014).
 Outbound is REST v10 (send/edit/typing/reactions/interaction acks) through one
 ladder that spends the rate-limit accounting Discord hands back on every
 response: a bucket whose last response reported `Remaining: 0` is waited out

@@ -81,6 +81,7 @@ async def _auto_apply_update(self: GatewayOrchestrator, *, mandatory: bool = Fal
     # the kill-the-tree + bounded-reap contract for an asyncio child. (The
     # managed-venv engine's build children are synchronous ``Popen`` children
     # and use ``platform_compat.kill_popen_tree`` instead.)
+    from kiro_crew.platform.update_governance import unattended_apply_allowed
     from kiro_crew.platform.update_provider import _kill_and_reap
 
     # Loaded before the reinstall below for the same reason as the provider
@@ -253,9 +254,9 @@ async def _auto_apply_update(self: GatewayOrchestrator, *, mandatory: bool = Fal
         # reset below. It comes straight from the fetch, so it cannot be moved by
         # a concurrent fetch between decision and reset, and the old
         # `refs/remotes/origin/<branch>` tag-vs-ref ambiguity does not arise: no
-        # ref name is resolved to get it. The helper also pins that tracking ref
-        # to this OID (by a direct file write, firing no hook) for parity with a
-        # normal fetch.
+        # ref name is resolved to get it. The helper writes no ref in the
+        # checkout, so its remote-tracking ref stays as the last plain fetch left
+        # it.
         fetched = await fetch_and_pin_upstream(
             proj, "origin", branch, git=_git, env=_git_env, timeout=60
         )
@@ -598,6 +599,20 @@ async def _auto_apply_update(self: GatewayOrchestrator, *, mandatory: bool = Fal
                     self.dashboard_state.push_update_progress(
                         "failed", f"Update refused: {floor_breach}"
                     )
+                    self.dashboard_state.push_refresh("update_available")
+                return True
+
+            # 6. A policy that turned unattended installs off since the effect
+            #    was derived. Read LAST, after every await above, so on the
+            #    post-copy pass nothing awaits between it and the reset. A
+            #    floor's mandatory update does not ask.
+            if not mandatory and not unattended_apply_allowed():
+                logger.info(
+                    "Auto-update not applied: the security policy turned off "
+                    "unattended installs while this update waited"
+                )
+                if self.dashboard_state:
+                    self.dashboard_state.clear_update_progress()
                     self.dashboard_state.push_refresh("update_available")
                 return True
 
@@ -1014,6 +1029,7 @@ async def _auto_apply_wheel_update(
         feed_base=feed_base,
         artifact_base=artifact_base,
         state=state,
+        refuse_if_unattended_off=not mandatory,
     )
     if outcome.status == "promoted":
         if not await asyncio.to_thread(wheel_apply.restart_reaches, version):

@@ -38,6 +38,7 @@ import { threadLiveStore } from '../state/threadLiveStore'
 import { _resetSlotReadRelayForTest } from '../lib/slotReadRelay'
 import { holdStreamingFlushes, releaseStreamingFlushes } from '../lib/streamHold'
 import type { ChatSlot } from '../types'
+import { setViewedThreadSlot, _resetViewedThreadForTests } from '../lib/viewedThread'
 
 vi.mock('../api/client', () => ({
   api: {
@@ -545,6 +546,33 @@ describe('useWebSocket frame routing trace', () => {
   it.each(FRAME_CASES)('%s', async (name, setup, frames) => {
     const got = await run(setup, frames)
     expect(got).toEqual(EXPECTED_FRAMES[name])
+  })
+
+  it('chat_done in the active slot refreshes Explore once it has been read (session-keyed)', async () => {
+    const { ws } = await mountOpen()
+    // What useMilestones caches: the key carries the session.
+    qc.setQueryData(['milestones', `dashboard:${ACTIVE}`], { enabled: true })
+    act(() => { ws.frame({ type: 'chat_chunk', data: { slot: ACTIVE, seq: 1, content: 'answer' } }) })
+    act(() => { drainFrames() })
+    trace = []
+    act(() => { ws.frame({ type: 'chat_done', data: { slot: ACTIVE, ts: TS } }) })
+    act(() => { drainFrames() })
+    expect(trace).toContain('query invalidateQueries ["milestones"]')
+  })
+
+  it('refreshes Explore when the thread a non-chat page shows ends a turn (the Mate DM on Members)', async () => {
+    const { ws } = await mountOpen()
+    qc.setQueryData(['milestones', `dashboard:${ACTIVE}`], { enabled: true })
+    // Members registers the thread it renders; the chat's activeSlot is another one.
+    setViewedThreadSlot(BACKGROUND)
+    try {
+      trace = []
+      act(() => { ws.frame({ type: 'chat_done', data: { slot: BACKGROUND, ts: TS } }) })
+      act(() => { drainFrames() })
+      expect(trace).toContain('query invalidateQueries ["milestones"]')
+    } finally {
+      _resetViewedThreadForTests()
+    }
   })
 
   it('swallows a malformed frame and keeps routing the next one', async () => {
@@ -1500,6 +1528,7 @@ const EXPECTED_LIFECYCLE: Record<string, string[]> = {
   "first connect": [
     'connect ws:/api/ws?caps=slot_patch,fold_delta.1,fold_delta.2',
     'query invalidateQueries ["crew-log-projections"] {"cancelRefetch":false}',
+    'query invalidateQueries ["shared-crew"] {"cancelRefetch":false}',
     'action dashboard/sseConnected undefined',
     'query fetchQuery ["automation-seed","legacy"] {"staleTime":0,"retry":false}',
     'query fetchQuery ["automation-seed","structured"] {"staleTime":0,"retry":false}',
@@ -1520,6 +1549,7 @@ const EXPECTED_LIFECYCLE: Record<string, string[]> = {
     'action dashboard/sseDisconnected undefined',
     'connect ws:/api/ws?caps=slot_patch,fold_delta.1,fold_delta.2',
     'query invalidateQueries ["crew-log-projections"] {"cancelRefetch":false}',
+    'query invalidateQueries ["shared-crew"] {"cancelRefetch":false}',
     'action stream/flush {"slots":[{"slot":"slot-a","thinking":"kept","status":{"content":true,"thinking":true}}],"subagents":[],"recency":[]}',
     'cancel-frame 1',
     'action dashboard/sseConnected undefined',
@@ -1560,6 +1590,7 @@ const EXPECTED_LIFECYCLE: Record<string, string[]> = {
     'action dashboard/sseDisconnected undefined',
     'connect ws:/api/ws?caps=slot_patch,fold_delta.1,fold_delta.2',
     'query invalidateQueries ["crew-log-projections"] {"cancelRefetch":false}',
+    'query invalidateQueries ["shared-crew"] {"cancelRefetch":false}',
     'reload',
   ],
   "unmount": [
@@ -1572,6 +1603,7 @@ const EXPECTED_LIFECYCLE: Record<string, string[]> = {
     'close',
     'connect ws:/api/ws?caps=slot_patch,fold_delta.1,fold_delta.2',
     'query invalidateQueries ["crew-log-projections"] {"cancelRefetch":false}',
+    'query invalidateQueries ["shared-crew"] {"cancelRefetch":false}',
     'action dashboard/sseConnected undefined',
     'action dashboard/fetchSlots/pending',
     'query invalidateQueries ["session-summary"]',
@@ -1612,6 +1644,7 @@ const EXPECTED_LIFECYCLE: Record<string, string[]> = {
     'action chat/setVoicePlaying false',
     'connect ws:/api/ws?caps=slot_patch,fold_delta.1,fold_delta.2',
     'query invalidateQueries ["crew-log-projections"] {"cancelRefetch":false}',
+    'query invalidateQueries ["shared-crew"] {"cancelRefetch":false}',
     'action dashboard/sseConnected undefined',
     'query fetchQuery ["automation-seed","legacy"] {"staleTime":0,"retry":false}',
     'query fetchQuery ["automation-seed","structured"] {"staleTime":0,"retry":false}',

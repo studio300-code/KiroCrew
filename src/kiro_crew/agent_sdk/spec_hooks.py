@@ -186,6 +186,24 @@ def spec_hook_tool_names(tool_id: str) -> tuple[str, ...] | None:
     return kas_tool_match_names(tool_id)
 
 
+def envelope_named_tool_id(tool_id: str) -> bool:
+    """Whether *tool_id* is a call on a harness whose ids come only from Crew's gate envelope.
+
+    On such a harness (Strands) an MCP server's tool is named by its MCP forms
+    alone, so the shared matcher never adds its bare name.
+    """
+    if not tool_id:
+        return False
+    # circular import: see spec_hook_tool_names.
+    from kiro_crew.acp.harness_tool_names import (
+        ENVELOPE_NAMED_TOOL_BACKENDS,
+        split_harness_tool_id,
+    )
+
+    parts = split_harness_tool_id(tool_id)
+    return parts is not None and parts[0] in ENVELOPE_NAMED_TOOL_BACKENDS
+
+
 def post_tool_hook_tool_id(provider: object, *, harness_tool_id: str, is_shell: bool) -> str:
     """The tool id a finished call's PostToolUse spec hooks match on, or "".
 
@@ -208,7 +226,13 @@ def post_tool_hook_tool_id(provider: object, *, harness_tool_id: str, is_shell: 
     if not is_shell:
         return ""
     # circular import: see spec_hook_tool_names.
+    from kiro_crew.acp.harness_tool_names import ENVELOPE_NAMED_TOOL_BACKENDS
     from kiro_crew.acp.kas_permissions import KAS_TOOL_IDS_BY_KIRO_TOOL
+
+    # On Strands the shell verdict a card carries is the CLI's guess from the tool
+    # name, so only the id the gate envelope stated names the call.
+    if capabilities_of(provider).backend in ENVELOPE_NAMED_TOOL_BACKENDS:
+        return ""
 
     shell_ids = KAS_TOOL_IDS_BY_KIRO_TOOL.get("execute_bash") or ()
     return shell_ids[0] if shell_ids else ""
@@ -596,6 +620,45 @@ def spec_hooks_run_nowhere(provider: object) -> bool:
         return False
     ability = ability_for(caps.backend)
     return _HOOKS_CONCERN in ability.no_channel or _HOOKS_CONCERN in ability.withheld
+
+
+def spec_steering_read_nowhere(provider: object) -> bool:
+    """Whether a session on *provider* loads none of its spec's ``file://`` steering.
+
+    True where the backend's mirror rules ``resources`` ``withheld`` or
+    ``no-channel``: the harness is handed no spec, and Crew's own steering load
+    serves only the ``provider=claude_code`` seam's default agent
+    (``providers.mirrors.base.RESOURCES_NO_READER``). False for a backend with no
+    mirror (kiro-cli and KAS read ``resources`` themselves) and for one whose
+    rulings cannot be read, about which nothing is established.
+    """
+    # circular import: the mirrors package reaches back into agent_sdk.
+    from kiro_crew.providers.mirrors import mirror_for
+    from kiro_crew.providers.mirrors.base import Concern, Disposition
+
+    try:
+        mirror = mirror_for(capabilities_of(provider).backend)
+        ruling = mirror.rulings().get(Concern.RESOURCES) if mirror is not None else None
+    except Exception:  # noqa: BLE001 - an unreadable ruling establishes nothing
+        return False
+    return ruling is not None and ruling.disposition in (
+        Disposition.WITHHELD,
+        Disposition.NO_CHANNEL,
+    )
+
+
+def spec_steering_resources(agent_id: str, project_dir: str | None = None) -> list[str]:
+    """The ``file://`` entries of the active agent spec's ``resources``, in order.
+
+    For the session-start notice on a backend where
+    :func:`spec_steering_read_nowhere` holds. Read through the spec reader the
+    hooks use, so it is the spec the session runs. Raises when the spec cannot be
+    read. *project_dir* is :func:`spec_project_dir` of the session.
+    """
+    resources = _agent_spec(agent_id, project_dir).get("resources")
+    if not isinstance(resources, list):
+        return []
+    return [r for r in resources if isinstance(r, str) and r.startswith("file://")]
 
 
 def spec_hook_events(agent_id: str, project_dir: str | None = None) -> list[str]:

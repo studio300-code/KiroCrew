@@ -101,6 +101,7 @@ vocabulary.
 | `ACP_BACKENDS_HARNESS_OWNED_SESSIONS` | The harness owns persisted session records and can restore from a `sessionId` without a Crew-side transcript or `_kiro.dev/session_file`. |
 | `ACP_BACKENDS_LOAD_WITHOUT_MODES` | A successful restore response may omit `modes`; membership prevents that valid load from being mistaken for a failed restore and replaced by a fresh session. |
 | `ACP_BACKENDS_RESUME_WITHOUT_LOAD` | The harness restores with standard ACP `session/resume` and advertises `sessionCapabilities.resume`, rather than using `session/load`. Membership selects both the capability key and verb. |
+| `ACP_BACKENDS_RELOAD_DISPOSED_SESSION` | The harness can dispose one session's backend inside a live process and then answer every prompt on that id with one error. Membership needs a capture of that error and of a `session/load` in a second process; `acp/disposed_session.py` lists the exact texts. |
 | `ACP_BACKENDS_FORK_AT_MESSAGE` | The harness's `session/fork` copies a stored session only up to a given assistant message, so an edited message's rewind can keep the retained native history. Advertising `sessionCapabilities.fork` is not enough: a fork that ignores the point copies the edited-away suffix too. |
 | `ACP_BACKENDS_MODEL_VIA_CONFIG_OPTION` | Model switching lands as a config option rather than a protocol call. |
 | `ACP_BACKENDS_EFFORT_VIA_CONFIG_OPTION` | Reasoning-effort push, same channel shape. |
@@ -121,7 +122,7 @@ vocabulary.
 | `ACP_BACKENDS_MEMBER_PANEL` | The member panel is mounted for a member session on this harness. Decided separately from `ACP_BACKENDS_MEMBER_DISPATCH` (harness-parity H6), so mounting the panel never implies the dispatch tools or their grant. |
 | `ACP_BACKENDS_MEMBER_TOOL_LIMITS` | Of the member-capability backends, the harness honours a saved spec's per-tool `disabledTools` on an MCP server. A non-member refuses such a spec before spawn. |
 | `ACP_BACKENDS_MEMBER_CAPABILITIES` | The harness can load an enrolled member's saved agent spec at spawn, or confirm the projection it consumed (see harness-parity H6 for the fields a projecting harness reports as gaps). This is distinct from session sharing and per-session member dispatch; membership in either does not prove full-spec loading. |
-| `ACP_BACKENDS_SIDE_READONLY` | A Side Chat turn may execute read-only tools under `READ_ONLY` because the harness confines the side session (kiro-cli: the derived `<agent>--readonly` spec; claude: a session with only its read built-ins, no MCP server, pinned to `default` mode). A harness with an independent pre-approval surface stays out until every tool call either runs natively as a read or is proven to reach this policy. |
+| `ACP_BACKENDS_SIDE_READONLY` | A Side Chat turn may execute read-only tools under `READ_ONLY` because the harness confines the side session (kiro-cli: the derived `<agent>--readonly` spec; claude: a session with only its read built-ins, no MCP server, pinned to `default` mode; strands: no MCP server and only its own proven `read` runs). A harness with an independent pre-approval surface stays out until every tool call either runs natively as a read or is proven to reach this policy. |
 | `ACP_BACKENDS_COMPACT` | The manual `/compact` entry points are offered. A non-member refuses the manual command up front rather than stranding the status waiter on a harness that emits no compaction status of its own. |
 | `ACP_BACKENDS_INLINE_COMPACTION` | A strict subset: the compaction finishes INSIDE the `session/prompt` turn, so `wait_for_compaction()` answers `completed` from the capability instead of from the queue. A non-member's result arrives separately and must be awaited. Awaiting a member strands for the full timeout; telling a non-member it is done acknowledges a compaction that has not happened. |
 | `ACP_BACKENDS_HARNESS_MANAGED_COMPACTION` | The harness compacts on its OWN initiative and reports it on its ACP surface, so Crew's context meter falls back below the threshold without Crew acting. This is what makes declining a non-member of `ACP_BACKENDS_COMPACT` honest rather than merely quiet. |
@@ -130,6 +131,7 @@ vocabulary.
 | `ACP_BACKENDS_SEED_LOCAL_SETTINGS` | A local settings file is seeded at spawn **and re-seeded on `set_model`**, so a warm-pool claim does not leave a stale model or allowlist behind. A harness with no such file is not a member. |
 | `ACP_BACKENDS_MCP_CONFIG_HOT_RELOAD` | The dashboard's MCP sync leaves running sessions alone after a config write, because the harness reconciles the agent file itself. Membership is version-gated per process by `mcp_hot_reload_supported`, not granted by the harness name alone. |
 | `ACP_BACKENDS_MCP_WIRE_REINJECT` | The dashboard's MCP sync leaves running sessions alone because Crew re-sends the session's projected agent at its next turn boundary (`session/close` of the resident session, `session/load` of the same id with the new `_meta.kiro.customAgents` batch, `session/set_mode`) and the engine keeps the conversation. KAS only, on a live capture; a member must also take the mark `mark_mcp_config_changed` leaves. Disjoint from the hot-reload set: a file watcher and a re-sent projection are different properties. |
+| `ACP_BACKENDS_MCP_RELAUNCH_RELOAD` | The dashboard's MCP sync leaves running sessions alone because Crew relaunches the process with the new launch-time MCP config at the session's next turn boundary and `session/load`s the same id, and the harness keeps the conversation (`acp/relaunch_reload.py`). Strands only, on a live capture of an added and a withdrawn server. Disjoint from the hot-reload and re-inject sets. |
 | `ACP_BACKENDS_STRUCTURED_REFUSAL` | The harness reports a model-side refusal with a **reason** — on the Kiro path a `_kiro.dev/metadata` frame with `stopReason: CONTENT_FILTERED` and a `refusal {category, explanation, recommendedModel}` object — and `acp/_dispatch.parse_refusal` is consulted on that frame. Every harness still lands on the same `RefusalInfo` and the same dashboard card; a non-member's card just has no category line. A harness whose refusal wire carries a reason in a different shape adds a parser and joins here — it must not widen the metadata reader to guess. |
 | `ACP_BACKENDS_REPORT_USAGE` | Every turn lands its billing or token counts in `TurnUsage`, so a turn that reports none billed none (agent-host-contract.md §6). Read through `AcpProvider.reports_turn_usage`; memory consolidation takes an empty, unbilled reply as free only on a member. A harness joins once a captured turn, or its driver's tested accounting (KAS's `turn_completion` credits), shows its spend reaching `TurnUsage`; context occupancy alone (`usage_update` `used` / `size`) is not that evidence. |
 | `ACP_BACKENDS_HOOKS_LIST` | The child's agent may ask its CLIENT for the hooks matching a trigger and to run one, over `_kiro/hooks/list`, `_kiro/hooks/sessionStart` and `_kiro/hooks/executeHook`; membership authorizes the session dispatch loop to answer them from Kiro Crew's own script-hook store. A non-member is answered `-32601` like any other method it does not serve, which is why membership is the gate rather than the method name: the answers carry, and the last one runs, operator-authored hook commands. Membership authorizes the route only: the handshake does not announce the channel, so a member asks nothing yet. |
@@ -964,3 +966,100 @@ back read-only to the one Copilot CLI child it is for (`extra_expose_files`). It
 removed as soon as `initialize` answers (measured safe: the harness reads it at boot),
 and on a failed handshake, a failed write or a refused spawn too. An existing masked
 directory whose purpose fits was the answer, not a new entry on a sandbox list.
+
+## Worked example: Strands
+
+The run to read for a harness whose ACP mode asks for nothing on its own, and for a
+harness that runs the OPERATOR's code as its agent. It is in `ACP_BACKENDS_KNOWN`
+and it IS selectable.
+
+| Stage | State |
+|---|---|
+| 1 vocabulary | Done — `ACP_BACKEND_STRANDS`, `PROVIDER_LABEL_STRANDS`, policy name mapped, its own `strands` model namespace. |
+| 2 capability sets | Decided for every set against Strands CLI **0.2.3** (`@strands-agents/cli`) over `strands-harness` 0.3.3. In the session MCP array (none of it on the wire), the zero-tool ban, `ACP_BACKENDS_HARNESS_OWNED_SESSIONS`, `ACP_BACKENDS_LOAD_WITHOUT_MODES` and `ACP_BACKENDS_LOCAL_CLEAR`; the new sets are `ACP_BACKENDS_MODEL_AT_LAUNCH` and `ACP_BACKENDS_EFFORT_AT_LAUNCH` (the model and effort are the CLI's `--model` and `--effort` launch arguments, project-mode ACP has no channel for either, and a change relaunches the process and reloads the session). Not a compaction, steering, usage or advertised-model member: project-mode ACP sends no `usage_update`, no model list and no compaction status. Deliberately outside `ACP_BACKENDS_CONTEXT_RECYCLE` too: a full context is left to the project's own Strands context manager (strands-harness's `context_manager` defaults to `"auto"`), so Crew neither compacts nor recycles it and the gate logs the unclassified decline. That is a recorded gap, not a claim of harness-managed compaction: it closes when the CLI reports usage and offers `/compact` in project mode. |
+| native Windows | Refused, as for every enforced harness: `tool_gate.enforce_sandbox_floor` names that Crew has no OS sandbox backend there to apply the credential mask. No Strands-specific bypass exists, and `agent.sandbox_allow_no_isolation` does not unlock an enforced harness. The Windows launch pieces (the `strands.cmd` shim, `.venv\Scripts\python.exe`, the PowerShell `&` setup command) are in place for when a backend exists. |
+| 3 spawn path | Done — `strands --acp-server --agent <crew home>/pi-gate/strands/agent.py [--model <id>] [--mcp-config <file>]` off the shared self-served ladder (`acp/harness/strands.py`). The Node under it is checked against the CLI's `engines.node` (22) with the same choice pi's launch makes. |
+| 4 handshake | Done — integer `1`. The CLI answers `agentInfo.version` `0.0.1` (a constant in its source), so the verified release is read from its `package.json` instead. |
+| 5 auth declaration | Done — `host_vault`, no leaf: the CLI stores no credential, and `agent.strands_env` carries provider settings from Crew's vault. |
+| 6 install probe | Done — `_probe_strands`: the binary at the verified release, plus `strands-harness` in the project's `.venv`, each named with the command that installs it. |
+| 7 selectability | **Selectable**, on `Routing.VERIFIED_GATE_EXTENSION` with `Readback.LOAD_MARKER` — pi's and DeepSeek's member. |
+| 8 live spill | Reached for the turn classes (`test/fixtures/acp_frames/strands/`): a shell call denied then allowed, and an operator project's custom `@tool` and vended `file_editor` each asking. In a dashboard pod the session started and the read-back passed; the model call there needs a credential the sandbox lets the child read (see the provider table in agent-host-contract.md §3). |
+| verified range | Strands CLI **0.2.3** exactly (`STRANDS_VERIFIED_VERSION`). Fail closed on another release: the install row and the spawn refuse it with the pinned install command. |
+
+Three things this run produced that the checklist did not ask for.
+
+**The first is a harness whose ACP mode never asks.** The CLI's default
+`--acp-server` profile sends no `session/request_permission` at all, and its
+Python-project mode forwards only a Strands interrupt. So the route is Crew's own code
+running AS the project: the CLI is pointed at a sealed copy of
+`agent_sdk/gate_extensions/strands/kiro_crew_strands_gate.py`, which patches
+`strands.Agent.__init__` before any project code runs, so every agent built in that
+process -- the bundled one, the operator's, a sub-agent -- raises one interrupt per
+tool call in Crew's gate envelope. A read-back boot of the same argv proves the module
+loaded from Crew's file under this session's nonce before the session's own process
+starts, and the completed-unasked tripwire watches the session itself.
+
+**The second is the operator's project.** `agent.strands_project` points the gate at
+the operator's own `agent.py`; the gate imports it with every `Agent` already gated,
+re-creates it per session through its `create_agent` (awaited when it is `async`) or
+its captured `create_harness(...)` call, and refuses to start a project whose agent it
+cannot gate or that sets its own sandbox. A plain `agent = Agent(...)` with neither is
+served as that worker's one agent, given the same `SnapshotSessionManager` the
+harness's factory builds, under Crew's state directory, so `session/load` restores
+it rather than answering success on an empty agent; such a project cannot take a
+launch model, so a configured or chat model refuses it by name. A script-style
+project that calls its agent at import has that call stopped at its first tool by the
+same interrupt, and the paused turn is dropped. A cancel that lands while an approval
+interrupt is open leaves the agent saved in interrupt state, after which Strands refuses
+every prompt and every reload of that session ("must resume from interrupt"); the gate
+wraps `Agent.stream_async` so that, before any prompt that is not itself the interrupt
+answers, each open interrupt is resumed with a DENY (fail closed: the hook cancels the
+call, the tool never runs), at most three passes, then the state is cleared
+(`test/test_strands_gate_module.py`).
+
+**The operator's project runs only as the version the operator confirmed.** Its module
+code runs in the worker that holds the `agent.strands_env` keys, and the tool gate never
+sees it, so a project in a folder the agent can write could be turned into code nobody
+reviewed. The confirmed version is a fingerprint in `agent.strands_project_sha256`
+(`acp/harness/strands_project_pin.py`): sha256 over every regular file under the folder
+holding the project's `agent.py`, recursively, as sorted relative POSIX paths, sizes and
+bytes. `__pycache__` folders are left out because no project file is ever run from
+bytecode (below). A link or
+junction, any other non-regular entry, an unreadable file, more than 5000 files or more
+than 64 MB refuses. The pin sits in `config.json`, which the agent's file tools may not
+write and every sandbox tier mounts read-only (with `agent.sandbox: "off"`, the
+operator's own choice, no tier mounts anything, as for every config switch), and it has no `_EDITABLE_CONFIG` entry, so
+no dashboard write or change card records it; only the operator does
+(`kirocrew config set agent.strands_project_sha256 <value>`, or the file). Every launch
+recomputes it in the gateway before the read-back boot and before any key file is
+written, and a mismatch or an empty pin refuses the session with the current value and
+that command; nothing re-records it. The gate module recomputes it again (its own copy
+of the algorithm, held equal by `test_the_gate_fingerprint_equals_the_gateway_one`)
+right before the import, against the pin Crew passed in `KIROCREW_STRANDS_PROJECT_SHA256`,
+keeping each file's own digest. It then puts a finder just ahead of Python's path finder
+for the rest of the session: every import that resolves into the project folder (judged
+on the path as written, with its folder resolved, and fully resolved, so a file linked
+out of the folder still counts; and by the folder's device and inode, so a spelling no
+path rule maps back, such as other letter case on a case-insensitive macOS volume or a
+Windows short name, still counts and finds its file by inode), the entry included, runs only a `.py` file whose bytes
+match its confirmed digest, compiled from the bytes it checked by a `SourceFileLoader`
+subclass, so package resources (`importlib.resources`, `pkgutil.get_data`) still work.
+A file the project loads by path (`spec_from_file_location`, `runpy`) never asks the meta
+path, so the gate also holds Python's own file loaders to the same rule inside the folder:
+the stock source loader compiles only confirmed bytes there and never reads bytecode, and
+the bytecode and extension loaders refuse; `runpy.run_path` on a file there runs only
+confirmed source; a zip archive there is never imported from; outside the folder all of
+them are unchanged. A cached `.pyc` is never read (Python trusts an
+unchecked-hash `.pyc` without its source), a file edited or added mid-session is refused
+when imported, and any other file kind there (`.pyc`, an extension module) is refused.
+Not covered: code the project imports from installed packages outside its folder, and
+files the project opens itself at run time after the launch check (data, or text it
+passes to `exec` or `compile` on its own, a child process it starts on a folder file, a
+library it loads with `ctypes`). The bundled project
+needs no pin (`test/test_strands_project_pin.py`).
+
+**The third is a wire that refuses Crew's MCP array.** Project mode rejects a non-empty
+`session/new` `mcpServers` array, so the whole projected array rides an owner-only
+`--mcp-config` file (Copilot's staging directory and lifetime), and the CLI's own
+discovery of other tools' MCP and skill files is switched off in the child's
+environment (`STRANDS_CLI_MCP_DISCOVERY=off`, `STRANDS_CLI_SKILL_DISCOVERY=off`).

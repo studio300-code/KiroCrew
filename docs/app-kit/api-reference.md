@@ -710,7 +710,9 @@ Three rules the registry relies on:
 A failed approval decision, a refused tool-output copy and a failed MCP sign-in banner render an
 `ErrorNotice` with the "Ask the agent" hand-off, which navigates to the main chat. A host holding unsaved local state that the
 navigation would drop passes `handOff={false}` to `ChatMessageList`: those notices then render
-without the button, and renderers see `ctx.handOff === false`. `ChatEmbed` does this because its
+without the button, and renderers see `ctx.handOff === false`. The failed sign-in banner then
+names where to sign in again (Customize → Connections → MCP Servers) as plain text, not a link,
+so it still offers a next step without navigating away. `ChatEmbed` does this because its
 composer draft lives only in the embed; `ChatPane` does too, for its staged message quote. `ToolCallPill` takes the same switch as `askAgent`.
 Default is `true`, so a host with nothing to lose keeps the hand-off.
 
@@ -722,7 +724,7 @@ Default is `true`, so a host with nothing to lose keeps the hand-off.
 | `defaultMessageRenderers` | value | the built-in registry, in resolution order |
 | `mergeRenderers(extra)` | function | shape-matched defaults, then host entries, then the rest |
 | `resolveRenderer(message, renderers)` | function | first entry that claims the message |
-| `ToolCallPill` | component | the store-free tool row the default registry uses; expanded, it shows the persisted `meta.input` / `meta.output` in the main chat's Input/Output panel, and falls back to the row's `content` only when both are empty; with a payload, its Copy control copies input and output together whichever tab is showing, and says so in a visible "Copy input and output" label, while a fallback row keeps the icon-only Copy |
+| `ToolCallPill` | component | the store-free tool row the default registry uses; expanded, it shows the persisted `meta.input` / `meta.output` in the main chat's Input/Output panel, and falls back to the row's `content` only when both are empty; with a payload, its Copy control copies input and output together whichever tab is showing, and says so in a visible "Copy input and output" label, while a fallback row keeps the icon-only Copy; the panel's left rail takes its colour from `toolRailColor` (`utils/toolRailColor.ts`), the one store-free mapping the main chat's tool row also uses (rejected > auto-denied > done > awaiting approval > running, at a 70% `color-mix`), while each row derives its own status flags |
 | `GROUPED_ROLES` | value | frozen array of the roles grouped before per-row resolution (see the limitation above) |
 | `MessageRenderer` | type | `{ id, roles, match?, render }` |
 | `MessageRenderContext` | type | what `render` is handed |

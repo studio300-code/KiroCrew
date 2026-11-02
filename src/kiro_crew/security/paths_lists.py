@@ -510,6 +510,8 @@ _CREW_SECRET_LEAVES: list[str] = [
     # is ``sandbox._CREW_HIDDEN_LEAVES``. Deliberately NOT under ``trust/``,
     # which stays sandbox read-write for SEL. Only the gateway opens it.
     "panel-dismissals",
+    # Pending deletes of released engine records (``released_sessions``); also masked.
+    "released-sessions",
     # The operator's OAuth consent-endpoint extension
     # ({additional_authorization_endpoints: [{host, path}]}). Each entry widens
     # the banner-only OAuth entropy carve-out (_OAUTH_AUTHORIZATION_ENDPOINTS),
@@ -627,6 +629,12 @@ _CREW_SECRET_LEAVES: list[str] = [
     # ``/api/decisions/consent`` handler is the only writer and opens the path
     # directly, not through this gate.
     "decisions_consent.json",
+    # The owner's Shared Crew preview switch. The record is what AUTHORIZES the
+    # Crew to open to other people on the next start, so an agent that could
+    # write it would share the owner's machine on the owner's behalf. The
+    # owner-only ``/api/shared-crew/preview`` handler is the only writer and
+    # opens the path directly, not through this gate.
+    "shared_crew_preview.json",
     "ssh_auth_sock_consent.json",
     # The owner's credential-redaction switch. Same class of control as the
     # consent records above: the record is what AUTHORIZES the credential scrubber
@@ -741,6 +749,9 @@ _CREW_SECRET_LEAVES: list[str] = [
     # the launcher and read the sealed extension. This floor still keeps the agent's
     # own file tools out; the controls cover different readers rather than cancelling.
     "pi-gate",
+    # KAS MCP launch snapshots hold servers' env values (``acp.kas_env_launch``); the
+    # ``pi-gate`` split: readable in the sandbox for the launcher, fenced from file tools.
+    "kas-mcp-launch",
     # Encrypted secret vault directory — denylists the entire subdirectory so
     # the key file, ciphertext store, lock, and atomic-write temp files are all
     # unreadable to the agent through any Kiro Crew-mediated channel.

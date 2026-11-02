@@ -20,6 +20,7 @@ import { Link } from 'react-router-dom'
 import { Server, X } from 'lucide-react'
 import { api, ApiError } from '../../../api/client'
 import { crewPeerUrl } from '../../../api/client/instances'
+import { refreshDashboardReads } from '../../../api/dashboardRefresh'
 import { useAppSelector } from '../../../store'
 import { useSelectInstance } from '../../../hooks/useSelectInstance'
 import { Btn } from '../../../components/ui'
@@ -39,7 +40,8 @@ import { SlotProvider } from '../../../providers/SlotContext'
 import { i18nT } from '../../../i18n/t'
 import { errMessage } from '../../../utils/thunkError'
 import type { ChatMessage, ChatSlot } from '../../../types'
-import { capsRetryInterval, closeCrewWindow, coverSiblings, markCrewWindowShown, readCrewDraft, subscribeCrewDraft, writeCrewDraft, type CrewWindowTarget } from './crewWindowStore'
+import { capsRetryInterval, closeCrewWindow, markCrewWindowShown, readCrewDraft, subscribeCrewDraft, writeCrewDraft, type CrewWindowTarget } from './crewWindowStore'
+import { coverSiblings } from '../../../utils/coverSiblings'
 import { createCrewWindowRenderers, crewWindowSlot } from './crewWindowRenderers'
 import { useCrewWindowModelPicker, type PeerModelFields } from './crewWindowModelPicker'
 import { useCrewWindowAgentMode, type PeerAgentModeFields } from './crewWindowAgentMode'
@@ -147,7 +149,9 @@ export default function CrewChatWindow({ target, onClose = closeCrewWindow }: { 
       if (timer) return
       timer = setTimeout(() => {
         timer = undefined
-        void queryClient.refetchQueries({ queryKey: detailKeyQ }, { cancelRefetch: false })
+        // A read already in flight began before this frame's write, so the
+        // helper owes one more read after it, however many frames ask.
+        refreshDashboardReads(queryClient, detailKeyQ)
       }, REFETCH_THROTTLE_MS)
     }
     const es = new EventSource(crewPeerUrl(instanceId, 'api/stream'))

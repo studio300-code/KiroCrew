@@ -400,6 +400,15 @@ class AcpSessionProvider(LLMProvider):
                         exc_info=True,
                     )
                 raise AcpError(f"failed to re-apply model {prior_model} to fresh session") from exc
+        # Accumulated across the swap: the old session's KAS launch snapshots are
+        # removed by this provider's shutdown, like the new one's.
+        new_handle.kas_launch_snapshots = [
+            *getattr(old, "kas_launch_snapshots", []),
+            *getattr(new_handle, "kas_launch_snapshots", []),
+        ]
+        # The fresh conversation is the same worker's, so its record waits as long as
+        # the previous one's did.
+        new_handle.delete_delay_secs = getattr(old, "delete_delay_secs", 0.0)
         self._handle = new_handle
         # The fresh session launched fresh stubs carrying a fresh token, and
         # nothing has named it: an unnamed token is refused, not resolved from
@@ -426,6 +435,16 @@ class AcpSessionProvider(LLMProvider):
         if self.memory_mode != "persistent":
             self._handle.keep_transcript = False
             self._runtime.recording_allowed = False
+
+    def set_delete_delay(self, seconds: float) -> None:
+        """Keep this session's record for ``seconds`` after it ends, then delete it.
+
+        Takes effect where the runtime can free a session and keep its record
+        (``AcpSessionHandle.destroy``); elsewhere the session ends as before.
+        Set by a workflow worker for its pooled conversations, and carried to the
+        next one by :meth:`new_conversation`.
+        """
+        self._handle.delete_delay_secs = max(0.0, float(seconds))
 
     def set_keep_transcript(self, value: bool) -> None:
         """Mark the underlying session handle to keep (or delete) its
@@ -525,7 +544,27 @@ class AcpSessionProvider(LLMProvider):
         - Parent sessions (owns_runtime=True): kill the entire runtime.
         - Subagent sessions (owns_runtime=False): cancel any in-flight turn,
           then destroy the handle only.
+
+        Either way the local MCP launch snapshots this session's projection wrote
+        go with it (``acp.kas_env_launch``): they hold env values, and a later
+        resume projects and writes new ones. Only the files this session's
+        projections wrote are removed (its registered batch, plus every name the
+        handle recorded before a ``session/load`` hoist and across a handle swap),
+        so another provider of the same session, and every other session, keeps
+        its own.
         """
+        handle = getattr(self, "_handle", None)
+        batch = getattr(handle, "kas_registered_agents", None)
+        written = list(getattr(handle, "kas_launch_snapshots", None) or [])
+        try:
+            await self._shutdown_session()
+        finally:
+            if batch or written:
+                from kiro_crew.acp import kas_env_launch
+
+                await asyncio.to_thread(kas_env_launch.discard_batch, list(batch or []), written)
+
+    async def _shutdown_session(self) -> None:
         if self._owns_runtime:
             # A runtime kill cancels only its reader tasks, so the handle's own
             # in-flight hook executions are stopped here first.

@@ -352,6 +352,11 @@ _CREW_HIDDEN_LEAVES: tuple[str, ...] = (
     # it and the mask would be vacuous for the life of that sandbox, which is
     # precisely the disposition this entry exists to deny.
     "panel-dismissals",
+    # Released sessions whose records wait for deletion (``released_sessions``):
+    # each entry has the gateway delete the record it names, so a sandboxed writer
+    # could forge deletes or drop them. Created on the first release, so it is in
+    # ``_CREW_PRECREATE_HIDDEN_DIR_LEAVES`` too, and in ``_CREW_NO_ALIAS_LEAVES``.
+    "released-sessions",
     # Crewmate teams (``crew_teams.py``): which crewmates are on which team. The
     # same shape as ``crew-panels`` and for the same reason it is not under
     # ``trust/``: a team is the OWNER's grouping, so the crewmates it groups must
@@ -497,6 +502,11 @@ _CREW_READONLY_LEAVES: tuple[str, ...] = (
     # is being prompt-injected through. The read-only mount is the load-bearing
     # half; the shell gate matches no paths.
     "decisions_consent.json",
+    # The owner's Shared Crew preview switch. A writable record lets an
+    # auto-approved agent choose whether the Crew opens to other people on its
+    # next start. The read-only mount is the load-bearing half; the shell gate
+    # matches no paths.
+    "shared_crew_preview.json",
     # The decision log that keystone's feature writes. Sealing the grant and
     # leaving the RECORD writable would be half a control: an agent that cannot
     # switch the seam on can still append a ``kind="feedback"`` line -- the exact
@@ -627,6 +637,12 @@ _CREW_READONLY_LEAVES: tuple[str, ...] = (
     # pi launch path, before the sandbox is built, so a pi session refuses with a message
     # that names the directory it actually resolves.
     "pi-gate",
+    # KAS MCP launch snapshots (``acp.kas_env_launch``): the env values a server's
+    # spec declares, kept off the wire. The launcher a KAS child execs reads them,
+    # so the leaf must stay visible in the sandbox; a write would choose the command
+    # and environment a later server start runs, so it is sealed. Pre-created and
+    # no-follow for the ``pi-gate`` reasons above.
+    "kas-mcp-launch",
     # The app dev-mode AUTHORIZATION record (operator grants binding each dev
     # app to its resolved ui root — see apps/dev_mode.py). Sealing it makes
     # "operator, not agent" kernel-enforced: a sandboxed process cannot mint,
@@ -896,6 +912,7 @@ _CREW_CHILD_WITHHELD_LEAVES: tuple[str, ...] = (
     "computer_use.json",
     "oauth_endpoints.json",
     "decisions_consent.json",
+    "shared_crew_preview.json",
     "ssh_auth_sock_consent.json",
     "credential_redaction.json",
     # The paid-AWS consent grant. Unlike its sibling consent records this one stores
@@ -918,6 +935,9 @@ _CREW_CHILD_WITHHELD_LEAVES: tuple[str, ...] = (
     # one lazily to avoid a load-time cycle, so importing its constant here would
     # close the cycle from the other side. The seal lists above spell it the same way.
     "pi-gate",
+    # KAS MCP launch snapshots hold MCP servers' env values, and only a KAS child
+    # (not an enforced harness's) starts the launcher that reads them.
+    "kas-mcp-launch",
 )
 
 #: Leaves an ENFORCED harness's child MAY read. The other half of the pair above.

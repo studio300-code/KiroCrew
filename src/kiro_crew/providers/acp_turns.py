@@ -21,7 +21,9 @@ from collections.abc import AsyncIterator
 from contextlib import aclosing
 from typing import TYPE_CHECKING, Any
 
+from kiro_crew.acp import relaunch_reload
 from kiro_crew.acp.client import AcpClient, AcpError
+from kiro_crew.acp.launch_tuning import switch_barrier
 from kiro_crew.acp.types import (
     ACP_BACKENDS_KIRO_SLASH_COMMANDS,
     EVENT_COMPACTION_STATUS,
@@ -106,6 +108,9 @@ def _to_llm_event(e: Any) -> LLMEvent:
         # Dropping this would let a READ_ONLY turn on an unproved dsh
         # composition reach the gate's other read-only proofs.
         deepseek_read_only_issue=e.deepseek_read_only_issue,
+        # Dropping this would let a Strands side turn's read-only shell command
+        # reach the gate's shell classifier and run.
+        side_read_only_refusal=e.side_read_only_refusal,
         server_name=e.server_name,
         oauth_url=e.oauth_url,
         subagents=e.subagents,
@@ -165,7 +170,15 @@ async def _ready_confirmed_session(self: AcpProvider) -> None:
     ``AcpClient``, so their paths gain no call or await (harness-parity H13).
     """
     if isinstance(self._client, AcpClient):
-        await self._client.ensure_ready()
+        # A model or effort switch on a launch-time harness holds this lock across
+        # its relaunch (``acp.launch_tuning``): a send waits for it to land rather
+        # than starting a second process inside it, and a switch waits for this start.
+        async with switch_barrier(self._client):
+            await self._client.ensure_ready()
+            # A pending MCP change on a relaunch-reload harness is applied here,
+            # before the prompt and before the confirmation, so the relaunched
+            # session is the one confirmed and prompted. A no-op with no mark set.
+            await relaunch_reload.apply_pending_mcp_relaunch(self._client)
         await self._client.confirm_member_projection()
 
 

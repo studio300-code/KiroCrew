@@ -370,6 +370,7 @@ def test_known_membership_is_unchanged_by_the_move() -> None:
         "muse",
         "opencode",
         "pi",
+        "strands",
     ]
 
 
@@ -772,6 +773,7 @@ def test_honor_zero_tool_ban_membership_matches_the_rule() -> None:
         sdk_backends.ACP_BACKEND_DEEPSEEK,
         sdk_backends.ACP_BACKEND_PI,
         sdk_backends.ACP_BACKEND_MUSE,
+        sdk_backends.ACP_BACKEND_STRANDS,
     }
 
 
@@ -783,7 +785,7 @@ def test_the_knowledge_pool_client_takes_the_default_backend() -> None:
     ``AcpWorker`` constructs its ``AcpClient`` with ``acp_backend=``, and
     ``llm_pool._get_acp_backend`` restricts the value to whatever answers both
     ``honors_zero_tool_ban`` and ``acp_client_spawnable`` True -- today
-    kiro/opencode/goose/deepseek/pi. claude is NOT a member: its routing
+    kiro/opencode/goose/deepseek/pi/strands. claude is NOT a member: its routing
     (``Routing.SEEDED_SETTINGS``) is declared but not enforced by this core, so
     an inherited ``~/.claude`` pre-approval can skip the permission request the
     refusal needs to run. Asking the EFFORT capabilities rather than the identity
@@ -800,6 +802,7 @@ def test_the_knowledge_pool_client_takes_the_default_backend() -> None:
         ACP_BACKEND_MUSE,
         ACP_BACKEND_OPENCODE,
         ACP_BACKEND_PI,
+        ACP_BACKEND_STRANDS,
         ACP_BACKENDS_ACP_CLIENT_SPAWNABLE,
         ACP_BACKENDS_HONOR_ZERO_TOOL_BAN,
     )
@@ -824,6 +827,7 @@ def test_the_knowledge_pool_client_takes_the_default_backend() -> None:
         ACP_BACKEND_DEEPSEEK,
         ACP_BACKEND_PI,
         ACP_BACKEND_MUSE,
+        ACP_BACKEND_STRANDS,
     }, (
         "the set of backends this pool trusts changed -- decide the effort "
         "channel for whichever member is new or missing deliberately, then "
@@ -840,6 +844,10 @@ def test_the_knowledge_pool_client_takes_the_default_backend() -> None:
     # pi carries effort as its ``thought_level`` config option.
     assert capabilities_for(ACP_BACKEND_PI).effort_via_config_option is True
     assert capabilities_for(ACP_BACKEND_PI).effort_via_slash_command is False
+    # Strands takes its model at launch and carries no effort channel at all, so the
+    # pool sends it none: neither the config option nor a slash command.
+    assert capabilities_for(ACP_BACKEND_STRANDS).effort_via_config_option is False
+    assert capabilities_for(ACP_BACKEND_STRANDS).effort_via_slash_command is False
 
 
 def test_effort_via_slash_command_membership_is_the_command_verb_set() -> None:

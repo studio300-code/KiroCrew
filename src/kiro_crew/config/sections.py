@@ -119,6 +119,8 @@ from kiro_crew.config.sections_agent_env import (  # noqa: F401
     CHILD_ENV_DEFAULT_MAX,
     CHILD_ENV_DEFAULT_MIN,
     CHILD_ENV_DEFAULT_NAMES,
+    STRANDS_ENV_NAMES,
+    STRANDS_PROVIDER_CHOICES,
     _agent_env_denied,
     _agent_env_entry_refusal,
     _agent_env_home_override_names,
@@ -129,6 +131,8 @@ from kiro_crew.config.sections_agent_env import (  # noqa: F401
     coerce_child_env_defaults,
     coerce_deepseek_env,
     deepseek_env_plaintext_keys,
+    merge_strands_env_patch,
+    validate_strands_env_patch,
 )
 from kiro_crew.config.sections_agent_fields import (  # noqa: F401
     _AVATAR_EXPRESSION_AXES,
@@ -297,6 +301,8 @@ from kiro_crew.config.sections_limits import (  # noqa: F401
     IDLE_EXEMPT_KEY_MAX_CHARS,
     IDLE_EXEMPT_KEYS_MAX,
     IMPORT_CHUNK_BUDGET_MAX,
+    KAS_DELETE_DELAY_SECS_MAX,
+    KAS_DELETE_DELAY_SECS_MIN,
     MAX_SUBAGENTS_FIXED_FLOOR,
     MCP_PROBE_TIMEOUT_MAX,
     MCP_PROBE_TIMEOUT_MIN,
@@ -356,6 +362,7 @@ from kiro_crew.config.sections_shared_crew import (  # noqa: F401
     SHARED_CREW_BOUNDS,
     SHARED_CREW_EXPOSURE_FLAGS,
     SHARED_CREW_FLAGS,
+    SHARED_CREW_NEEDS_PREVIEW_HELP,
     EffectiveLimits,
     SharedCrewConfig,
     effective_limits,
@@ -408,6 +415,7 @@ from kiro_crew.config.sections_stt import (  # noqa: F401
     warn_deferred_stt_providers,
 )
 from kiro_crew.config.sections_tailnet import (  # noqa: F401
+    TAILNET_OPENING_PATHS,
     TailscaleConfig,
     _tailscale_config_from,
     effective_pin_scope,

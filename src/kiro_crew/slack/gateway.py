@@ -391,9 +391,9 @@ from kiro_crew.platform.update_capability import (
     AutoUpdateEffect,
     auto_update_effect,
 )
+from kiro_crew.platform.update_fetch import fetch_and_pin_upstream
 from kiro_crew.platform.update_governance import (
     commits_ahead,
-    fetch_and_pin_upstream,
     git_command_env,
     hidden_worktree_edits,
     is_primary_branch,
@@ -495,6 +495,10 @@ from kiro_crew.slack.gateway_runtime.cron_dispatch import (
     claim_vet_bound,
     cron_job_env_without_reserved,
 )
+from kiro_crew.slack.gateway_runtime.cron_failure import (
+    _failure_alert_due,
+    _log_held_alert,
+)
 from kiro_crew.slack.gateway_runtime.cron_fire import (
     _annotate_model_downgrade,
     _cron_extra_env,
@@ -552,6 +556,7 @@ from kiro_crew.slack.gateway_runtime.runtime_charge import (
     _apply_gate_verdict,
     _charge_failure,
     _cron_failure_attribution,
+    _streak_after_charge,
 )
 from kiro_crew.slack.gateway_runtime.service_boot import (
     _PROFILE_PROJECTION_POLL_S,
@@ -916,6 +921,8 @@ class GatewayOrchestrator:
     # gateway_runtime/cron_fire.py
     _init_cron = _cron_fire._init_cron
     _cron_capture = _cron_fire._cron_capture
+    _record_bound_script_failure = _cron_fire._record_bound_script_failure
+    _alert_cron_timeout = _cron_fire._alert_cron_timeout
     _resolve_cron_agent = _cron_fire._resolve_cron_agent
     _acquire_with_model_fallback = _cron_fire._acquire_with_model_fallback
     _retained_session_agent_mismatch = _cron_fire._retained_session_agent_mismatch

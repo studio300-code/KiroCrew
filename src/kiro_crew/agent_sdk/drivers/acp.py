@@ -76,6 +76,7 @@ __all__ = [
     "resolve_pin_spelling_on",
     "resolve_usable_model",
     "run_kiro_native_commands",
+    "settings_default_model",
     "drain_skill_view_aliases",
     "skill_view_alias_census",
     "skill_view_sidecar_dirs",
@@ -828,6 +829,41 @@ def self_served_wrong_version(backend: str) -> str:
     return ""
 
 
+def strands_wrong_version() -> str:
+    """The Strands CLI release installed when it is not the verified one, else ``""``.
+
+    Read from the install's own manifest, never by running it. Blocking.
+    """
+    from kiro_crew.acp.client import _resolve_self_served_bin
+    from kiro_crew.acp.harness.strands import strands_installed_version
+    from kiro_crew.agent_sdk.backends import ACP_BACKEND_STRANDS, STRANDS_VERIFIED_VERSION
+
+    binary, _searched_path = _resolve_self_served_bin(ACP_BACKEND_STRANDS)
+    version = strands_installed_version(binary) if binary else ""
+    return version if version and version != STRANDS_VERIFIED_VERSION else ""
+
+
+def strands_python_env_missing() -> tuple[str, str]:
+    """``(component, command)`` when the Strands project's Python environment is absent.
+
+    ``("", "")`` when it is ready. File reads only. The project directory is created
+    on the way, owner-only, which is also what the first spawn would do. Blocking.
+    """
+    from kiro_crew.acp.harness.strands import (
+        strands_project_dir,
+        strands_python_env_issue,
+        strands_python_setup_command,
+    )
+
+    try:
+        project_dir = strands_project_dir()
+    except Exception as exc:  # noqa: BLE001 -- the probe reports, it never raises
+        return f"Strands project directory ({exc})", ""
+    if not strands_python_env_issue(project_dir):
+        return "", ""
+    return "Strands Python environment", strands_python_setup_command(project_dir)
+
+
 def pi_components_resolve() -> tuple[bool, bool]:
     """``(adapter, pi_cli)`` -- the pi backend's two halves, separately.
 
@@ -1156,3 +1192,26 @@ def skill_view_sidecar_dirs() -> tuple[str, str]:
     )
 
     return (str(_projection_metadata_dir()), str(_projection_lease_dir()))
+
+
+def settings_default_model(agent_config: Any, backend: str) -> str:
+    """The model a launch-model harness's own settings name, or ``""`` for ``auto``.
+
+    Such a harness advertises no model list, so this is what its picker offers beside
+    ``auto``: for Strands, ``agent.strands_provider`` + ``agent.strands_model`` as the
+    ``provider/model`` id its launch would pass. A setting the launch would refuse
+    offers nothing here; the session start names it. Never a kiro-cli id.
+    """
+    from kiro_crew.agent_sdk.backends import ACP_BACKEND_STRANDS
+
+    if backend == ACP_BACKEND_STRANDS:
+        from kiro_crew.acp.harness.strands import strands_configured_model
+
+        try:
+            return strands_configured_model(
+                str(getattr(agent_config, "strands_provider", "") or ""),
+                str(getattr(agent_config, "strands_model", "") or ""),
+            )
+        except ValueError:
+            return ""
+    return ""

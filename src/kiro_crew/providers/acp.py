@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, AsyncContextManager
 
 from kiro_crew import _facade_mirror, model_scope  # noqa: F401
+from kiro_crew.acp import relaunch_reload as _relaunch_reload
 from kiro_crew.acp.client import (  # noqa: F401
     DEFAULT_MODEL,
     AcpAuthRequired,
@@ -51,6 +52,7 @@ from kiro_crew.acp.types import (  # noqa: F401
     ACP_BACKEND_KIRO,
     ACP_BACKEND_OPENCODE,
     ACP_BACKEND_PI,
+    ACP_BACKEND_STRANDS,
     ACP_BACKENDS_ACP_RUNTIME,
     ACP_BACKENDS_COMPACT,
     ACP_BACKENDS_CONTEXT_RECYCLE,
@@ -86,6 +88,10 @@ from kiro_crew.acp_backends import POLICY_ID_BY_BACKEND  # noqa: F401
 from kiro_crew.agent_sdk import host_auth
 from kiro_crew.agent_sdk.backend_identity import is_claude_backend_name
 from kiro_crew.agent_sdk.backends import model_registry_namespace  # noqa: F401
+from kiro_crew.agent_sdk.backends import (
+    ACP_BACKENDS_EFFORT_AT_LAUNCH,
+    ACP_BACKENDS_MODEL_AT_LAUNCH,
+)
 from kiro_crew.agent_sdk.capabilities import SessionCapabilities, capabilities_for
 from kiro_crew.agent_sdk.tool_search import (  # noqa: F401
     TOOL_SEARCH_DEFAULT_MIN_PCT,
@@ -596,6 +602,11 @@ class AcpProvider(LLMProvider):
         return self._client.backend == ACP_BACKEND_COPILOT
 
     @property
+    def is_strands_backend(self) -> bool:
+        """True when this ACP provider talks to the Strands CLI (vs kiro-cli)."""
+        return self._client.backend == ACP_BACKEND_STRANDS
+
+    @property
     def is_kas_backend(self) -> bool:
         """True when this ACP provider talks to KAS (kiro-agent)."""
         return self._client.backend == ACP_BACKEND_KAS
@@ -793,9 +804,24 @@ class AcpProvider(LLMProvider):
         """
         return getattr(self._client, "mcp_config_wire_reinject", False) is True
 
+    @property
+    def mcp_config_relaunch_reload(self) -> bool:
+        """True when an MCP write reaches this session by relaunch + ``session/load``.
+
+        Answered for the direct ``AcpClient`` from ``ACP_BACKENDS_MCP_RELAUNCH_RELOAD``
+        membership (harness-parity H6/H14); a runtime-backed provider's inner
+        session provider is not an ``AcpClient`` and answers False.
+        """
+        client = self._client
+        return isinstance(client, AcpClient) and _relaunch_reload.mcp_config_relaunch_reload(client)
+
     def mark_mcp_config_changed(self) -> None:
-        """Hand the mark to the inner session provider; nothing to mark before startup."""
-        mark = getattr(self._client, "mark_mcp_config_changed", None)
+        """Hand the mark to the inner session provider, or set it on the direct client."""
+        client = self._client
+        if isinstance(client, AcpClient):
+            _relaunch_reload.mark_mcp_config_changed(client)
+            return
+        mark = getattr(client, "mark_mcp_config_changed", None)
         if callable(mark):
             mark()
 
@@ -995,6 +1021,15 @@ class AcpProvider(LLMProvider):
         """
         await self._client.new_conversation()  # type: ignore[attr-defined]
 
+    def set_delete_delay(self, seconds: float) -> None:
+        """Keep the session's record for ``seconds`` after it ends, then delete it.
+
+        Only a session on the shared runtime can be released and deleted later,
+        so the per-session client ends its sessions as before.
+        """
+        if isinstance(self._client, AcpSessionProvider):
+            self._client.set_delete_delay(seconds)
+
     def is_alive(self) -> bool:
         """Whether the shared client is responsive.
 
@@ -1027,6 +1062,18 @@ class AcpProvider(LLMProvider):
     def has_active_turn(self) -> bool:
         """True if a prompt is in flight (and not yet cancelled) on the client."""
         return bool(self._client) and self._client.has_active_turn()
+
+    @property
+    def switches_by_relaunch(self) -> bool:
+        """Whether a model or effort change relaunches this session's process (Strands).
+
+        Such a switch either lands on the same chat or raises with the prior values
+        back in force, so a caller answers the raise as a refusal: it keeps the old
+        setting and does not reset the session, which would cold-start on the refused
+        value and fail the same way.
+        """
+        backend = getattr(self._client, "backend", "")
+        return backend in ACP_BACKENDS_MODEL_AT_LAUNCH or backend in ACP_BACKENDS_EFFORT_AT_LAUNCH
 
     def background_launch(self) -> tuple[float, str] | None:
         """The client's newest background launch, or ``None`` (see base)."""

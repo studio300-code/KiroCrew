@@ -1638,6 +1638,22 @@ a file happened to change. A file whose bytes read fine but would not parse is a
 stable fact about those bytes and is still cached. Pinned by
 `test_config_overlay.py::TestConfigOverlayLoad::test_a_transient_base_read_failure_is_not_cached`.
 
+**Derived-value memo** (`config/load_memo.py`). The cache above skips the read and
+validation, but every `load()` still rebuilds each section dataclass with the GIL
+held. A hot path that needs a field or two goes through `load_memo.memoized(name,
+load, derive)`, passing the `KiroCrewConfig.load` its own module binds, which reuses
+`derive(load())` while the config files' fingerprint and the cache's invalidation
+generation are unchanged, and computes afresh whenever that loader is not the
+class's own classmethod (a test double on the class or on the caller's binding). A derive that raises is not remembered, and neither is a value from a load
+with no content digest: a present file that did not read whole falls back to
+defaults under an unchanged fingerprint, so that answer must not outlive the fault
+(the document cache declines it for the same reason). Only values derived from the
+config files belong there. Users: the turn ceiling and the cancel-ack budget in
+`dashboard.turn_dispatch` (read on the event loop at every turn dispatch), the
+transport's prompt-timeout inputs in `acp.client_timeouts.resolve_prompt_timeout`
+(the turn's own limit stays live), and `skills.project_skills_enabled` in
+`skill_trust`. Pinned by `test_turn_path_memos.py`.
+
 **Content provenance on the cache entry.** Beside the `data` dict and its sidecar, each
 cache entry carries a third fact: the digest of the bytes that data was parsed from.
 `load_config_with_content_stamp()` returns a config together with that digest, and
@@ -3271,6 +3287,7 @@ class SessionConfig:
     empty_response_max_continues: int = 1  # how many continue nudges may run back to back before the give-up card (EMPTY_RESPONSE_MAX_CONTINUES_MIN/MAX; load-time clamped to [1, 10] so a hand-edited 0 cannot disable recovery and a large value cannot arm an unbounded ladder). Default 1 keeps the pre-knob behavior byte-identical; above 1 the notice numbers each recovery ("recovery 2 of 3").
     autocompact_pct: float = 70.0  # context usage % at which auto-compaction triggers (DEFAULT_AUTOCOMPACT_PCT). Load-time clamped to [5.0, 90.0] (one constant pair shared with the dashboard write gate)
     pool_size: int = 0             # pre-warmed kiro-cli processes kept ready for instant session start; 0 (the default) disables. Single source of truth: DEFAULT_POOL_SIZE, read by both the field default and load()'s file-parse fallback. Load-time clamped to [0, 10]
+    kas_delete_delay_secs: int = 0  # on kas, seconds a task-runner session's record and a reused workflow worker's previous conversation stay on disk after the session ends, before the released_sessions sweep deletes them; 0 (the default) deletes at once, as does a process the sandbox launched (sandbox_launch_mark). Load-time clamped to [KAS_DELETE_DELAY_SECS_MIN, KAS_DELETE_DELAY_SECS_MAX] = [0, 86400]. Point-of-use reads: open_task_session reads SessionManager._cfg (kept current by the session applier) as each task session opens; the workflow worker reads KiroCrewConfig.load() before each reuse. Needs an engine that advertises sessionCapabilities.close. A record that comes due while another backend is selected waits until kas is selected again. See session.md "Released KAS session records".
     watchdog_rss_max_mb: int = 4096   # DEFAULT_WATCHDOG_RSS_MAX_MB: recycle a session when its process tree RSS exceeds this many MiB; 4096 sits above a healthy tree with many MCP servers (1.4-2.6 GB measured) and still bounds a runaway one; 0 disables; the internal background runtime recycles at BACKGROUND_RSS_FALLBACK_MB (1536), or at this value when it is lower. Busy sessions (turn in flight) are never recycled, and neither is a parent whose sub-agents are still running, queued, or delivering their results on its runtime.
 
 @dataclass

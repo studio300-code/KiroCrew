@@ -28,6 +28,7 @@ from kiro_crew.agent_sdk.backends import (
     ACP_BACKEND_KIRO,
     ACP_BACKEND_OPENCODE,
     ACP_BACKEND_PI,
+    ACP_BACKEND_STRANDS,
 )
 
 # ── Capability: where a harness gets its MCP servers ──
@@ -140,6 +141,14 @@ from kiro_crew.agent_sdk.backends import (
 # The array still carries the stdio elements on the wire because the session report
 # and the mount check read their roster from it, and each transport has exactly one
 # channel that mounts it, so nothing is mounted twice.
+#
+# strands is a member on pi's terms, one step further: the array is composed like
+# every member's, and none of it goes on the wire. The Strands CLI refuses a
+# non-empty ``session/new`` array in its Python-project mode, so the strands launch
+# writes the whole composition to an owner-only ``--mcp-config`` file
+# (``acp.harness.strands``) and the CLI mounts it at start, with its own discovery of
+# other tools' MCP files switched off. Captured as a round trip:
+# ``test/fixtures/acp_frames/strands/mcp-stdio-mount-live.jsonl``.
 ACP_BACKENDS_SESSION_MCP_ARRAY: FrozenSet[str] = frozenset(
     {
         ACP_BACKEND_CLAUDE,
@@ -150,6 +159,7 @@ ACP_BACKENDS_SESSION_MCP_ARRAY: FrozenSet[str] = frozenset(
         ACP_BACKEND_PI,
         ACP_BACKEND_COPILOT,
         ACP_BACKEND_MUSE,
+        ACP_BACKEND_STRANDS,
     }
 )
 
@@ -373,6 +383,12 @@ ACP_BACKENDS_SPEC_SERVERS_OFF_WIRE = frozenset({ACP_BACKEND_KIRO, ACP_BACKEND_KA
 # session's own directory WITHOUT a permission request (measured -- its ``view``
 # ran unasked), so ``_deny_zero_tools`` never sees that call and a total ban cannot
 # be honoured.
+#
+# strands is a member on pi's grounds: Crew's gate module raises an interrupt for
+# EVERY tool call of every Strands ``Agent`` in the process -- built-in, the
+# project's own, vended or MCP -- which the CLI forwards as
+# ``session/request_permission``, so ``_deny_zero_tools`` sees each one; it is
+# mirrored, enforced (``Routing.VERIFIED_GATE_EXTENSION``) and ``AcpClient``-served.
 ACP_BACKENDS_HONOR_ZERO_TOOL_BAN = frozenset(
     {
         ACP_BACKEND_KIRO,
@@ -382,6 +398,7 @@ ACP_BACKENDS_HONOR_ZERO_TOOL_BAN = frozenset(
         ACP_BACKEND_DEEPSEEK,
         ACP_BACKEND_PI,
         ACP_BACKEND_MUSE,
+        ACP_BACKEND_STRANDS,
     }
 )
 
@@ -504,6 +521,35 @@ ACP_BACKENDS_MCP_CONFIG_HOT_RELOAD = frozenset({ACP_BACKEND_KIRO})
 # and load of a resident session with a changed array, so none inherits a skip
 # whose wrong grant leaves a server unmounted with nothing red to say why.
 ACP_BACKENDS_MCP_WIRE_REINJECT = frozenset({ACP_BACKEND_KAS})
+
+# Backends whose RUNNING session takes a changed MCP server set by Crew RELAUNCHING
+# its process with the new launch-time MCP config and ``session/load``-ing the same
+# session id, with the conversation kept. The third way a live session applies a
+# config change without a reset, beside the file watcher
+# (``ACP_BACKENDS_MCP_CONFIG_HOT_RELOAD``) and the re-sent projection
+# (``ACP_BACKENDS_MCP_WIRE_REINJECT``); the dashboard's MCP writers skip their
+# all-sessions reset when every live provider answers one of the three.
+#
+# Membership is a MEASURED relaunch, not a reading of the CLI's flags. The Strands
+# CLI reads its MCP servers once, from ``--mcp-config`` at launch, and refuses a
+# non-empty ``session/new`` array in project mode, so nothing reaches a running
+# process. A SECOND process launched with a changed ``--mcp-config`` and sent
+# ``session/load`` of the same id (empty array) replays the saved conversation,
+# answers ``{}``, and its next turn sees the new set with the earlier turns kept.
+# Captured live on Strands CLI 0.2.3:
+# ``test/fixtures/acp_frames/strands/mcp-relaunch-add-live.jsonl`` (a server
+# added: its tool is offered and completes) and ``mcp-relaunch-remove-live.jsonl``
+# (a server withdrawn: its tool is absent from the offer). Crew performs the relaunch
+# on a client marked by a dashboard MCP write, at that session's next turn
+# boundary and never mid-turn (``acp/relaunch_reload.py``): the stalled-child
+# replacement ``ensure_ready`` already runs for a disposed session
+# (``ACP_BACKENDS_RELOAD_DISPOSED_SESSION``), and the replacement's spawn re-reads
+# the agent spec into a fresh ``--mcp-config`` file.
+#
+# Disjoint from both sets above: the process does not watch a file and takes no
+# projection on a live session; the relaunch is the mechanism, with its own
+# failure mode (a load that falls back to a fresh session).
+ACP_BACKENDS_MCP_RELAUNCH_RELOAD = frozenset({ACP_BACKEND_STRANDS})
 
 # Backends on which a per-template MCP addition reaches a session of a template
 # Crew does NOT own (a third-party or other custom agent) without Crew writing into

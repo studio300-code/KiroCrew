@@ -1,4 +1,6 @@
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useMutation } from '@tanstack/react-query'
 import { ArrowRight } from 'lucide-react'
 
 import { SettingsSection, SettingsCard, SettingsToggle } from '../../components/settings'
@@ -6,7 +8,11 @@ import { FeaturePreviewIntroButton, type FeaturePreviewIntro } from '../../compo
 import { usePreviewFlag, useRemoteCrewChat } from '../../hooks/usePreviewFlag'
 import { clearPreviewFlagWriteError, usePreviewFlagWriteError } from '../../hooks/usePreviewFlagServerSync'
 import ErrorNotice from '../../components/ErrorNotice'
-import { PREVIEW_ARTIFACT_DEPLOY, PREVIEW_CREW_MODE, PREVIEW_CREWMATE_HARNESS, PREVIEW_FOLDER_CONDUCTOR, PREVIEW_LAYOUT_HARNESS, PREVIEW_REMOTE_CREW_CHAT, PREVIEW_SESSION_ENVIRONMENTS, PREVIEW_WEBHOOKS, setPreviewFlag, setRemoteCrewChat } from '../../utils/previewFlags'
+import { Btn } from '../../components/ui'
+import { api } from '../../api/client'
+import { ApiError } from '../../api/apiError'
+import { useSharedCrewPreviewSetting } from './sharedCrewPreviewSetting'
+import { PREVIEW_ARTIFACT_DEPLOY, PREVIEW_CREW_MODE, PREVIEW_CREWMATE_HARNESS, PREVIEW_EXPLORE, PREVIEW_FOLDER_CONDUCTOR, PREVIEW_LAYOUT_HARNESS, PREVIEW_REMOTE_CREW_CHAT, PREVIEW_SESSION_ENVIRONMENTS, PREVIEW_WEBHOOKS, setPreviewFlag, setRemoteCrewChat } from '../../utils/previewFlags'
 import ErrorBoundary from '../../components/ErrorBoundary'
 import { KasBundleCard } from '../developer/KasBundleCard'
 import { KIRO_SIGN_IN_BACKEND } from '../developer/kiroSignInLink'
@@ -114,6 +120,7 @@ function previewFlagLabel(flag: string): string {
     case PREVIEW_ARTIFACT_DEPLOY: return i18nT('pages.developer.featurePreviewsTab.artifact_deploy')
     case PREVIEW_WEBHOOKS: return i18nT('pages.developer.featurePreviewsTab.webhooks')
     case PREVIEW_CREW_MODE: return i18nT('pages.developer.featurePreviewsTab.crew_mode')
+    case PREVIEW_EXPLORE: return i18nT('pages.developer.featurePreviewsTab.explore')
     case PREVIEW_REMOTE_CREW_CHAT: return i18nT('pages.developer.featurePreviewsTab.chat_on_a_crew')
     case PREVIEW_LAYOUT_HARNESS: return i18nT('pages.developer.featurePreviewsTab.layout_harness')
     case PREVIEW_FOLDER_CONDUCTOR: return i18nT('pages.developer.featurePreviewsTab.folder_conductor')
@@ -134,6 +141,10 @@ function previewFlagLabel(flag: string): string {
  * pose as a schema path.
  */
 export const FEATURE_PREVIEWS_HIGHLIGHT_ANCHOR = 'feature-previews-section'
+
+/** Millisecond bound matching Tailnet's cold-restart allowance. */
+export const SHARED_CREW_RESTART_VERIFY_TIMEOUT_MS = 60_000
+
 export function FeaturePreviewsSection() {
   const navigate = useNavigate()
   const artifactDeploy = usePreviewFlag(PREVIEW_ARTIFACT_DEPLOY)
@@ -144,7 +155,46 @@ export function FeaturePreviewsSection() {
   const crewmateHarness = usePreviewFlag(PREVIEW_CREWMATE_HARNESS)
   const sessionEnvironments = usePreviewFlag(PREVIEW_SESSION_ENVIRONMENTS)
   const crewMode = usePreviewFlag(PREVIEW_CREW_MODE)
+  const explore = usePreviewFlag(PREVIEW_EXPLORE)
   const writeError = usePreviewFlagWriteError()
+  const [gatewayRestarting, setGatewayRestarting] = useState(false)
+  const [restartFailed, setRestartFailed] = useState(false)
+  const sharedCrewPreview = useSharedCrewPreviewSetting({ poll: gatewayRestarting })
+  const sharedCrewSetting = sharedCrewPreview.setting
+  // The stored choice and what this gateway started with disagree: a restart applies it.
+  const sharedCrewNeedsRestart = !!sharedCrewSetting && (sharedCrewSetting.restart_required
+    || (!sharedCrewSetting.env_override && sharedCrewSetting.enabled !== sharedCrewSetting.active))
+  // A dropped restart response is ambiguous until the setting can be read back.
+  const restartGateway = useMutation({
+    mutationFn: () => api.restartGateway(),
+    onMutate: () => setRestartFailed(false),
+    onSuccess: () => setGatewayRestarting(true),
+    onError: (e: unknown) => {
+      if (e instanceof ApiError) {
+        setGatewayRestarting(false)
+        setRestartFailed(true)
+      } else {
+        setGatewayRestarting(true)
+      }
+    },
+  })
+
+  useEffect(() => {
+    if (!gatewayRestarting) return
+
+    const timeoutId = window.setTimeout(() => {
+      setGatewayRestarting(false)
+      setRestartFailed(true)
+    }, SHARED_CREW_RESTART_VERIFY_TIMEOUT_MS)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [gatewayRestarting])
+
+  useEffect(() => {
+    if (sharedCrewNeedsRestart) return
+    setGatewayRestarting(false)
+    setRestartFailed(false)
+  }, [sharedCrewNeedsRestart])
   // The KAS engine card is for a deployment that can select KAS at all: the same
   // gate its old mount used, read from the schema's `agent.acp_backend` enum. An
   // unanswered schema hides nothing, as on the harness tab.
@@ -262,6 +312,51 @@ export function FeaturePreviewsSection() {
           onChange={v => setPreviewFlag(PREVIEW_CREW_MODE, v)}
         />
       </SettingsCard>
+      {/* Explore (flag key `mc-preview-explore`): the top-bar pill, its sheet,
+          the milestone notice, the Try today card and Display > Explore. A
+          plain switch, like Ultra Mode's; on, Display > Explore is the inner
+          switch. */}
+      <SettingsCard>
+        <SettingsToggle
+          label={i18nT('pages.developer.featurePreviewsTab.explore')}
+          description={i18nT('pages.developer.featurePreviewsTab.explore_desc')}
+          checked={explore}
+          onChange={v => setPreviewFlag(PREVIEW_EXPLORE, v)}
+        />
+      </SettingsCard>
+      {/* Shared Crew (People, invites, shared sessions). Unlike the flags above, the
+          switch is not a browser setting: it is the owner's stored choice behind
+          `/api/shared-crew/preview` (a keystone file), which the gateway reads at
+          start, so a change waits for a restart. No `configKey` and no
+          `previewFlags.ts` entry for that reason. The card shows whether or not the
+          People tab does; a gateway without the route, or a caller who is not the
+          owner, gets no card. */}
+      {sharedCrewPreview.visible && (
+        <SettingsCard>
+          <SettingsToggle
+            label={i18nT('sharedCrew.preview_title')}
+            description={i18nT('sharedCrew.preview_desc')}
+            checked={!!sharedCrewSetting && (sharedCrewSetting.env_override || sharedCrewSetting.enabled)}
+            disabled={!sharedCrewSetting || sharedCrewSetting.env_override || sharedCrewPreview.saving}
+            onChange={sharedCrewPreview.set}
+          />
+          {sharedCrewSetting?.env_override && (
+            <p className="text-[12px] text-muted pt-1" data-testid="shared-crew-preview-env">{i18nT('sharedCrew.preview_env_on')}</p>
+          )}
+          {sharedCrewNeedsRestart && (
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pt-1" data-testid="shared-crew-preview-restart">
+              <span className="text-[12px] text-warn">{i18nT('sharedCrew.preview_restart_notice')}</span>
+              <Btn onClick={() => restartGateway.mutate()} disabled={restartGateway.isPending || gatewayRestarting} data-testid="shared-crew-preview-restart-button">
+                {restartGateway.isPending || gatewayRestarting ? i18nT('sharedCrew.preview_restarting') : i18nT('sharedCrew.preview_restart')}
+              </Btn>
+            </div>
+          )}
+          {/* The hand-off is safe here: the section holds no draft input. */}
+          {sharedCrewPreview.loadError && <ErrorNotice variant="inline" askAgent message={i18nT('sharedCrew.preview_load_failed')} testId="shared-crew-preview-load-error" />}
+          {sharedCrewPreview.saveFailed && <ErrorNotice variant="inline" askAgent message={i18nT('sharedCrew.preview_save_failed')} testId="shared-crew-preview-save-error" />}
+          {restartFailed && <ErrorNotice variant="inline" askAgent message={i18nT('sharedCrew.preview_restart_failed')} testId="shared-crew-preview-restart-error" />}
+        </SettingsCard>
+      )}
       {/* A chat dispatched to another MACHINE over the instances tunnel.
 
           ONE card for both halves of that feature: starting a chat on a crew and

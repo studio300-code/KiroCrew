@@ -211,33 +211,42 @@ entry would exceed 1024 checkpoints, so an entry's size is capped regardless of
 transcript length. A file-stamp or invalidation-generation change makes the
 cached entry unusable; an exact revision reuses it. The next scan then either
 starts at byte zero or resumes from the last complete scan: the projection keeps
-that scan (`_page_index_base`: device, inode, the record boundary it stopped at,
-a blake2b digest of the 4 KiB before the boundary, the row count and the
+that scan (`_page_index_base`: the first line's length, the record boundary it
+stopped at, a blake2b digest of three 4 KiB body windows -- the start of the body,
+the last checkpoint and the bytes before the boundary -- plus the byte before and
+the 64 bytes after EVERY checkpoint, the row count and the
 checkpoints) across invalidation, because `ConversationLog.append` invalidates on
-every write and the file only grows by appends. The scan resumes only when the
-open handle it is about to read has the same device and inode, is at least as long
-as the boundary (equal means nothing was appended, and nothing is scanned), and has
-the same digest before the boundary; it then scans only the appended rows. A final
-row without a line terminator is never used as a boundary.
+every write and the file only grows by appends. The base is identified by content,
+never by inode (`history_page_index.relocate`): the open handle it is about to read
+is checked with every offset moved by the first line's change in length, must reach
+the moved boundary (equal means nothing was appended, and nothing is scanned), and
+must hash to the saved digest there; the scan then covers only the rows after the
+boundary. A final row without a line terminator is never used as a boundary. When
+the first line is itself a row (a legacy file with no metadata line) it is part of
+the digested body, and a change to its length refuses the base.
 
-The base also survives a restart and a first-line rewrite
+The base also survives a restart, a copy and every rewrite that keeps the rows
 (`kiro_crew.history_page_index`). For a transcript of 256 KiB or more it is
-persisted to `<transcripts>/.page-index/<file>.json` after a build, and again after
-each further 256 KiB; a read with no usable in-memory base loads it, checks its
-shape, and applies the same handle re-check, so a stale or damaged sidecar costs one
-rebuild and never a wrong page. `delete_session` removes it. The metadata-line
-writers (`update_metadata`, `clear_closed`, `mark_consolidated`,
-`advance_consolidation_sub_offset`) replace the file through `atomic_write` (a new
-inode) and then move the base onto the new file, shifting every offset by the first
-line's change in length, only when that is proven: both first lines end in a
-newline, the bytes after them are the same length in both files (which rules out a
-text read's newline translation), the base names the old file with every offset past
-its first line, and the 4 KiB before the moved boundary in the new file hash to the
-saved digest. Compaction, rotation and body rewrites change rows, so they rebuild
-from byte zero. The premise is that
-product writes are `O_APPEND` appends or atomic replaces; an in-place edit that
-keeps the inode and the 4 KiB before the old end and also lengthens the file would
-not be noticed. A key with
+persisted to `<transcripts>/.page-index/<file>.json` (format version 2) after a
+build, again after each further 256 KiB, and whenever the base no longer extends
+the one this process last wrote; a read with no usable in-memory base loads it,
+checks its shape, and applies the same relocation check, so a stale, damaged or
+version-1 sidecar costs one rebuild and never a wrong page. `delete_session`
+removes it. Because the check follows the rows, no writer has to move the base: the
+metadata-line writers (`update_metadata`, `clear_closed`, `mark_consolidated`,
+`advance_consolidation_sub_offset`), the dashboard's full save (which rewrites the
+whole file through `atomic_write` behind a new first line on every flush), a copy of
+the data home and a restore all resume. An inode-keyed base failed every one of
+those, which on a live data home left most large transcripts framing from byte zero
+on their first page after a restart. Compaction, rotation and body rewrites that
+change a row's length move the windows after it off their expected offsets, so they
+rebuild from byte zero; the per-checkpoint windows matter for a rewrite whose length
+changes cancel out before the end, which would otherwise leave the end windows in
+place while every checkpoint between the edits points at the wrong row
+(`test_interior_row_length_changes_that_cancel_out_are_rescanned`). Not noticed: a
+rewrite that changes rows outside all those windows while keeping every row's length,
+which leaves the offsets correct and only the row count at risk if a row's validity
+changed. A key with
 no transcript file is a stable empty revision (`total=0`); any other stat error
 propagates rather than reading as empty.
 The index is built lazily by the first paginated read of a revision (one O(rows)
@@ -266,6 +275,14 @@ so the endpoint never returns a mixed revision. Indexed reads use the strict fra
 (`strict_raw_records_with_offsets`): a record over `RECORD_CAP` raises instead of
 being skipped, because a skipped row would shift every cursor above it; the
 endpoint then serves the request from the full reader, which has no per-record cap.
+The framer (`jsonl_util._frames_with_offsets`) reads the handle in 1 MiB chunks
+(`_FRAME_CHUNK`) and serves its line requests from them, so a scan drops and
+retakes the GIL once per megabyte rather than once per line; while turns and
+searches run Python threads in the same process, each retake can cost a switch
+interval, and per-line reads made a cold page read of a 20 MB transcript take about
+50 times longer than it does alone. Framing and offsets are unchanged; a caller that
+stops early finds the handle up to one chunk further on, which is why every caller
+takes positions from the yielded offsets.
 
 `ConversationLog.read_messages_chained_tail(key, limit)` answers the newest *limit*
 rows of `read_messages_chained` without building that index: it reads the end of
@@ -539,16 +556,17 @@ mode, so a restricted transcript is cached and paged like any other.
 ### Warm task brief rows
 
 A return-triggered task summary stores one hidden `notice` claim followed by
-ordinary `assistant` rows. `warm_task_brief_claim` contains only the fingerprint
+ordinary `assistant` rows. `warm_task_brief_claim` contains only the fingerprint and the ledger digest
 and is suppressed by transcript renderers. Its `ts` also counts as owner
-presence when the next return measures time away. The deterministic opener row and
-the model-written result carry normal mate message roles and classes. The
+presence when the next return measures time away. The one result row (the
+model-written brief, the fixed quiet line, or the fixed failure line) carries
+normal mate message roles and classes; older builds also wrote a deterministic
+opener row (`warm_task_brief_preparing`), which still reads as a brief row. The
 result row's `meta.brief` holds the validated, redacted fields (`status`,
 `headline`, `asked`, `remaining`, `done`, `needs_you`, `next`, `extra`, `body`,
-an optional HTML `widget`, and the gateway-counted `progress`; an older row holds `asked`, `now`, `needs_you` and
-`next`) that the transcript draws as a fixed plain-text card; its
-`content` is the same brief as plain text, for export and any reader without
-the card.
+an optional HTML `widget`, and the goal-scoped `progress`; an older row holds `asked`, `now`, `needs_you` and `next`) that the
+transcript draws as a fixed card; its `content` is the same brief as plain
+text, for export and any reader without the card.
 Their metadata marks them only for fingerprint and model-input
 exclusion. They remain ordinary visible chat messages but are excluded from
 model replay, session-summary extraction, and their own task fingerprint. The
@@ -835,6 +853,7 @@ Per-thread JSONL files at `~/.kiro/crew/sessions/{safe_key}.jsonl`. First line i
 - Forge references (pull requests, merge requests, issues) are a query dimension of their own, because one item has several written spellings and a transcript carries whichever one its author used. A term naming an item — `#4411`, `PR #4411`, `pr 4411`, `pull request 4411`, `pr4411`, `pull/4411`, a full PR/MR URL, `owner/repo#4411` — becomes ONE required needle carrying every spelling of that item (`SearchNeedle.alts`, counted by the shared `count_needle`), so any spelling finds every spelling. The words that introduce the number are dropped from the gate: they are not part of the reference, and requiring the literal "pr" would disqualify a transcript that names the item only by URL. Spellings are `digit_bounded` on both sides, so `#4411` matches neither `#44110` nor the run id `1544110293`. The TYPED sigil decides the family, never a word before it: `mr#12` is read as `#12`, because letting the word win produced a reference none of whose spellings was the string the user typed. Coverage of every accepted shape is pinned by a property test that drives each one against a transcript quoting it verbatim, rather than by inspection of the spelling list. GitHub's pull/issue sequence is shared (`#4411` ≡ `/pull/4411` ≡ `/issues/4411`) while GitLab numbers merge requests separately, so `!12` and `#12` stay distinct families and never match each other; bare `merge` is not a GitLab word (GitLab is `MR 12` / `merge request 12` / `!12`). Plain digits remain one of the spellings exactly when the QUERY typed no sigil (`issue 42`, `PR 4411`, `pr4411`): such a query would otherwise lose a gate on the digits, so dropping them would HIDE the transcript that says "we hit issue 42 in prod", and keeping them makes the recall of the literal AND it replaces hold with ONE intended exception — a session whose only claim to the old match was the digits sitting inside a longer number, which is what the boundary exists to exclude. The LEFT edge of that boundary applies only to a spelling that starts with a digit: for a delimited spelling the character before it says nothing about the number's length, and demanding a non-digit there would refuse `#4411` inside `owner/repo2#4411` — a repo whose name ends in a digit, matched against the very reference the query named. Only a lead-in run that actually NAMES a type turns a following number into a reference: `pr 4411`, `issue 42`, `pull request 4411` and `merge request 12` (the two-word GitLab form) do; `requests 12` and `merge 1234` do NOT and stay literal terms, since dropping such a word from the gate would trade a real term for every session mentioning that number. A query that DID type a sigil never gated on bare digits, so it keeps them out and stays precise (a standalone "12" is ordinary prose). A BARE number with no naming word is not a reference at all: it keeps its plain substring needle — numeric content search (ports, error codes, run ids) is unchanged — and gains the spellings as scoring-only needles at `_FORGE_REF_WEIGHT`, so the session that references the pull request outranks one that merely contains those digits. Those ranking needles are NOT adjacency evidence (`SearchNeedle.adjacency`, which only CJK bigrams set), or they would arm the adjacency floor and turn a ranking hint into a hidden gate. Two limitations are accepted rather than special-cased, both needing a query nobody writes and both only widening the result set: a chain-only word wedged between the type word and the number (`issue merge 42`) is swallowed, and because the gate is keyed by term text a query repeating a suffix word as its own term (`pull the pull request 12`) loses that term. Closing either means keying the gate by token position instead of by text. Expansions per query are capped at `_SEARCH_MAX_FORGE_REFS`, each costing one scan per spelling per scanned session (up to eight for a named reference, up to thirteen for a bare number's both-families ranking needle, plus up to eight more for a registered provider's own prefixed id — see below); a token past the cap degrades to a plain needle.
 - A REGISTERED source provider contributes its OWN id spellings through the same machinery, so an edition whose reviews are written `REV-987654321` is searchable without any provider vocabulary in core. The seam is one optional plugin hook, `search_ref(token) -> (canonical, alts) | None` on `SourceProviderPlugin`, discovered with `getattr` exactly like `path_markers()`; `source_search_ref()` fans out across the registered plugins (asking each registered plugin until one answers, then handing that answer through unjudged — shape is the normalizer's job, and skipping a malformed answer would only serve the same two-registrant case the merge below is declined for), and `register_source_provider()` publishes that collector DOWNWARD into `history_search.register_search_ref_resolver` at registration time — never from a route handler, because `parse_search_query` is also reached from paths that serve no HTTP (the Discord title-only resume gate, the `kirocrew memory search` CLI) and a process that never ran a route would otherwise answer the same query differently. One slot holds the resolver, not a list: the per-plugin fan-out already lives in the collector. The FIRST plugin to recognize a token WINS, for every token shape: a prefixed id names ONE item, so merging would conflate distinct items, and a cross-plugin merge for a bare number would exist only to serve two registrants holding a real item at the same number — which this repo, registering no provider at all, cannot produce. Cost stays bounded in ONE place: `_MAX_SEARCH_REF_SPELLINGS` (8, sized to the sibling per-plugin `_MAX_PLUGIN_PATH_MARKERS` because it bounds the same kind of thing — what ONE plugin hands core for one lookup) bounds the single answer that arrives, with no collector-side ceiling to drift from it. A bare number is NOT a provider token at all: a provider's ids are prefixed, so a run of digits names nothing it owns and the resolver is not consulted for one. `_provider_search_ref` is the single normalizer — it casefolds every spelling (the query is casefolded before parsing and `count_needle` requires already-folded needles, so a capitalized spelling produces a needle that matches NOTHING, silently), de-duplicates, drops empties, applies the fan-in ceiling, and DROPS an answer none of whose spellings carries the typed token, since such an answer describes some other item and would otherwise rank a query on text it never named. Every way a resolver can fail is contained and costs no more than a debug log — carrying a traceback where an exception was raised, and the offending value where a shape was merely wrong, so none of them is silent: raising when called, returning a malformed answer, and raising while its `alts` are READ — the hook promises a `Sequence`, which cannot do that, but a resolver ignoring the contract can, so the read sits inside the same boundary and the answer is dropped WHOLE rather than half-read, since an exception there would otherwise escape the parse as a 500 on every search. A provider is consulted only for a token no built-in shape recognized (built-ins always win), contributes SPELLINGS ONLY and never lead-in vocabulary (the words a provider would want — "review", "cr" — are common English, so admitting them would trade a real search term for every session mentioning that number), and can never gate a BARE all-digit token, which it is never even asked about — so no number of registered providers can spend the `_SEARCH_MAX_FORGE_REFS` budget on one numeric token. The purity contract — pure, allocation-cheap, no I/O — is documented and not enforced: a resolver is consulted for every term of every query and the parse runs at least twice per search, so a blocking resolver becomes per-keystroke latency in the search box.
 - `_read_messages` — identity-guarded message cache with the same double-checked, miss-only locking `_folded_content` uses for this identical race. A warm hit is served lock-free; only a MISS takes the session's in-process writer lock (`_file_lock`) and re-checks identity + cache under it. The identity `(st_mtime_ns, st_ctime_ns, st_size, st_ino)` changes on the normal atomic rewrite even when housekeeping restores the previous mtime, so a stale cache entry cannot remain current. ON the event loop the lock is acquired non-blockingly and a busy lock falls back to an unlocked fill, so an on-loop read never stalls behind a writer holding the RLock across its cross-process flock wait (`_FLOCK_ACQUIRE_TIMEOUT_S`). An unlocked fill publishes through two witnesses: a per-key invalidation **generation** covering local writers and a cross-process **flock-hold witness** covering external processes (`_flock_hold_witness`: publish only while this process provably held the sidecar flock for the whole fill window). A fill that cannot prove its window clean is discarded. Every transcript memo (`_msg_cache`, `_meta_cache`, `_recent_cache`, `_folded_cache`, and `_snippet_cache`) records identity and generation; a warm hit requires both, so a write through another `ConversationLog` instance also invalidates it through the process-wide generation table keyed by `(transcript dir, sanitized filename stem)`, with canonical and legacy Slack spellings closed over bidirectionally (`_cache_key_identities`).
+- `_msg_cache` is bounded by weight as well as entry count: each entry weighs its transcript's file size times `_PARSED_BYTES_PER_FILE_BYTE` (2, measured 1.58–2.34 on the five largest real transcripts), and the LRU evicts until the total fits `_TRANSCRIPT_CACHE_MAX_BYTES` (32 MiB). A count bound alone let a few multi-ten-MiB transcripts hold 210 MiB of parsed rows (tracemalloc, live data copy). A transcript heavier than the whole budget is never cached, so a full read of one re-parses it.
 - `delete_session(key)` — permanently removes a session JSONL file. Dashboard
   deletion may tear down the exact live slot and idle SessionManager generation
   captured before unlink, but it preserves chat pins, work ledgers, and
@@ -2296,6 +2315,11 @@ writer:
 
 Background task that fires once a session's message count reaches
 `_CONSOLIDATION_THRESHOLD` (30) messages past its last consolidation offset.
+A preference-only pass whose result is discarded because the user spoke while
+the model read the window (`_CONSOLIDATION_STALE`, "conversation changed during
+extraction") keeps the window pending and waits
+`_CONSOLIDATION_STALE_RETRY_SECS` (300 s) before the next turn may start another,
+so a live chat does not start and bill a discarded pass on every turn.
 Global history extraction uses its own lazily created `_consolidate` session to extract:
 - `history_entry` → appended to today's daily history file
 - `preferences_update` → overwrites `preferences.md` if changed
@@ -2769,7 +2793,13 @@ with the previewed row, so roster recency ordering is unaffected.
 After a cancelled turn, `context.build_cancelled_turn_preamble` reads the
 cancelled user prompt and partial assistant output from this log and
 prepends them to the next prompt as a bracketed preamble, because kiro-cli
-discards cancelled turns from its own ACP conversation log. The flag
+discards cancelled turns from its own ACP conversation log. A mid-turn steer
+(a `user` row marked `meta.steer`) is not taken as the cancelled prompt: the
+plain `user` row that opened the turn is, and each steer the turn took is
+carried, labelled and in order, inside the partial assistant output, outside the
+cap on the assistant text. A steer marked `requeued` is left out, because it
+runs as the next prompt (see "Context restore after a soft cancel" in
+`docs/architecture/design-notes/soft-stop.md`). The flag
 `_Session.prev_turn_cancelled` (set by `SessionManager.stop_turn` on
 soft-cancel success) gates the one-shot re-injection.
 

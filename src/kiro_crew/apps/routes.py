@@ -258,6 +258,10 @@ def register_app_routes(app: web.Application) -> None:
     app.router.add_get("/apps/{name}/art/{path:.*}", handle_app_art_file)
     # Reverse proxy: dashboard app UI → app backend (same-origin, avoids CORS)
     app.router.add_route("*", "/apps/{name}/api/{path:.*}", handle_app_api_proxy)
+    # App frames (every frame-backed point): the sandboxed document, its mint and its fetch.
+    from kiro_crew.apps.app_frame import register_app_frame_routes
+
+    register_app_frame_routes(app)
 
 
 # This module keeps only the route table. It is the facade of the app management route
@@ -298,6 +302,9 @@ _sys.modules[__name__].__class__ = _facade_mirror.MirroredModule
 __all__ = sorted(n for n in set(globals()) | set(_EXPORTS) if not n.startswith("_"))
 
 if TYPE_CHECKING:  # every owner-defined name in _EXPORTS, for type checkers and IDEs
+    from kiro_crew.apps.point_grants import (  # noqa: F401
+        point_grant_families,
+    )
     from kiro_crew.apps.routes_art import (  # noqa: F401
         _BLOB_FETCH_SEMAPHORE,
         _BLOB_FETCH_TIMEOUT,

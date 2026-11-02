@@ -74,6 +74,30 @@ can reorder strictness or redefine matching):
   collapses a leading `//` to `/` (POSIX leaves a two-slash prefix
   implementation-defined and `normpath` preserves it, so `//etc/passwd` would
   otherwise dodge a `/etc/**` deny while the OS opens `/etc/passwd`).
+  On a **Windows** gateway the item comes out of `abspath` with `\` and a drive,
+  while a pattern is written with `/` (`~/.ssh/**` even expands to
+  `C:\Users\u/.ssh/**`), and a directory usually opens a name whatever its case.
+  So there a separator the pattern writes outside a bracket expression also
+  meets the other separator (`_match_local_path`, `_windows_glob`), and in a
+  **deny** pattern only, an ASCII letter also meets its other case
+  (`_match_denied_path`, served to `ScopedRuleset.permits` through
+  `_DENY_MATCHERS`). An allow compares case as written: a directory can be case
+  sensitive (`fsutil file setCaseSensitiveInfo`, no elevation needed), and there
+  `private` and `Private` are two directories, so an allow that folded case
+  would admit the one the operator did not name, while a deny that folds case
+  refuses at most an extra directory. Nothing else changes: the item is matched as written, and a
+  bracket expression, `?` and `*` read it as on POSIX. Rewriting the pattern
+  would change what a bracket expression covers (lower-casing turns `[A-z]`,
+  which covers `_`, into `[a-z]`; `/` for `\` turns `[\-z]` into `[/-z]`, which
+  covers the digits). The case fold is ASCII-only because Unicode simple case
+  folding pairs letters NTFS keeps apart (`I`/`İ`, `k`/Kelvin `K`, `s`/`ſ`), so a
+  full fold would refuse a name no spelling of the deny opens; a non-ASCII
+  letter in another case matches only as written. The pattern is never
+  `normpath`'d. Each Windows reading is an OR beside the as-written comparison,
+  so no deny loses a path that comparison covers, and a negated class (`[!a-z]`)
+  stays as case sensitive as the as-written match. Compared as written only, a `~/.ssh/**` deny matched no path
+  at all there. A pattern rooted without a drive (`/data/**`) still never
+  meets an item, which `abspath` gives a drive. POSIX is unchanged.
 
   **Path matcher — lexical-only contract.** The `path` matcher does **not**
   resolve symlinks (no `realpath`): a symlink lexically inside an allow-prefix
@@ -187,11 +211,12 @@ is kept. Over a profile this is a no-op, because a profile cannot carry posture.
 Everything outside `controls` stays the
 **authority's** — identity, signature state, tier and the `updates` *commands* — so a
 subordinate document cannot relabel whose ceiling this is or supply a command the
-gateway would run unsandboxed. The two `updates` pins that are themselves restrictions
-fold instead (`_intersect_update_pins`): `updates.source` is an allowlist and
-`updates.min_version` a floor, so a subordinate that sets one the authority left empty
-narrows the ceiling and keeps it; where both set one, the authority's source stands and
-the higher floor wins. Keeping "the authority's" there would have voided a pure
+gateway would run unsandboxed. The `updates` pins that are themselves restrictions
+fold instead (`_intersect_update_pins`): `updates.source` is an allowlist,
+`updates.min_version` a floor and `updates.unattended_apply` a switch whose `false`
+restricts, so a subordinate that sets one the authority left empty narrows the ceiling
+and keeps it; where both set one, the authority's source stands, the higher floor
+wins, and either tier's `false` stands. Keeping "the authority's" there would have voided a pure
 tightening — an empty source pin permits any remote, so a central document silent on
 updates plus a local source pin would have composed to "install from anywhere". Two
 things follow a declared-wins rule instead, because for them "the authority's" is only
@@ -374,9 +399,19 @@ every wheel apply checks the pin again under the update lock before downloading
   overrides each non-empty field it sets. Any command in any entry selects the
   provider on every host, so a host whose platform has no command then never
   checks or applies.
+- **`unattended_apply`** — a JSON boolean; absent or `null` reads `true`. `false`
+  stops the gateway installing an update by itself on every install shape,
+  whatever the user's `auto_update` says: the check still runs, the badge still
+  lights, and a person's Update applies it. `auto_update_effect` answers `notify`
+  but keeps the route, so the provider path still reads `can_apply` off it and
+  About keeps its Update button (see [cli](cli.md)). Each routine install reads
+  the pin again at its last step before it changes anything, so a policy
+  installed while the update waited still decides. A build below `min_version`
+  still takes its mandatory update, because the floor is the stronger pin. A
+  string such as `"false"` fails the load rather than reading as on.
 
-These five are the only keys `updates` accepts (`UpdatePins.from_dict`). Any
-other key, or a non-string value, **fails closed** (`_reject_unknown_keys`); what
+The bullets above name every key `updates` accepts (`UpdatePins.from_dict`). Any
+other key, or a value of the wrong type, **fails closed** (`_reject_unknown_keys`); what
 an unparsable file does at boot is in [Loading + precedence](#loading--precedence).
 The desktop marker's camelCase names (`checkCommand`, `updateCommand`) are
 **not** valid here.
@@ -419,7 +454,9 @@ boundary against a local operator who could edit the checkout directly.
 **Roll the build before the pin.** The parser fails closed on an unknown key, so a
 build predating `updates` refuses to boot on a pinned policy — which inverts the
 `min_version` case, since the stale hosts a floor targets are exactly the ones
-that would stop booting. Recovery is a manual `kirocrew update`.
+that would stop booting. Recovery is a manual `kirocrew update`. The same holds
+for a key added later: a build predating `unattended_apply` refuses a policy that
+sets it.
 
 ## Central distribution (`distribution`) — policy-only
 
@@ -543,7 +580,9 @@ in an oss build). One fetch is the Kiro control plane's
   an accepted residual.
 - **Signing in first.** `kirocrew kas login`, `whoami`, `logout` and `route` (the
   read-only lookup a remote sign-in runs first) run when the policy load fails, so the
-  sign-in the fetch needs can be created. Every other command still exits.
+  sign-in the fetch needs can be created. A `gateway` start whose load failed only
+  because nobody is signed in serves the sign-in-only app (platform-context.md,
+  "Enterprise gate"), then exits 0 so the next start loads the rules. Every other command still exits.
 
 A test address needs its own build.
 
@@ -3222,14 +3261,15 @@ rewrite its own ceiling in any sandbox mode), the row is a control the running a
 cannot undo.
 
 Consulted at **four** chokepoints — the derivation, the publish action, and every
-write path to `dashboard.tailscale.enabled`; any one alone would be a
-half-control:
+write path to a tailnet-opening key (`sections_tailnet.TAILNET_OPENING_PATHS`:
+`dashboard.tailscale.enabled`, `dashboard.tailscale.trust_identity` and
+`dashboard.shared_crew.tailnet_direct`); any one alone would be a half-control:
 
 | Chokepoint | Pinned-off behavior |
 |---|---|
 | `tailnet.resolve_tailnet_host()` | Contributes no origin **and does not spawn the CLI**, so the pin closes both halves an administrator objects to. Checked ahead of the daemon call |
 | `tailnet_serve.publish()` | Refuses to run `tailscale serve`, so the dashboard is never put on the tailnet in the first place. Checked before the spawn — refusing after publishing would be theatre |
-| `PATCH /api/config/kirocrew` (`handlers/core_config_patch.py`) | **403** on `dashboard.tailscale.enabled=true` |
+| `PATCH /api/config/kirocrew` (`handlers/core_config_patch.py`) | **403** on any `TAILNET_OPENING_PATHS` key set to `true`, with a `governance_decision` SEL row (`config_patch_dashboard_tailnet`) |
 | `kirocrew config set [--local] …` (`cli_config.py`) | Exits **1** without writing. The generic setter reaches the same key, and `--local` writes the overlay that takes PRECEDENCE over the base file |
 
 `tailnet_serve.unpublish()` is deliberately **not** gated, and the asymmetry is
@@ -3296,6 +3336,7 @@ Every place an origin becomes trusted, and what decides it:
 | Extra origins at startup (`dashboard.url`, configured host, env lists) | `dashboard_origins` | each one |
 | Tunnel URL on connect | `dashboard_origins` | yes |
 | Tailnet origin (startup, recovery) | `capabilities.tailnet_origin` (enterprise: policy layer only) | yes |
+| Shared Crew Tailscale invites (invite and credential routes, accept poller) | `capabilities.tailnet_origin`, through `tailnet.is_governance_pinned_off` (`shared-crew.md` §1) | yes, except the status read |
 | `check_origin` loopback `Origin == Host` fallback | an allowlisted origin up to case and default port, else `dashboard_origins` | each request |
 | `check_origin` with no `Origin` header (loopback or unix socket) | unchanged: not a browser | no |
 
@@ -4009,6 +4050,10 @@ carve-out stay as code. It expects `CONTRACT_VERSION == 1` (pinned pre-launch).
   the update handler owners (`dashboard/handlers/updates_verdict.py`, `updates_check.py`,
   `updates_apply.py`), `cli_server_update.py` and the gateway's update owners
   (`slack/gateway_runtime/update_schedule.py`, `slack/gateway_runtime/update_apply.py`).
+- `platform/update_fetch.py` — `fetch_and_pin_upstream`, the isolated fetch the update
+  check and the unattended apply share. It fetches into a throwaway git dir so no hook in
+  the checkout's config fires, and every read it makes goes through
+  `update_governance`'s guarded probe.
 - `platform/policy_distribution.py` — central distribution: source resolution
   (env ∘ the policy's `distribution` block), the append-only
   `register_policy_fetcher` transport seam, the last-known-good cache, the

@@ -142,13 +142,20 @@ class TerminalCoordinator(ManagerComponent):
         this counter describe a population nobody chose.
 
         The outcome is the runtime's own three-way classification, folded onto a
-        closed enum. Nothing else from the record is published: the ``error``
-        text, the agent name and the task are all free text.
+        closed enum. ``result`` says only whether a completed run's result was
+        empty (``events.SUBAGENT_RESULT_VALUES``). Nothing else from the record is
+        published: the ``error`` text, the result text, the agent name and the
+        task are all free text.
 
         Like every other name in this module's methods, the import is inside the
         body (see :meth:`_record_crew_log_terminal`).
         """
-        from kiro_crew.metrics.events import SUBAGENT_COMPLETED, emit_counter, subagent_outcome
+        from kiro_crew.metrics.events import (
+            SUBAGENT_COMPLETED,
+            emit_counter,
+            subagent_outcome,
+            subagent_result_kind,
+        )
         from kiro_crew.subagent import logger as _logger
 
         try:
@@ -159,7 +166,17 @@ class TerminalCoordinator(ManagerComponent):
             # one the remainder member names.
             _logger.debug("metrics: reading a subagent terminal outcome failed", exc_info=True)
             outcome = subagent_outcome(None)
-        emit_counter(SUBAGENT_COMPLETED, {"outcome": outcome})
+        try:
+            # Only whether the result was empty leaves this method, never its text.
+            result = subagent_result_kind(
+                outcome,
+                getattr(info, "result", ""),
+                getattr(info, "result_truncated", False),
+                returned_reply=getattr(info, "returned_reply", None),
+            )
+        except Exception:
+            result = "none"
+        emit_counter(SUBAGENT_COMPLETED, {"outcome": outcome, "result": result})
 
     def _claim_finalize_impl(self, info: SubagentInfo, *, supersede_recovery: bool = False) -> bool:
         """Claim the exclusive right to report ``info``'s terminal outcome.
@@ -491,6 +508,9 @@ class TerminalCoordinator(ManagerComponent):
             if (
                 mark_delivered_on_success
                 and not info.error
+                # A completed run whose kill failed keeps an empty error, so the
+                # flag sends it to the ``leaked_process`` branch below.
+                and not info._leaked_process
                 and not info._digest_held
                 and not info._delivery_queued
                 # A report the gateway gave up on reached the parent at most as a
@@ -499,12 +519,9 @@ class TerminalCoordinator(ManagerComponent):
                 # settles it.
                 and not info._report_undelivered
             ):
-                # The teardown has decided by now (this report waited for it
-                # before publishing), so an empty error means the reset ended
-                # the process or the kill landed: only then is the run's folder
-                # excluded from orphan reconciliation. A kill the teardown could
-                # not deliver is in ``info.error`` and leaves no ``delivered``
-                # tombstone, so reconciliation still reaches the survivor.
+                # The teardown has decided by now (this report waited for it), so
+                # no error and no leaked process means the process is gone: only
+                # then does a plain ``delivered`` tombstone end reconciliation.
                 #
                 # Retain result.txt for a TTL grace window instead of deleting
                 # it now, so the parent can read the full transcript

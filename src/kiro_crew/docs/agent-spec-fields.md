@@ -154,6 +154,7 @@ underneath.
 | `goose` | `goose.py` | `mcpServers`, the one channel measured as a round trip rather than as an accepted element; `model` [5] | `tools` → the array's allowlist [3]; `disabledTools` → the server is withheld whole, control plane included [7]; `hooks` → fired by Crew's turn loop | as `codex` except `hooks`, with `permissions.defaultMode` carried as `GOOSE_MODE` in the child's environment |
 | `pi` | none | — | — | no projection of the spec — kind `broker-only` [8]; `model` and `prompt` still arrive [9] |
 | `deepseek` | none | — | — | no projection of the spec — kind `broker-only` [8]; `model` and `prompt` still arrive [9] |
+| `strands` | `strands.py` | `mcpServers`, by the `--mcp-config` launch file, never the wire [10]; `model`, as the `--model` launch argument [10] | `tools` → the array's allowlist [3]; `disabledTools` → the server is withheld whole, control plane included [7]; `hooks` → fired by Crew's turn loop | `availableModels` — no vocabulary advertised; `autoApprove` and `permissions.defaultMode` — gate-preserving (Crew's gate module asks for every call); `prompt` — context-instead [10]; `resources` — no-reader [6] |
 
 **An empty `tools` list is a second, stronger case of the "allowlist" row.** `tools:
 []` reads as "mount nothing" for the MCP array on every mirror, same as any other
@@ -232,9 +233,10 @@ mounts anything.
 5. Not through the mirror: pushed with `session/set_config_option` after
    `session/new` (on `goose`, from the provider and model selects the harness
    advertises there).
-6. Not the mirrors' own wording: three of the four give this field a reason the
-   code does not support. See the note below the table, and
-   [#12215](https://github.com/kirodotdev/KiroCrew/issues/12215).
+6. `claude`, `codex` and `opencode` give this field the shared `no-reader`
+   reason (`RESOURCES_NO_READER`); `goose` rules it `withheld` too, with a reason
+   saying no channel is advertised for them. See the note
+   below the table.
 7. `codex` and `opencode` keep a narrowed CONTROL-PLANE server mounted;
    withholding `kirocrew-core` would leave the session unable to report back at
    all. `codex` refuses the call at the permission request
@@ -255,6 +257,19 @@ mounts anything.
    every harness alike (`build_message` appends the `[AGENT SYSTEM PROMPT]` block for
    a custom agent with no backend condition on it). What a mirror decides, and
    these two therefore go without, is the MCP surface.
+10. `strands` runs the Strands CLI in its Python-project ACP mode, which refuses a
+   non-empty `session/new` or `session/load` `mcpServers` array. So the mirror's
+   array is written to an owner-only `--mcp-config` file the CLI reads at start,
+   removed once `initialize` answers, and nothing is spliced onto the wire
+   (`acp/harness/strands.py`). The CLI's own discovery of other tools' MCP and
+   skill files (`~/.kiro/settings/mcp.json`, `~/.claude.json` and the rest) is off
+   for the child, so that file is the whole MCP set. The model is a launch argument
+   because this mode has no ACP model channel. With no chat model, `agent.strands_provider`
+   (default `bedrock`) and `agent.strands_model` (default `auto`, which passes no `--model`)
+   decide it: `--model <provider>/<model>`. The spec's `prompt` is not sent as
+   the `_meta` `strands/agent-definition` instructions: those replace the project's
+   own system prompt, and the prompt already arrives as the `[AGENT SYSTEM PROMPT]`
+   block.
 
 **No mirrored harness READS `resources`, and the two URI schemes under that one
 key survive that differently.** Neither is loaded natively: the harness is not
@@ -263,15 +278,17 @@ context rather than as config — `context.py`'s `_skills_injection_plan` return
 `bool(globs) or not is_custom`, with no backend condition, so Crew injects the
 mapped set on every backend, as a bounded directory plus each `always: true`
 body. The `file://` steering
-block is the half that reaches nothing: it is gated on `is_cc`, which is
+load is the half that never runs: it is gated on `is_cc`, which is
 `is_claude_code(provider_type)`, true only for `provider=claude_code` and never for
 an `acp_backend`. `claude_code.py`, `codex.py` and `opencode.py` give `withheld`
-the reason that STEERING FILES are injected as context text instead, which is the
-one thing that does not happen here; `goose.py`'s reason is already right, and says
-no channel is advertised for them.
-Correcting those three strings, and deciding whether a spec author should be
-WARNED rather than left to read this page, is tracked in
-[#12215](https://github.com/kirodotdev/KiroCrew/issues/12215). The ruling stays
+the shared reason `RESOURCES_NO_READER` (`providers/mirrors/base.py`), which opens
+with this page's class name, `no-reader`; `goose.py`'s reason says no channel is
+advertised for them. A new session of a custom agent on a backend whose mirror
+rules `resources` `withheld` or `no-channel` gets one notice row naming the spec's
+`file://` entries (`spec_steering_read_nowhere` in
+`src/kiro_crew/agent_sdk/spec_hooks.py`). The default agent gets no row, because
+its steering trees reach these harnesses by other routes. Injecting the steering
+itself is a separate, open decision. The ruling stays
 **no-reader** rather than context-instead because it is a statement about the
 harness: what reaches the session on the skill half is Crew's own injected
 directory, not the key the mirror declined to project.
@@ -297,8 +314,8 @@ Four classes cover the rest, and `no-channel` is not one of them:
 `no-channel` is the fourth `Disposition` and a different statement, which is why
 `hooks` sits in that column on `claude` and `codex` without being a withhold:
 the backend HAS the capability and this transport cannot carry it. Both run
-hooks natively; what is missing is the delivery path. On `goose` and `opencode`
-the ruling is `translated` instead: their session carries no hooks field either,
+hooks natively; what is missing is the delivery path. On `goose`, `opencode` and
+`strands` the ruling is `translated` instead: their session carries no hooks field either,
 so Crew's own turn loop fires the field (`ACP_BACKENDS_CREW_FIRES_SPEC_HOOKS`). `Ruling.__post_init__` refuses a
 `no-channel` ruling that does not name the channel it would have to travel on,
 which is what keeps a gap from reading as a decision.
@@ -346,13 +363,14 @@ is the part worth knowing before you switch:
 - **`autoApprove` and a spec-written `permissions` block travel nowhere.**
   Deliberately, and this is the one degradation you want: every call reaches
   Crew's gate instead of being pre-approved inside the harness.
-- **`hooks` reaches only two mirrors, and `resources` only half-reaches.**
-  `hooks` is `translated` on `goose` and `opencode`, where Crew's turn loop fires
+- **`hooks` reaches only three mirrors, and `resources` only half-reaches.**
+  `hooks` is `translated` on `goose`, `opencode` and `strands`, where Crew's turn loop fires
   it, and `no-channel` on `claude` and `codex`. Neither URI scheme is loaded natively, but a mapped
   `skill://` still arrives as Crew's injected skill directory, per the note above,
   so an agent whose skills come from its spec keeps them on a mirrored harness. A
-  `file://` steering glob is the one that silently reaches nothing
-  ([#12215](https://github.com/kirodotdev/KiroCrew/issues/12215)). `prompt`
+  `file://` steering glob is not loaded from the spec; a custom agent's new
+  session gets a notice row saying so. The same file still arrives if folder
+  steering or a crew member's essentials carry it. `prompt`
   survives as context text.
 
 So a spec written for kiro-cli degrades predictably rather than silently, as long
@@ -513,7 +531,13 @@ survives on any server when the edition lists `NAME` through
 `McpToolingProvider.kas_relayed_env_references()` (the public build lists none);
 KAS resolves it at spawn, so only the name crosses the wire. Any other reference
 is withheld, because KAS's own environment holds credentials such as
-`KIRO_API_KEY`. And `KIROCREW_HOME` survives for Crew's own managed servers,
+`KIRO_API_KEY`. A withheld value still reaches a stdio server, as it does on
+kiro-cli: Crew keeps it in an owner-only launch snapshot under the data home's
+`kas-mcp-launch/` and hands KAS its own launcher in the server's place, which reads
+the snapshot and starts the real command with those values. Only the launcher, the
+session, agent and server names and a version cross the wire, so `session.json`
+never holds the value. A remote entry's `headers` stay withheld. And
+`KIROCREW_HOME` survives for Crew's own managed servers,
 because it pins the data home — but only as a literal containing no `${`, since
 KAS would expand a reference under that name too. That recorded pin is also
 **write provenance**: the shared-home write guard reads it back from every managed

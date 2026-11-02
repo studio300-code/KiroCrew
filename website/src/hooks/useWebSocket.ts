@@ -56,6 +56,7 @@ import {
   handleDashboardMoved,
   handleMemberProjection,
   handleMembersSubscribed,
+  handleSlotFoldMoved,
   handleSourceStatus,
   handleThreadReply,
   invalidateRefreshQueries,
@@ -66,6 +67,7 @@ import { useTurnCompletion } from './websocket/turnCompletion'
 import { attachFocusRelay, focusedSlotForCurrentSurface } from './websocket/attention'
 import { emitAppReload, emitChannelEvent, emitComputerUseFrame, emitCronHistory } from './websocket/browserEvents'
 import { runFirstConnect, runReconnectCatchUp } from './websocket/reconnectCatchUp'
+import { applySharedCrewFrame, onSharedCrewSocketOpen, setSharedCrewSender } from './sharedCrew/sharedCrewSocket'
 import { batchedUnlessOpen } from '../lib/streamBatch'
 
 /* The dashboard's single multiplexed WebSocket. `useWebSocket` composes the
@@ -204,6 +206,10 @@ export function useWebSocket() {
       resetContextTraceRefresh()
       // Cache auto-speak preference
       voice.refreshAutoSpeak()
+      // Shared Crew: this socket carries the tab's activity frames, and its
+      // presence, work and decision state is re-read from the server.
+      setSharedCrewSender(payload => socket.sendIfOpen(payload))
+      onSharedCrewSocketOpen(queryClient)
       const catchUp = {
         dispatch,
         queryClient,
@@ -247,6 +253,16 @@ export function useWebSocket() {
             break
           case 'slots':
             slotList.onSlots(msg, data, e.data as string)
+            break
+          case 'shared_crew.presence':
+          case 'shared_crew.work':
+          case 'shared_crew.decision':
+          case 'shared_crew.capacity':
+          case 'shared_crew.send_state':
+          case 'shared_crew.typing_lease':
+          case 'shared_crew.memory_change':
+          case 'shared_crew.people':
+            applySharedCrewFrame(queryClient, data)
             break
           case 'credential_redaction_changed':
             handleCredentialRedactionChanged(queryClient, msg.data as { enabled?: unknown; changed_at?: unknown } | undefined)
@@ -753,6 +769,10 @@ export function useWebSocket() {
             // ancestors were re-read when it first arrived.
             const outcome = applySlotFoldFrame(queryClient, frame, (next, replayed) => pull(next, replayed, [next.slot]))
             pull(frame, outcome, roots)
+            // Even on `stale`: that means the work BOARD already holds this
+            // revision (its own poll can land first), not that the separately
+            // cached Overview does.
+            handleSlotFoldMoved(queryClient, roots)
             break
           }
           case 'slot_projection': {
@@ -788,7 +808,8 @@ export function useWebSocket() {
               // moved -- the push is an optimisation, never the only channel.
               if (seedFoldedProjection(queryClient, read.frame.slot, read.frame)) seededRoot = read.frame.slot
             }
-            for (const root of teamRoots(store.getState().dashboard.slots, data.slot)) {
+            const roots = teamRoots(store.getState().dashboard.slots, data.slot)
+            for (const root of roots) {
               if (root === seededRoot) continue
               const key = ['command-center', root, 'work']
               const inFlight = queryClient.getQueryCache().find({ queryKey: key, exact: true })
@@ -796,6 +817,7 @@ export function useWebSocket() {
                 void inFlight.promise.catch(() => undefined).finally(() => { void queryClient.invalidateQueries({ queryKey: key, exact: true }, { cancelRefetch: false }) })
               } else queryClient.invalidateQueries({ queryKey: key, exact: true }, { cancelRefetch: false })
             }
+            handleSlotFoldMoved(queryClient, roots)
             break
           }
           case 'workflow_run_event': {

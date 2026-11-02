@@ -35,6 +35,11 @@
         "default_agent": "",
         "crew_mode_agent": "kirocrew-conductor",
         "deepseek_env": {},
+        "strands_env": {},
+        "strands_project": "",
+        "strands_project_sha256": "",
+        "strands_provider": "bedrock",
+        "strands_model": "auto",
         "sweep_agents_backups": false,
         "sandbox": "auto",
         "sandbox_allow_no_isolation": false,
@@ -482,6 +487,98 @@
       "hasChildren": false,
       "enumValues": null,
       "defaultValue": null
+    },
+    {
+      "path": "agent.strands_env",
+      "kind": "core",
+      "type": "object",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
+      "label": "Strands provider keys",
+      "help": "Model-provider settings handed to the Strands harness ('strands' backend) as environment variables at spawn, mapping an environment-variable NAME to a 'secret://<vault name>' reference, the same shape as agent.deepseek_env. Store the value under Settings > Secrets, then map it here, e.g. {\"ANTHROPIC_API_KEY\": \"secret://my-anthropic-key\"}. Only the names the Strands CLI reads for its providers are accepted: AWS_REGION, AWS_DEFAULT_REGION and AWS_BEARER_TOKEN_BEDROCK (Bedrock and Bedrock Mantle), ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, OLLAMA_HOST, OLLAMA_MODEL, LITELLM_BASE_URL, LITELLM_API_KEY and LITELLM_MODEL. Kiro Crew withholds every mapped name from the shells and code the Strands agent runs. A plaintext value is REFUSED at write time, and any other name refuses the Strands session before it starts with a message naming the key. The harness runs sandboxed and cannot read ~/.aws, so Bedrock needs AWS_BEARER_TOKEN_BEDROCK (a Bedrock API key) and AWS_REGION mapped here. Ignored by every other backend.",
+      "hasChildren": true,
+      "enumValues": null,
+      "defaultValue": {}
+    },
+    {
+      "path": "agent.strands_env.*",
+      "kind": "core",
+      "type": "string",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
+      "label": "*",
+      "help": "",
+      "hasChildren": false,
+      "enumValues": null,
+      "defaultValue": null
+    },
+    {
+      "path": "agent.strands_project",
+      "kind": "core",
+      "type": "string",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
+      "label": "Strands project",
+      "help": "The Strands Python project the 'strands' backend runs: the path of its agent.py, or of a folder holding one. Empty runs Kiro Crew's bundled minimal project. Either way Kiro Crew loads it through its own gate module, which makes every Strands Agent the project builds ask Kiro Crew before each tool call, so a project needs no change of its own. Its imports must be installed in the Python environment Kiro Crew runs Strands with. A project of yours runs only as the version recorded in agent.strands_project_sha256. Takes effect for new Strands sessions. Ignored by every other backend.",
+      "hasChildren": false,
+      "enumValues": null,
+      "defaultValue": ""
+    },
+    {
+      "path": "agent.strands_project_sha256",
+      "kind": "core",
+      "type": "string",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
+      "label": "Strands project fingerprint",
+      "help": "The fingerprint of the agent.strands_project version you confirmed: a sha256 over every file in the project's folder. The project's code runs with your provider keys and outside the tool gate, so a Strands session on your project starts only when the folder still matches it; a refused session prints the current value and the command that records it. Set it yourself after reviewing the files (kirocrew config set agent.strands_project_sha256 <value>); Kiro Crew never records it on its own. Packages the project imports from outside its folder are not covered. Ignored for the bundled project and by every other backend.",
+      "hasChildren": false,
+      "enumValues": null,
+      "defaultValue": ""
+    },
+    {
+      "path": "agent.strands_provider",
+      "kind": "core",
+      "type": "string",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
+      "label": "Strands provider",
+      "help": "The model provider a new Strands session ('strands' backend) runs on. With agent.strands_model it builds the Strands CLI's --model '<provider>/<model>' argument; with agent.strands_model 'auto' no --model is passed. A model picked for the chat wins over both. Any value outside the list refuses the session before it starts. Its key comes from agent.strands_env. Ignored by every other backend.",
+      "hasChildren": false,
+      "enumValues": [
+        "bedrock",
+        "bedrock-mantle",
+        "anthropic",
+        "openai",
+        "google",
+        "ollama",
+        "litellm"
+      ],
+      "defaultValue": "bedrock"
+    },
+    {
+      "path": "agent.strands_model",
+      "kind": "core",
+      "type": "string",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
+      "label": "Strands model",
+      "help": "The model a new Strands session runs when the chat picks none, as an id for agent.strands_provider: Kiro Crew launches the Strands CLI with --model '<provider>/<model>'. 'auto' (or empty) passes no --model, so the provider's CLI default runs. Ignored by every other backend.",
+      "hasChildren": false,
+      "enumValues": null,
+      "defaultValue": "auto"
     },
     {
       "path": "agent.sweep_agents_backups",
@@ -1721,6 +1818,7 @@
         "eager_spawn": true,
         "archive_retention_days": 30,
         "file_changes_keep_turns": 0,
+        "kas_delete_delay_secs": 0,
         "watchdog_rss_max_mb": 4096,
         "reconcile_max_kills": 5
       }
@@ -1918,6 +2016,20 @@
       "tags": [],
       "label": "File-Change Copies Kept (turns)",
       "help": "How many of a dashboard chat's most recent file-changing turns keep the before and after copies their file-change card diffs. An older turn keeps its file list, and the rows that held its copies are written to the session archive first. 0, the default, keeps every turn's copies.",
+      "hasChildren": false,
+      "enumValues": null,
+      "defaultValue": 0
+    },
+    {
+      "path": "session.kas_delete_delay_secs",
+      "kind": "core",
+      "type": "integer",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
+      "label": "KAS Session Record Delete Delay (seconds)",
+      "help": "On the kas backend, seconds a task-runner session's record, and a reused workflow worker's previous conversation, stay on disk after the session ends before Kiro Crew deletes them. The session leaves the engine's memory when it ends either way. 0 (the default) deletes the record when the session ends. Incognito and temporary sessions are deleted when they end whatever this says. A record that comes due while another backend is selected waits until kas is selected again. Other backends ignore it.",
       "hasChildren": false,
       "enumValues": null,
       "defaultValue": 0
@@ -2234,6 +2346,9 @@
         "embedding_idle_evict_secs": 3600,
         "embedding_weight_repack": true,
         "embedding_child_process": false,
+        "consolidation_write_child_process": false,
+        "recall_pool_processes": 0,
+        "recall_pool_worker_max_mb": 3072,
         "embed_model_url": "",
         "embed_model_path": "",
         "embed_model_id": "",
@@ -2376,6 +2491,48 @@
       "hasChildren": false,
       "enumValues": null,
       "defaultValue": false
+    },
+    {
+      "path": "memory.consolidation_write_child_process",
+      "kind": "core",
+      "type": "boolean",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
+      "label": "Run Consolidation Memory Writes in a Child Process",
+      "help": "Run the memory writes that history consolidation makes (extracted facts, episodes and lessons) in a separate low-priority process, so they never compete with turn context building for the gateway's interpreter lock. Off by default: the writes run inside the gateway. Takes effect at the next consolidation pass.",
+      "hasChildren": false,
+      "enumValues": null,
+      "defaultValue": false
+    },
+    {
+      "path": "memory.recall_pool_processes",
+      "kind": "core",
+      "type": "integer",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
+      "label": "Recall Worker Processes",
+      "help": "Number of child processes that answer the memory reads of a turn's context (facts, episodes, lessons), so several sessions can build their context at the same time instead of taking turns on the gateway's interpreter lock. 0 (the default) keeps those reads inside the gateway. Each process holds its own copy of the store's search data, so it uses memory in proportion to the store; see Recall Worker Memory Limit. If a process cannot start or fails, the read runs in the gateway instead. Takes effect within a second.",
+      "hasChildren": false,
+      "enumValues": null,
+      "defaultValue": 0
+    },
+    {
+      "path": "memory.recall_pool_worker_max_mb",
+      "kind": "core",
+      "type": "integer",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
+      "label": "Recall Worker Memory Limit (MB)",
+      "help": "Memory limit for one recall worker process. A worker is not started while less than this is free on the host, and a worker whose resident memory passes it after a read exits and is replaced by the next read. Only used when Recall Worker Processes is above 0.",
+      "hasChildren": false,
+      "enumValues": null,
+      "defaultValue": 3072
     },
     {
       "path": "memory.embed_model_url",
@@ -3699,6 +3856,7 @@
         "retention_days": 0,
         "max_total_mb": 0,
         "otlp_endpoint": "",
+        "otlp_endpoints": [],
         "beacon_enabled": true,
         "beacon_endpoint": "https://d175o3ylxqum0e.cloudfront.net"
       }
@@ -3782,10 +3940,38 @@
       "sensitive": true,
       "tags": [],
       "label": "OTLP Endpoint",
-      "help": "Opt-in OpenTelemetry OTLP/HTTP metrics endpoint (e.g. http://localhost:4318/v1/metrics). EMPTY = no network egress (default). When set, aggregated metrics are ALSO pushed to this collector in addition to the local JSONL sink; requires the OTLP exporter from the otlp package extra to be installed.",
+      "help": "Opt-in OpenTelemetry OTLP/HTTP metrics endpoint (e.g. http://localhost:4318/v1/metrics). EMPTY = no network egress (default). When set, aggregated metrics are ALSO pushed to this collector in addition to the local JSONL sink; requires the OTLP exporter from the otlp package extra to be installed. Kept for compatibility: when set it is the first entry of the OTLP Endpoints list below.",
       "hasChildren": false,
       "enumValues": null,
       "defaultValue": ""
+    },
+    {
+      "path": "telemetry.otlp_endpoints",
+      "kind": "core",
+      "type": "array",
+      "required": false,
+      "deprecated": false,
+      "sensitive": true,
+      "tags": [],
+      "label": "OTLP Endpoints",
+      "help": "Opt-in list of OpenTelemetry OTLP/HTTP metrics collectors, each its own destination, sent to IN ADDITION to the local JSONL sink and to OTLP Endpoint above. EMPTY = no network egress (default). Each entry is {endpoint, name, enabled, headers_env, temporality, allow, point_attributes, resource_allow}: endpoint is an http(s) URL; headers_env maps a header name to an environment variable that holds its value, so no secret is stored here (there is no key for a literal header value, and an entry with one is skipped). An entry sends only those headers: the OTEL_EXPORTER_OTLP_HEADERS variables apply to OTLP Endpoint above, not to these entries. temporality is '' (core default), 'cumulative' or 'delta'; allow is a list of metric names or the preset 'PRODUCT_METRICS', and without it the collector gets every metric; point_attributes adds fixed labels from a reviewed key set (ClientType); resource_allow keeps only the named resource keys. Set enabled to false to turn an entry off. Every entry obeys the 'enabled' switch above and the capabilities.telemetry otlp_hosts policy. A malformed entry is skipped with a warning. See docs/guides/telemetry-otlp-export.md.",
+      "hasChildren": true,
+      "enumValues": null,
+      "defaultValue": []
+    },
+    {
+      "path": "telemetry.otlp_endpoints.*",
+      "kind": "core",
+      "type": "object",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
+      "label": "*",
+      "help": "",
+      "hasChildren": true,
+      "enumValues": null,
+      "defaultValue": null
     },
     {
       "path": "telemetry.beacon_enabled",
@@ -5214,7 +5400,7 @@
       "sensitive": false,
       "tags": [],
       "label": "Endpoint",
-      "help": "Full URL of the evaluation endpoint. Override only to point at a compatible proxy — the request and response field names are fixed by the TypeSafe API, not by this setting.",
+      "help": "Full URL of the evaluation endpoint. Override only to point at a compatible proxy — the request and response field names are fixed by the TypeSafe API, not by this setting. 'sagemaker://<endpoint-name>?region=<region>[&profile=<profile>]' sends the same request to an Amazon SageMaker endpoint, signed with this machine's AWS credentials instead of an API key (needs boto3).",
       "hasChildren": false,
       "enumValues": null,
       "defaultValue": "https://api.typesafe.ai/v1/systemone"
@@ -5456,8 +5642,8 @@
       "defaultValue": {
         "max_depth": 2,
         "remote_dispatch": false,
-        "remote_dispatch_memory_gb": 2.0,
-        "remote_dispatch_disk_gb": 10.0
+        "remote_dispatch_memory_gb": 5.0,
+        "remote_dispatch_disk_gb": 5.0
       }
     },
     {
@@ -5497,10 +5683,10 @@
       "sensitive": false,
       "tags": [],
       "label": "Remote dispatch memory estimate (GB)",
-      "help": "Free memory one dispatched worker needs. A work-item create is refused as crew_busy when less is free. Used only with remote_dispatch on; a value that is not a positive number uses the default.",
+      "help": "Free memory one dispatched worker needs. A work-item create is refused as crew_busy when less is free. The default covers the largest measured worker session process tree. Used only with remote_dispatch on; a value that is not a positive number uses the default.",
       "hasChildren": false,
       "enumValues": null,
-      "defaultValue": 2.0
+      "defaultValue": 5.0
     },
     {
       "path": "work_ledger.remote_dispatch_disk_gb",
@@ -5511,10 +5697,10 @@
       "sensitive": false,
       "tags": [],
       "label": "Remote dispatch disk estimate (GB)",
-      "help": "Free scratch disk one dispatched worker needs. A work-item create is refused as crew_busy when less is free. Used only with remote_dispatch on; a value that is not a positive number uses the default.",
+      "help": "Free scratch disk one dispatched worker needs. A work-item create is refused as crew_busy when less is free. The default is about twice the measured size of one self-contained clone with its dependencies. Used only with remote_dispatch on; a value that is not a positive number uses the default.",
       "hasChildren": false,
       "enumValues": null,
-      "defaultValue": 10.0
+      "defaultValue": 5.0
     },
     {
       "path": "power",
@@ -8332,7 +8518,7 @@
       "sensitive": false,
       "tags": [],
       "label": "Shared Crew",
-      "help": "Fair admission and per-person limits for a shared Crew. Not active in this build yet: nothing reads these settings, so changing one does nothing.",
+      "help": "Fair admission, per-person limits and the direct tailnet link for a shared Crew. Read only while Shared Crew is turned on in Feature Previews; otherwise every value reads as its default.",
       "hasChildren": true,
       "enumValues": null,
       "defaultValue": {
@@ -8355,7 +8541,7 @@
       "sensitive": false,
       "tags": [],
       "label": "Fair Admission",
-      "help": "Charge every turn, subagent, task, workflow and cron run to the person who started it, and admit work through per-person and Crew-wide limits with a fair queue. Off by default: a single-operator Crew keeps its current behaviour and reports queueing as unavailable. Requires KIROCREW_SHARED_CREW_PREVIEW=1 in the gateway environment; without it this reads as its default.",
+      "help": "Charge every turn, subagent, task, workflow and cron run to the person who started it, and admit work through per-person and Crew-wide limits with a fair queue. Off by default: a single-operator Crew keeps its current behaviour and reports queueing as unavailable. Needs Shared Crew turned on in Feature Previews; without it this reads as its default.",
       "hasChildren": false,
       "enumValues": null,
       "defaultValue": false
@@ -8369,7 +8555,7 @@
       "sensitive": false,
       "tags": [],
       "label": "Active Work Per Person",
-      "help": "Root executions (turns, tasks, workflows, cron runs) one person may run at once, across all tabs, devices and sessions. Requires KIROCREW_SHARED_CREW_PREVIEW=1 in the gateway environment; without it this reads as its default.",
+      "help": "Root executions (turns, tasks, workflows, cron runs) one person may run at once, across all tabs, devices and sessions. Needs Shared Crew turned on in Feature Previews; without it this reads as its default.",
       "hasChildren": false,
       "enumValues": null,
       "defaultValue": 4
@@ -8383,7 +8569,7 @@
       "sensitive": false,
       "tags": [],
       "label": "Active Work Crew-Wide",
-      "help": "Root executions the whole Crew runs at once. 0 uses the session start gate's automatic width for this host. Requires KIROCREW_SHARED_CREW_PREVIEW=1 in the gateway environment; without it this reads as its default.",
+      "help": "Root executions the whole Crew runs at once. 0 uses the session start gate's automatic width for this host. Needs Shared Crew turned on in Feature Previews; without it this reads as its default.",
       "hasChildren": false,
       "enumValues": null,
       "defaultValue": 0
@@ -8397,7 +8583,7 @@
       "sensitive": false,
       "tags": [],
       "label": "Per-Person Slices",
-      "help": "While fair admission is on, start each person's agent runtimes in that person's own systemd slice so their CPU, memory and process counts are bounded together. Linux with cgroup v2 delegation only. Requires KIROCREW_SHARED_CREW_PREVIEW=1 in the gateway environment; without it this reads as its default.",
+      "help": "While fair admission is on, start each person's agent runtimes in that person's own systemd slice so their CPU, memory and process counts are bounded together. Linux with cgroup v2 delegation only. Needs Shared Crew turned on in Feature Previews; without it this reads as its default.",
       "hasChildren": false,
       "enumValues": null,
       "defaultValue": true
@@ -8411,7 +8597,7 @@
       "sensitive": false,
       "tags": [],
       "label": "Require Enforced Limits",
-      "help": "Refuse to admit work when cgroup v2, a trusted systemd-run, a reachable user bus, or memory and pids delegation is missing, instead of running without per-person limits. Needs fair admission on: with fair admission off, no agent runtime starts. Off by default. Requires KIROCREW_SHARED_CREW_PREVIEW=1 in the gateway environment; without it this reads as its default.",
+      "help": "Refuse to admit work when cgroup v2, a trusted systemd-run, a reachable user bus, or memory and pids delegation is missing, instead of running without per-person limits. Needs fair admission on: with fair admission off, no agent runtime starts. Off by default. Needs Shared Crew turned on in Feature Previews; without it this reads as its default.",
       "hasChildren": false,
       "enumValues": null,
       "defaultValue": false
@@ -8425,7 +8611,7 @@
       "sensitive": false,
       "tags": [],
       "label": "Direct Tailnet Link",
-      "help": "Off by default. On: while Tailscale runs, also listen on this machine's own Tailscale addresses (100.x and fd7a:) on the dashboard port, and let in every person Tailscale names, without a dashboard token. Tailscale (the tailnet ACL and device sharing) decides who can reach it. Never binds any other address. Off keeps the loopback-only listener. A value that is not true or false reads as off. Requires KIROCREW_SHARED_CREW_PREVIEW=1 in the gateway environment; without it this reads as its default.",
+      "help": "Off by default. On: while Tailscale runs, also listen on this machine's own Tailscale addresses (100.x and fd7a:) on the dashboard port, and let in every person Tailscale names, without a dashboard token. Tailscale (the tailnet ACL and device sharing) decides who can reach it. Never binds any other address. Off keeps the loopback-only listener. A value that is not true or false reads as off. Needs Shared Crew turned on in Feature Previews; without it this reads as its default.",
       "hasChildren": false,
       "enumValues": null,
       "defaultValue": false,
@@ -8440,10 +8626,11 @@
       "sensitive": false,
       "tags": [],
       "label": "Typing Lock Idle Window",
-      "help": "Seconds a collaborator may pause typing before the other collaborators' composers unlock. While someone types in a shared session, everyone else's composer is read-only until that person sends, clears the draft, or stays idle this long. 3 to 60. Requires KIROCREW_SHARED_CREW_PREVIEW=1 in the gateway environment; without it this reads as its default.",
+      "help": "Seconds a collaborator may pause typing before the other collaborators' composers unlock. While someone types in a shared session, everyone else's composer is read-only until that person sends, clears the draft, or stays idle this long. 3 to 60. Needs Shared Crew turned on in Feature Previews; without it this reads as its default.",
       "hasChildren": false,
       "enumValues": null,
-      "defaultValue": 10
+      "defaultValue": 10,
+      "requiresRestart": true
     },
     {
       "path": "dashboard.restore_sessions",
@@ -8554,6 +8741,20 @@
       "tags": [],
       "label": "Feature preview: crewmate_harness",
       "help": "Turn on the 'crewmate_harness' feature preview.",
+      "hasChildren": false,
+      "enumValues": null,
+      "defaultValue": false
+    },
+    {
+      "path": "dashboard.feature_previews.explore",
+      "kind": "core",
+      "type": "boolean",
+      "required": false,
+      "deprecated": false,
+      "sensitive": false,
+      "tags": [],
+      "label": "Feature preview: explore",
+      "help": "Turn on the 'explore' feature preview.",
       "hasChildren": false,
       "enumValues": null,
       "defaultValue": false

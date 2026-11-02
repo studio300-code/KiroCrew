@@ -188,6 +188,11 @@ _SETTING_ORDER: dict[str, tuple[Any, ...]] = {
     # On, an agent may add documents to the knowledge library
     # (``knowledge_add_document``); off, that tool refuses.
     "knowledge.auto_add_documents": (False, True),
+    # Fair admission on holds each person to their limit; off lets one person
+    # take the whole host.
+    "dashboard.shared_crew.admission_enabled": (True, False),
+    # On, the dashboard also listens on this machine's tailnet addresses.
+    "dashboard.shared_crew.tailnet_direct": (False, True),
     "skills.approval_required": (True, False),
     "telemetry.beacon_enabled": (False, True),
 }
@@ -287,6 +292,12 @@ _CANNOT_WIDEN_SETTINGS: frozenset[str] = frozenset(
         # Local recording only: the write route refuses the enable on a host
         # where it would start sending data out.
         "telemetry.enabled",
+        # Shared Crew capacity numbers and the typing lock: they size how much
+        # work runs at once and how long a draft holds the composer, never who
+        # may act or what an agent may reach.
+        "dashboard.shared_crew.crew_concurrency",
+        "dashboard.shared_crew.principal_concurrency",
+        "dashboard.shared_crew.typing_idle_seconds",
     }
 )
 
@@ -321,6 +332,12 @@ _CODE_EXEC_SETTINGS: frozenset[str] = frozenset(
         "session_environments.coder_url",
         "session_environments.sprites_profiles",
         "session_environments.boxd_profiles",
+        # Which vault secret the Strands harness is handed, and which provider
+        # address (a LiteLLM proxy, an Ollama host) its conversation is sent to.
+        "agent.strands_env",
+        # The provider and model a Strands session runs: where its conversation goes.
+        "agent.strands_provider",
+        "agent.strands_model",
     }
 )
 

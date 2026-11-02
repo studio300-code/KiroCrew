@@ -602,13 +602,13 @@ with `base_spec_missing` before a session exists.
 **The allowance is a harness capability, granted by positive membership.**
 Whether a side turn may execute read-only tools at all is
 `ACP_BACKENDS_SIDE_READONLY` (`agent_sdk/backends_routing.py`, harness-parity H6):
-kiro-cli, KAS, claude, goose and deepseek. A harness has its own pre-approval surface
+kiro-cli, KAS, claude, goose, deepseek and strands. A harness has its own pre-approval surface
 (claude-agent-acp `permissions.allow` / `bypassPermissions`, KAS `permissions`
 rules from its own store, goose's `permission.yaml`) that the host gate cannot see: a call it pre-approves
 would run with no READ_ONLY decision and no SEL row. A member therefore starts
 the side session in a shape where that surface cannot reach a write — kiro-cli
 through the derived spec above, KAS through the same spec taken over the wire,
-claude and goose through the session shapes below, and deepseek through Crew's verified gate plugin. KAS receives `<agent>--readonly` as a
+claude and goose through the session shapes below, deepseek through Crew's verified gate plugin, and strands through Crew's gate module. KAS receives `<agent>--readonly` as a
 projected custom agent (`acp/kas_agents` puts it in `customAgents`), and the
 derivation empties its `permissions` block with the other grants, so every KAS
 tool call raises `session/request_permission` (measured on kiro-cli 2.29.0,
@@ -646,7 +646,21 @@ loader built-in, or Crew's gate. Global `read`, `grep`, and `glob` must be held
 by running `dsh-tool-fs` or `dsh-tool-fs-search` tools, with no scoped layer
 shadowing them. A later per-agent scope stays covered by the stock-only rule.
 Any other composition, unknown owner, or shadow makes each DeepSeek side turn
-`REJECT_ALL` (`deepseek_read_only_issue`, refused in `llm_helpers`). Another
+`REJECT_ALL` (`deepseek_read_only_issue`, refused in `llm_helpers`). strands
+has no pre-approval store in project mode: Crew's gate module makes every Strands
+`Agent` ask once per tool call, and its envelope names the tool's owner, read off
+the tool object Strands resolved. Captured live on Strands CLI 0.2.3 through a real
+`side_read_only` session under `READ_ONLY` (`acp_frames/strands/side-read-only-live.jsonl`):
+the built-in `read` ran, `shell` running `ls` and `write` were refused.
+A side session (`side_read_only`) launches with no MCP server. Only the
+harness's own `read` built-in (`owner: "builtin"`) with a whole envelope and an
+absolute `path` equal to the one the deny tiers judge is named `fs_read`
+(`acp/_dispatch.is_strands_side_read`). Every other call, a read-only shell
+command included, carries `side_read_only_refusal` and is refused in
+`llm_helpers` before the gate, so the gate's shell classifier never sees it. The
+prompt is `SIDE_BOUNDARY_PROMPT_FILE_READS`: file reads only, no shell, search
+or web. Thread replies take the same posture (`THREAD_BOUNDARY_PROMPT_FILE_READS`).
+Another
 harness may have its own pre-approval surface the host gate cannot see. Off the set,
 or with the harness unknown because the config never loaded, `_run_side_turn`
 keeps the pre-allowance posture — the base agent under `REJECT_ALL`, no
@@ -995,8 +1009,9 @@ passes them straight through, so a path chip or an artifact link in a side reply
 opens a tab of the panel the side chat sits in, as the same chip and link do in
 the main transcript. Capability by omission, like every other host seam here: a
 host that passes neither gets `MarkdownRenderer`'s own fallbacks (a path chip
-reveals the file in the OS file manager, or copies the path on a remote
-dashboard; a path link stays a plain link; an artifact link navigates away).
+reveals the file in the OS file manager, or, where the gateway host cannot open
+one, copies the path and says so; a path link stays a plain link; an artifact
+link navigates away).
 `website/src/test/SideChat.fileOpen.test.tsx` pins both the wired and the
 unwired behaviour.
 

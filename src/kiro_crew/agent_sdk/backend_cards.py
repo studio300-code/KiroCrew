@@ -291,17 +291,28 @@ USER_FACING_LINES: Tuple[_LineSpec, ...] = (
     # from that set entirely, so reading the config set alone would report the
     # default harness as unable to do what it has always done. KAS takes effort as
     # a config option, so it answers through the first set.
+    # A launch-effort harness (Strands) changes its level by relaunching the
+    # process and reloading the session, which is still a change on a live chat.
     _LineSpec(
         LINE_REASONING_EFFORT,
-        ("ACP_BACKENDS_EFFORT_VIA_CONFIG_OPTION", "ACP_BACKENDS_KIRO_SLASH_COMMANDS"),
+        (
+            "ACP_BACKENDS_EFFORT_VIA_CONFIG_OPTION",
+            "ACP_BACKENDS_KIRO_SLASH_COMMANDS",
+            "ACP_BACKENDS_EFFORT_AT_LAUNCH",
+        ),
     ),
     # Same shape for the model: the config-option members take a switch as
     # ``session/set_config_option``, and the kiro family takes it as the native
     # set-model request -- so the kiro-family set stands for it, as on the first
     # line above.
+    # The model-at-launch set stands for a switch by relaunch, as above.
     _LineSpec(
         LINE_MODEL_SWITCH,
-        ("ACP_BACKENDS_MODEL_VIA_CONFIG_OPTION", "ACP_BACKENDS_KIRO_FAMILY"),
+        (
+            "ACP_BACKENDS_MODEL_VIA_CONFIG_OPTION",
+            "ACP_BACKENDS_KIRO_FAMILY",
+            "ACP_BACKENDS_MODEL_AT_LAUNCH",
+        ),
     ),
 )
 
@@ -580,6 +591,12 @@ OFF_CARD_SETS: Mapping[str, str] = {
         "whether an edited message's rewind forks the native session or replays "
         "the transcript as text. The edit runs either way"
     ),
+    "ACP_BACKENDS_RELOAD_DISPOSED_SESSION": (
+        "whether Crew reads one harness's own error for a session it disposed in a "
+        "live process, and reloads that session in a fresh one before the next "
+        "prompt. Recovery from a harness's failure mode, not a feature: a harness "
+        "without that failure mode loses nothing by being outside the set"
+    ),
     "ACP_BACKENDS_SELF_SERVED_ACP": (
         "whether a harness's whole launch is a row of ACP_BACKEND_LAUNCH, so the "
         "spawn path, the install probe and the driver seams resolve argv from that "
@@ -673,6 +690,13 @@ OFF_CARD_SETS: Mapping[str, str] = {
         "but a card that stated this half for KAS beside an off-card hot-reload set "
         "would read as kiro-cli lacking what it has; one fact needs one line, and "
         "that line cannot be projected while the other half cannot"
+    ),
+    "ACP_BACKENDS_MCP_RELAUNCH_RELOAD": (
+        "a third half of the same fact -- whether a freshly installed MCP server "
+        "reaches a RUNNING session, here by Crew relaunching the process with the "
+        "new launch file and loading the same session. Off the card for the reason "
+        "the re-sent projection is: the fact needs one line, and that line cannot be "
+        "projected while the version-gated hot-reload half cannot"
     ),
 }
 

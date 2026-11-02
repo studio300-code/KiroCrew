@@ -64,6 +64,8 @@ through it reaches every owner binding the same object (`kiro_crew._facade_mirro
 | `acp/client_turn_control.py` | a turn controlled from outside it: kiro, claude, goose and opencode steers, cancel, slash commands and the turn-state queries callers poll |
 | `acp/client_start.py` | the session start: the spawn (kiro-cli's own arm, and every other host's plan through the launch tail both drivers share), the `initialize` handshake and its params, new, loaded, forked and substituted sessions, and `ensure_ready` |
 | `acp/client_turn.py` | the turn loop: sending the prompt, `_prompt_loop`, reading the prompt response, dispatching and processing frames, `send_message`, `send_message_stream`, `stream_events` and `stream_unsolicited`, the tool-interrupted marker, OpenCode's deferred shell permission and the liveness consult |
+| `acp/disposed_session.py` | not a member owner: the per-harness texts that mean a session's backend was disposed in a live process, and the two answers `_prompt_loop` takes from it (see *A session the harness disposed*) |
+| `acp/relaunch_reload.py` | not a member owner: relaunching a live client's process and loading the same session in it, and the MCP mark a relaunch-reload harness applies at its next turn boundary (see *An MCP change applied by relaunch*) |
 | `acp/client_class.py` | the class statement: the constructor, the properties, the class defaults, the member table that binds every owner's members, and the members that stay class-resident |
 | `acp/client_lifecycle.py` | the child after it is spawned: the stderr drain, process-tree tracking, kill, failed-start classification, state reset, the workspace and sandbox discards, re-binding a live process, and shutdown |
 
@@ -212,7 +214,7 @@ row names its responsibility, and a new request shape or turn-metadata parser to
 | `acp/_dispatch_parts/tool_call_provenance.py` | the per-turn tool-call provenance caches: their scoped key, caps, overflow record and admission, the release at a terminal status, and the liveness keys (`liveness_key`, `InFlightIdSet`) |
 | `acp/_dispatch_parts/adapter_signals.py` | claude-agent-acp and codex-acp signals that ride ordinary frames: compaction notices, adapter-written errors, background-launch records and codex compaction updates |
 | `acp/_dispatch_parts/tool_result_events.py` | a `tool_call_update`'s output as `EVENT_TOOL_RESULT`: content and `rawOutput` text, the unrenderable-content diagnostic, the output measure and the `todo_list` snapshot |
-| `acp/_dispatch_parts/permission_requests.py` | a `session/request_permission` as `EVENT_PERMISSION_REQUEST`: option kinds and the least-destructive reject, the gate-extension envelope, MCP identity and approval, KAS consent and `build_permission_event` |
+| `acp/_dispatch_parts/permission_requests.py` | a `session/request_permission` as `EVENT_PERMISSION_REQUEST`: option kinds and the least-destructive reject, the gate-extension envelope and the Strands owner classification (`strands_envelope_identity`), MCP identity and approval, KAS consent and `build_permission_event` |
 | `acp/_dispatch_parts/session_update_parser.py` | the `session/update` parser: chunk text and message ids, the `tool_call` and refinement builders, and `parse_session_update` |
 
 `acp/liveness.py`, the per-session liveness oracle, keeps `LivenessOracle`, the
@@ -1156,6 +1158,26 @@ cancelled caller still lets the worker settle).
 **Unknown server→client requests are answered, never dropped.** `session/request_permission` and the elicitation request (`elicitation/create`, and on KAS `_kiro/mcp/elicitation`; see *MCP elicitation*) are the inbound *requests* `AcpClient` implements. `AcpSessionHandle` serves three more, all KAS-specific: `_kiro/hooks/list`, `_kiro/hooks/sessionStart` and `_kiro/hooks/executeHook`, answered from `acp/kas_wire.py` (see agent-host-contract.md, which states the four gates `executeHook` passes before anything spawns). `_kiro/hooks/executeHook` is routed there only while hooks are announced in the handshake (`kas_wire.hooks_announced()`); `KAS_CLIENT_CAPABILITIES` announces none today, so it is answered `-32601`. They are matched in that handle's own dispatch loop, ahead of the shared classifier, precisely so the classifier keeps reporting them as unknown on the `AcpClient` path — which serves no hooks surface, and where naming an action no branch handles would leave the request unanswered instead of refused. Any other server→client request (method **and** id — e.g. `fs/read_text_file`, `terminal/create`) is classified by `_process_message` as `"server_request_unknown"`. Every prompt dispatch site (`send_message_stream`, `_dispatch_events`, `_read_prompt_response`) handles that action by calling `_reject_unknown_server_request`, which replies with a JSON-RPC `-32601` (`JSONRPC_METHOD_NOT_FOUND`, "Method not found") error via `_send_error`. Without this, JSON-RPC semantics leave the agent blocked forever on an unanswered request — the turn hangs. Notifications (method, no id) are unaffected and still classified `"skip"`.
 
 `PermissionOption` field names differ between backends — kiro-cli uses `id`/`label`, claude-agent-acp uses `optionId`/`name` (per the public ACP spec). `_build_permission_event` reads both and remembers the optionIds keyed by `kind` (`allow_once`/`allow_always`/`reject_once`/`reject_always`) on the request id — recording an entry when **either** an allow option (for `approve_tool`) **or** a reject option (for a clean `reject_tool`) was advertised. `approve_tool(request_id, *, always=False)` echoes the matching allow id back, so the host doesn't need to know whether it's talking to kiro (`"allow_once"`/`"allow_always"`) or claude-agent-acp (`"allow"`/`"allow_always"`). `reject_tool` prefers a **clean reject**: if a reject optionId was advertised it sends `outcome: "selected"` with that id. Both backends advertise one — claude-agent-acp as `{kind:"reject_once", optionId:"reject"}` (→ `behavior:"deny"`), kiro-cli as `{kind:"reject_once", optionId:"reject_once"}` — and the fallback to `outcome: "cancelled"` therefore only applies to a backend that advertises no reject option at all. The distinction is load-bearing, not cosmetic: a clean reject resolves the tool call to `status:"failed"` with kiro-cli's fixed content `"User denied tool execution"` and the turn continues to the next model-inference boundary (`stopReason: "end_turn"`), whereas `cancelled` ends the turn immediately with `stopReason: "refusal"` and no text — and drops any queued `_session/steer` as `AgentExecutionUserMessageCleared`. That is why the host's in-band deny notice (`_steer_policy_notice`) can only be folded in on the clean-reject path, and why `stopReason: "refusal"` is NOT by itself evidence of a model-side content refusal.
+
+**Strands: classified from the gate envelope's owner, never from the card.**
+The Strands CLI asks only for Strands interrupts, so every tool call asks
+through Crew's gate module (`Routing.VERIFIED_GATE_EXTENSION`), and on that
+harness every permission frame must be the module's envelope (`kiro-crew-gate`,
+with the session nonce). The envelope names the tool, its `owner` and the
+call's `toolUseId` as `toolCallId`, which is the id on the CLI's `tool_call`
+card, so the request joins its card. The owner is read off the tool OBJECT
+Strands resolved: `builtin` for an object `strands_harness` built for that
+built-in's slot, `mcp:<server>` for an MCP tool (titled `mcp__<server>__<tool>`),
+`custom` for anything else. The Strands SDK's own shell (a tool whose function `make_shell` defined) is `builtin` wherever it was built, so `Agent(tools=[shell])` still reaches the command tiers; renamed (even to `read`), it gets an owner Crew does not know and is refused. `strands_envelope_identity` derives the kind, the
+shell verdict, the MCP identity and the `strands#…` harness tool id from owner
+and name only (`STRANDS_BUILTIN_TOOL_KINDS`): a project tool named `read` is
+`other` with no tool name, so no read-only tier and no built-in alias proves it.
+The card's own `kind`, which the CLI guesses from name substrings, and the shell
+verdict cached from it are never read on this harness. A frame that is not the
+envelope, an unknown owner, an MCP owner with no readable server or a built-in
+this build has not classified is refused as an unreadable identity. "Always
+allow" stays Crew's own grant; Strands offers only `allow` / `deny`, and Crew
+answers `allow` (one call) for both choices, never writing Strands' config.
 
 Both the shared runtime and the legacy direct `AcpClient` route permission
 frames through `_dispatch.build_permission_event`, including the same provenance
@@ -2492,6 +2514,49 @@ both `AcpClient` and `AcpSessionProvider` (called after `ensure_ready()`).
 `cancel_session()` sends a `session/cancel` JSON-RPC notification to the agent's stdin. It is fire-and-forget — no response ID is awaited.
 
 After the notification it answers every permission request still open (`_permission_options`) with the `cancelled` outcome, as ACP requires. goose and pi do not acknowledge a cancel while a permission request is unanswered, so without this a Stop from a surface that had not rejected the open approval first waited out the ack budget and hard-killed the harness. Each answered request gets one SEL record (`tool_name=approval_cancel`, `outcome=rejected_on_cancel`) before the answers go out: one off-loop hop for all of them, bounded by `_SEL_AUDIT_TIMEOUT_SECONDS`. The answers are ordinary response frames through `_send_response`, so each carries the response-write no-progress bound. Both costs fall inside the cancel grace window. A cancelled pi gate dialog is recorded as denied, the same as a rejection.
+
+### A session the harness disposed (`acp/disposed_session.py`)
+
+A harness in `ACP_BACKENDS_RELOAD_DISPOSED_SESSION` can stop serving one session while its process keeps running, and then answers every `session/prompt` on that id with the same error. The Strands CLI does this when a cancel does not stop its Python worker within 3s: it kills the worker and answers `-32603` with `data.details` "The Python agent did not stop after cancellation. Reload it to continue." (`test/fixtures/acp_frames/strands/cancel-dispose-live.jsonl`). A second process loads the saved session and serves the next prompt (`cancel-dispose-reload-live.jsonl`).
+
+For a member, `_prompt_loop` asks the module about every prompt error and every approval request, so all three prompt APIs behave the same. A harness outside the set never reaches it:
+
+| Read in the turn | What the client does |
+|---|---|
+| A prompt error whose `data.details` is one of the member's disposal texts (`DISPOSED_SESSION_DETAILS`), on a turn Crew cancelled | Ends the turn as `cancelled`, marks the client stalled (`_stdin_stalled`) and keeps this session as `_resume_session_id` |
+| The same error on a turn nobody cancelled | Marks the client the same way and raises a non-transient `AcpError` with a plain message: send the message again |
+| A `session/request_permission` read after `cancel_session` | Answers `cancelled` at once, with the same SEL record as the cancel's own answers (`cause=asked_after_cancel`), and never puts it to a person. The CLI holds its turn open on that answer, so the cancel could not finish while a card waited |
+
+The next `ensure_ready` replaces it through the stalled-child path it already has: it kills the process (force), refuses to spawn beside one it could not confirm dead, and resets state, which clears the flag. The start path itself is unchanged. `_resume_session_id` survives the reset, so the spawn that follows sends `session/load` for the same id and the conversation comes back before the next prompt goes out. Any other error text on the same code stays an ordinary turn failure.
+
+An open approval is a different case, and the client does not handle it. A cancel that finds a Strands approval OPEN ends cleanly as `cancelled`. But Strands CLI 0.2.3 leaves the agent in its interrupt state and saves it, so a bare CLI then fails every later prompt with "must resume from interrupt", and so does a reload (`cancel-approval-open-live.jsonl`). That text is not a disposal, because a fresh process loads the same saved state. Crew's gate module clears it instead: before any prompt that is not itself an interrupt answer, it resumes each open interrupt with a deny (`agent_sdk/gate_extensions/strands/kiro_crew_strands_gate.py`, `_gated_stream_async`).
+
+### An MCP change applied by relaunch (`acp/relaunch_reload.py`)
+
+A harness in `ACP_BACKENDS_MCP_RELAUNCH_RELOAD` reads its MCP servers once, at launch, and keeps its own session records. The Strands CLI is one: its servers come from the `--mcp-config` file the adapter writes at each spawn, and project mode refuses a non-empty `session/new` array. So a running process cannot take a new server. A second process launched with a changed file can: it `session/load`s the same id, replays the saved conversation, answers `{}`, and offers the new set on the next turn (`test/fixtures/acp_frames/strands/mcp-relaunch-add-live.jsonl`, an added server; `mcp-relaunch-remove-live.jsonl`, a withdrawn one).
+
+| Step | Where | What happens |
+|---|---|---|
+| Decide | dashboard MCP writer (`mcp_hot_reload.live_sessions_apply_mcp_live`) | `AcpProvider.mcp_config_relaunch_reload` is True for a direct `AcpClient` on a member, so the all-sessions reset is skipped |
+| Mark | `mark_reinjecting_providers` -> `AcpProvider.mark_mcp_config_changed` | sets `_mcp_relaunch_pending` on the client; a client outside the set keeps no mark |
+| Clear | the Strands adapter's `resolve_spawn` | drops the mark right before `_prepare_session_mcp` reads the spec: this launch already writes the new set. A mark set after that read survives |
+| Apply | `providers/acp_turns._ready_confirmed_session`, after `ensure_ready` and before `confirm_member_projection` | `apply_pending_mcp_relaunch`: skipped while `_turn_lock` is held (never mid-turn) or with no live process holding a session. Otherwise the mark is consumed and `relaunch_and_reload` runs |
+| Relaunch | `relaunch_and_reload` | the disposed-session path: marks the client stalled, keeps the session id as `_resume_session_id`, and calls `ensure_ready`, which kills the process, spawns a new one with a fresh `--mcp-config` and sends `session/load`. Once the same id loads, the stub token is re-claimed for the new process (`reclaim`), as the KAS re-injection does |
+
+A replacement that opened a different session (`ensure_ready` falls back to `session/new` when a load fails) is not this conversation, so it counts as a failure. A spawn refusal that names its own remedy (an `AcpError` such as a wrong CLI version or a missing vault secret) reaches the person unchanged, and a dead process stays transient. A replacement that opened another session, or a failure that is not an `AcpError`, refuses the turn with a plain message (`RELAUNCH_FAILED_TEXT`). Either way the load stays owed (`_relaunch_owed_session`): the client is stalled with the session id as its resume id and as `_session_id` (so the shutdown sweep never saves a fallback session's id as the chat's), and every later turn is refused until a replacement serves that id, so no turn is prompted into another conversation. A chat whose saved session is gone keeps refusing, and the message tells the person to start a new chat. The relaunch keeps the chat's model (`session._model` reaches `--model` again). `relaunch_and_reload` is the shared step for any launch-time setting a live chat must take.
+
+### A model or effort the harness takes at launch (`acp/launch_tuning.py`)
+
+A harness in `ACP_BACKENDS_MODEL_AT_LAUNCH` reads its model from its argv and offers no ACP request that changes it; one in `ACP_BACKENDS_EFFORT_AT_LAUNCH` does the same for effort. Strands is both: `--model` and `--effort` are read when the CLI starts. So `set_model` and the provider's effort verbs move an idle session by replacing its process, the way Strands' own TUI restarts its worker:
+
+| Step | What happens |
+|---|---|
+| Refuse | No session yet, a turn in flight, or (for a model) another harness's id. For Strands a `<provider>/<model>` id with a provider the CLI knows is its own, even when pi or opencode lists the same spelling; any other id another catalog claims is refused (`strands_model_is_foreign`). That refusal is `AcpModelUnavailable`, so a picker answers 4xx and a fallback walk skips the entry. |
+| Record | The new `_model` / `_launch_effort`, which the harness's launch reads. |
+| Relaunch | `relaunch_and_reload` (above) runs now: the replacement reads the new values and `session/load`s the same id, so the harness replays its own history. |
+| Undo | A relaunch that raised, or that opened another session, restores the prior values; the helper leaves the load owed, so the next start reopens the chat on them. |
+
+The switch holds the client's `_launch_tuning_lock` across the relaunch. Every `ensure_ready` a turn or command runs holds it too (`switch_barrier`: the provider's `_ready_confirmed_session`, and the client's send and command entries, which take it after marking the turn started), so no turn starts a process inside a switch, and a switch that wakes after a turn started refuses. Only a member of the launch-time sets takes it. An unchanged value starts nothing. The provider passes a model change and its effort in one relaunch, and its factory carries a saved level for any model id, pinned or not, so a cold start launches on it. A live change, the factory and the launch argv judge the level by one vocabulary, the CLI's own (`agent_sdk.backends.launch_effort_supported` over `EFFORT_LEVELS_AT_LAUNCH_BY_BACKEND`: Crew's five plus `auto`, `off` and `minimal` for Strands), so a level the switch took is never dropped on the next start. Only a level picked for the session reaches the argv: an inherited default (`agent.reasoning_effort`, a crew or role effort) is never passed, so a project that refuses a launch effort still starts. Clearing the override relaunches on the CLI's own default, as a cold start with no slot level does. Such a harness advertises no model list, so `GET /api/models` offers `auto` and the model its own settings name (`settings_default_model`: `agent.strands_provider` / `agent.strands_model`), never kiro-cli's catalog.
 
 ### stopReason Parsing
 

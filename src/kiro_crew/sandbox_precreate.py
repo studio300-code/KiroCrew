@@ -44,6 +44,8 @@ from kiro_crew.sandbox_leaves import (
 #:      both absent and empty, so every service stays unconfirmed;
 #:    * ``decisions_consent.json`` — ``decisions.consent.load_state`` reads ``{}``
 #:      as NOT CONSENTED, which is what an absent keystone means;
+#:    * ``shared_crew_preview.json`` — ``shared_crew.preview.read_stored`` reads
+#:      ``{}`` as OFF, which is what an absent keystone means;
 #:    * ``settings_seeds.json`` — ``acp.seed_provenance._load`` finds no ``seeds``
 #:      mapping in ``{}`` and returns having recorded nothing, so every settings
 #:      path reads as unowned. Identical to absent, and the leaf that most needs
@@ -131,6 +133,10 @@ _CREW_PRECREATE_READONLY_DIR_LEAVES: tuple[str, ...] = (
     # the adapter so the directory is a read-only mountpoint before ANY sandbox starts,
     # including the first pi spawn on a fresh install.
     "pi-gate",
+    # KAS MCP launch snapshots: the launcher reads a snapshot by name and refuses a
+    # missing one, so an empty directory means what an absent one does, and the
+    # bind is live, so a snapshot the gateway writes later is seen.
+    "kas-mcp-launch",
     # Empty directories are absent-equivalent to the approval and resolution readers.
     # Pre-creation gives Linux concrete bind targets on a fresh install.
     "mcp-launch-approvals",
@@ -173,6 +179,7 @@ _CREW_NOFOLLOW_READONLY_DIR_LEAVES: tuple[str, ...] = (
     "models",
     "redaction-allow",
     "pi-gate",
+    "kas-mcp-launch",
     "mcp-launch-approvals",
     "mcp/resolved",
     "template-mcp-additions",
@@ -248,6 +255,10 @@ _DELEGATED_OVERLAP_LEAF_REASONS: "dict[str, tuple[str, str]]" = {
         "sealed pi gate runtime",
         "the agent could plant the launcher a later pi session execs out of",
     ),
+    "kas-mcp-launch": (
+        "sealed KAS MCP launch snapshots",
+        "the agent could choose the command and environment a later MCP server start runs",
+    ),
     "mcp-launch-approvals": (
         "sealed MCP launch approvals",
         "the agent could approve a command the gateway launches outside the sandbox",
@@ -306,6 +317,13 @@ _CREW_PRECREATE_READONLY_FILE_LEAVES: tuple[str, ...] = (
     "oauth_endpoints.json",
     "aws_service_consent.json",
     "decisions_consent.json",
+    # The Shared Crew preview switch: ``preview.read_stored`` reads an absent,
+    # empty and unreadable store alike as OFF, so a pre-created ``{}`` means
+    # exactly what an absent file means (criterion 1); the writer rewrites an
+    # existing record in place (``preview.write_stored``), so the read-only mount
+    # stays on the same inode and a sandboxed reader sees the owner's choice,
+    # never a writable copy (criterion 2).
+    "shared_crew_preview.json",
     # Consent to forward SSH_AUTH_SOCK: ``ssh_auth_sock_consent.is_granted``
     # reports no consent for an absent, empty, AND unreadable store alike, so a
     # pre-created ``{}`` means exactly "not forwarded" (criterion 1); the writer
@@ -453,6 +471,9 @@ _CREW_PRECREATE_HIDDEN_DIR_LEAVES: tuple[str, ...] = (
     # operator's, hiding runs from the panel. Materialising it empty gives the
     # bind a target from first boot.
     "panel-dismissals",
+    # Released-session entries, for the same reason: created on the first release,
+    # and an entry has the gateway delete the record it names.
+    "released-sessions",
     # Append-only per-unit crew logs, and the hazard is the sharpest here: the
     # record is the AUTHORITY a reader trusts instead of re-deriving, and the
     # store creates this root on its first write. A sandbox spawned before that

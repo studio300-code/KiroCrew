@@ -946,11 +946,14 @@ always-on body.
 
 ### Managed-source root checks
 
-Each `_refuse_managed_source` call loads configuration anew and resolves each
-unique declared admin/workspace root once through `_comparable_root`. The local
-results serve only that call's overlap and containment checks. Later calls
-revalidate configuration and link targets; no authorization is cached across
-requests or turns. Candidate paths remain lexical until the existing path gate
+The root table is read once per `documents_for_member` call: that call loads
+configuration and resolves each unique declared admin/workspace root once
+through `_comparable_root`, and every `_refuse_managed_source` check inside it
+(the `_read` pre- and post-validation checks and the walk checks) reuses that
+table. A `_refuse_managed_source` call outside such a read builds its own. The
+next `documents_for_member` call, and so the next turn, revalidates
+configuration and link targets; no authorization is cached across requests or
+turns. Candidate paths remain lexical until the existing path gate
 admits them, and rejected UNC roots are never resolved. Every admin-overlap and
 managed-memory exclusion remains in force.
 
@@ -1414,7 +1417,12 @@ restore: codex resolves a load from the sessionId alone.
 KAS answers no, and that is the whole of its exclusion: `_kiro/session/delete`
 REMOVES the persisted record, so there is nothing for a load to restore and a
 shared subagent would strand `spawn_continue` on `conversation_gone`. A different
-gap, owned by whoever gives KAS a non-destroying teardown. The invariants governing what an
+gap, owned by whoever gives KAS a non-destroying teardown. A KAS engine that advertises
+`sessionCapabilities.close` now has one, `session/close`. Crew sends it to keep a finished
+task-runner or workflow session's record for `session.kas_delete_delay_secs`
+([session.md](session.md#released-kas-session-records)), and to reload a live session
+with a changed MCP projection (`AcpRuntime.evict_session`); the sharing membership is
+unchanged. The invariants governing what an
 added harness may and may not change are in
 [harness-parity.md](harness-parity.md).
 
@@ -1436,8 +1444,29 @@ servers remain withheld. A granted gateway broker stub is also admitted through
 the same restriction checks; gatewayd verifies its claim and supplies per-call
 identity to the managed backend.
 
+The work ledger (`kirocrew-work`) is admitted only as that gateway broker stub,
+and only in its exact shape: a stdio element running the broker stub module
+under one `--server kirocrew-work`, whose `env` is exactly one stub-token pair
+equal to this session's nonempty token. The same restriction, `disabled` and
+`tools` checks apply. A spec-described work-ledger entry, an unbound or foreign
+stub, and every other identity-bound server stay withheld.
+
 On an enforced sandbox, credential-bearing host readers need the broker route:
 configure `mcp_gateway.stub_servers` to include `kirocrew-core` and
 `kirocrew-dashboard`. Direct children cannot read the gateway credential or SEL
 trust root there; the Codex dashboard mount does not relax those masks. Global Codex MCP entries
 are not a substitute for this session mount.
+
+### opencode work-ledger stub mount
+
+The opencode mirror (`providers/mirrors/opencode.py`) withholds every
+identity-bound Crew server, from both the spec-described half of the array and
+the pooled broker stubs. The work ledger (`kirocrew-work`) is admitted only as
+the gateway's broker stub, and only in its exact shape: a stdio element running
+the broker stub module under one `--server kirocrew-work`, whose `env` is
+exactly one stub-token pair equal to this session's nonempty token. It still
+passes the `tools` allowlist and `disabled`, and a switched-off tool keeps the
+stub mounted only while its deny rule is in force. A spec-described work-ledger
+entry, an unbound or foreign stub, and every other identity-bound server stay
+withheld. The admission is opt-in on the shared `place_single_binary_array`, so
+goose, copilot and deepseek are unchanged.

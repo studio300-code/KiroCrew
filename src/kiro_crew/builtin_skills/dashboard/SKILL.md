@@ -263,6 +263,17 @@ a cell, or the whole `data` object for a script to draw. The record is the
 script's own words: draw it as text, and show its `at` so a stale poll reads as
 stale. Only a cron bound to you can write here, and it can never name who wrote.
 
+A record is not current just because it is the latest. Have the script pass
+`max_age_s` (about twice its interval) to `ctx.crew_log_append`; the row then
+carries `stale_after`, the gateway's write time plus that. When the job's run
+fails, the gateway adds `failed_at` and `last_error` to each record that job
+wrote, and lists the job in `custom.failures` even when it never landed a record.
+Bind the row, not only its `data`, and draw it as stale or failed, never as
+current, when `failed_at` is present or `Date.now()` is past `stale_after`. A
+record exactly at `stale_after` is still current. Both marks clear only when
+the job writes again, so a job that writes only on change stays marked failed
+until its next change; write each run if the page must show recovery.
+
 For a project fact absent from folds, first look for its recording tool or an
 existing project artifact. An agentic field can hold a verified snapshot as a
 number, text, boolean, array or object, as well as your own verdict. Label its
@@ -294,7 +305,7 @@ Values arrive in three ways:
 2. `window.kirocrew.fields` holds the same declared values, with `agentic`,
    `seq` and `missing` beside them.
 3. `window.kirocrew.subscribe(name, cb)` calls `cb(value, name, meta)`
-   immediately and on each push. Its returned function unsubscribes. A chart or
+   immediately and on each push that changes the field. Its returned function unsubscribes. A chart or
    script-only field needs no extra text binding or hidden sink. `meta` is
    `{missing}`; read the agentic marks from `window.kirocrew.agentic` and
    the write times from `window.kirocrew.written_at`. When a field you drew
@@ -308,7 +319,10 @@ Values arrive in three ways:
 Subscribe during parse. The subscription survives a replaced fields object;
 zero is a present value and still reaches the callback. A failing callback
 leaves the others running. The `kirocrew-dashboard` event is also available,
-but only announces a refill rather than naming the field.
+but only announces a refill rather than naming the field. It fires only when the
+read changed, and at most once a minute on a read that changed nothing, so a
+page drawing elapsed time from the clock stays current.
+Redraw on this event, not on every `message`.
 
 Use `createElement` and `textContent` for recorded text. Inserting recorded
 strings as `innerHTML` would turn somebody's data into page markup. Numerical

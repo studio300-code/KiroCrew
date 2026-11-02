@@ -8,6 +8,7 @@ import { useAppSelector, useAppDispatch } from '../../store'
 import { ackNotification } from '../../store/notificationsSlice'
 import { setActiveId } from '../../store/instancesSlice'
 import { useIsMobile } from '../../hooks/useIsMobile'
+import { useExplorePreview } from '../../hooks/usePreviewFlag'
 import { useAckCronNotesInView } from '../../hooks/useAckCronNotesInView'
 import { useCrewWindow } from '../../pages/chat/crew-window/crewWindowStore'
 import { animateDrawer, registerDrawerTargets, takeOverDrawer } from '../../hooks/useDrawerSwipe'
@@ -18,6 +19,7 @@ import NotificationDetailPanel from '../../components/notifications/Notification
 import NotificationFeed from '../../components/notifications/NotificationFeed'
 import NotificationBanner from '../../components/notifications/NotificationBanner'
 import FileMenuResultToast from '../../components/notifications/FileMenuResultToast'
+import MilestoneNoticeToast from '../../components/milestones/MilestoneNoticeToast'
 import { recordEvent } from '../../rum'
 import { i18nT } from '../../i18n/t'
 import { uiLocation } from '../../uiLocations/uiLocation'
@@ -378,6 +380,7 @@ export function NotificationSheet({ sheet }: { sheet: ReturnType<typeof useNotif
   // the `navigate` alone would leave the user's "keep my draft" answer with
   // the panel shut behind it.
   const leave = useGuardedLeave()
+  const explore = useExplorePreview()
   const {
     isMobile, phase, open, closing, selectedTs, setSelectedTs, selected,
     popoverRef, bellRef, sheetRef, sheetX, leavingProps, closePanel, openPanelOn,
@@ -531,7 +534,7 @@ export function NotificationSheet({ sheet }: { sheet: ReturnType<typeof useNotif
         bellRef={bellRef}
         popoverOpen={phase !== 'closed'}
         onOpenNote={openPanelOn}
-        after={<FileMenuResultToast />}
+        after={<><FileMenuResultToast />{explore && <MilestoneNoticeToast />}</>}
       />,
       document.body
     )}

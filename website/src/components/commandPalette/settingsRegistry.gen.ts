@@ -1074,6 +1074,17 @@ export const SETTINGS_REGISTRY: SettingEntry[] =
     }
   },
   {
+    "id": "chat.exact-threshold",
+    "label": "Exact Threshold (%)",
+    "labelKey": "pages.settings.chatPanel.auto_compact_exact",
+    "tab": "chat",
+    "type": "input",
+    "occurrence": 1,
+    "params": {
+      "sub": "advanced"
+    }
+  },
+  {
     "id": "chat.fallback-model",
     "label": "Fallback model",
     "labelKey": "pages.settings.chatPanel.fallback_model",
@@ -1905,6 +1916,18 @@ export const SETTINGS_REGISTRY: SettingEntry[] =
     }
   },
   {
+    "id": "developer.explore",
+    "label": "Explore",
+    "labelKey": "pages.developer.featurePreviewsTab.explore",
+    "description": "Adds Explore to the top bar: features to try, your progress, and a Try today card on a new chat.",
+    "tab": "developer",
+    "type": "toggle",
+    "occurrence": 1,
+    "params": {
+      "sub": "feature-previews"
+    }
+  },
+  {
     "id": "developer.folder-conductor",
     "label": "Folder conductor",
     "labelKey": "pages.developer.featurePreviewsTab.folder_conductor",
@@ -1981,6 +2004,18 @@ export const SETTINGS_REGISTRY: SettingEntry[] =
     "label": "Session Environments",
     "labelKey": "sessionEnvironments.title",
     "description": "Shows the Session Environments settings. Existing chats stay on this machine; a chat moves only if you pick a profile for it before its first message.",
+    "tab": "developer",
+    "type": "toggle",
+    "occurrence": 1,
+    "params": {
+      "sub": "feature-previews"
+    }
+  },
+  {
+    "id": "developer.shared-crew",
+    "label": "Shared Crew",
+    "labelKey": "sharedCrew.preview_title",
+    "description": "People tab, invites and shared sessions",
     "tab": "developer",
     "type": "toggle",
     "occurrence": 1,
@@ -2111,6 +2146,19 @@ export const SETTINGS_REGISTRY: SettingEntry[] =
     }
   },
   {
+    "id": "display.explore",
+    "label": "Explore",
+    "labelKey": "pages.settings.displayPanel.milestones",
+    "hint": "Show Explore in the top bar and a Try today card on a new chat.",
+    "tab": "display",
+    "type": "toggle",
+    "occurrence": 1,
+    "params": {
+      "sub": "view"
+    },
+    "configKey": "dashboard.milestones_enabled"
+  },
+  {
     "id": "display.external-terminal-app",
     "label": "External terminal app",
     "labelKey": "pages.settings.displayPanel.terminal_external_app",
@@ -2232,6 +2280,17 @@ export const SETTINGS_REGISTRY: SettingEntry[] =
     }
   },
   {
+    "id": "display.overlays",
+    "label": "Overlays",
+    "labelKey": "pages.settings.displayPanel.theme_experience_overlays",
+    "tab": "display",
+    "type": "toggle",
+    "occurrence": 1,
+    "params": {
+      "sub": "theme"
+    }
+  },
+  {
     "id": "display.palette",
     "label": "Palette",
     "labelKey": "pages.settings.displayPanel.palette",
@@ -2241,6 +2300,17 @@ export const SETTINGS_REGISTRY: SettingEntry[] =
     "occurrence": 1,
     "params": {
       "sub": "sidebar"
+    }
+  },
+  {
+    "id": "display.persona",
+    "label": "Persona",
+    "labelKey": "pages.settings.displayPanel.theme_experience_persona",
+    "tab": "display",
+    "type": "toggle",
+    "occurrence": 1,
+    "params": {
+      "sub": "theme"
     }
   },
   {
@@ -2267,6 +2337,17 @@ export const SETTINGS_REGISTRY: SettingEntry[] =
       "sub": "sidebar"
     },
     "configKey": "dashboard.show_unread_dot"
+  },
+  {
+    "id": "display.sounds",
+    "label": "Sounds",
+    "labelKey": "pages.settings.displayPanel.theme_experience_sounds",
+    "tab": "display",
+    "type": "toggle",
+    "occurrence": 1,
+    "params": {
+      "sub": "theme"
+    }
   },
   {
     "id": "display.theme",

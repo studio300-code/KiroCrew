@@ -24,7 +24,7 @@ vi.mock('../utils/resizeImage', () => ({
 const API_KEY_ORDER = [
   'status', 'tunnelStatus', 'system', 'leakedRuntimes', 'reclaimLeakedRuntimes', 'sessionStorage',
   'sessionStorageCleanup', 'sessionStorageRestore', 'sessionStorageEmpty', 'sessionStorageEmptyStatus',
-  'sessionInventory', 'sessionInventoryDetail', 'sessionInventoryTrash', 'sessionCrewLogProjections', 'sessionWorkProjection',
+  'sessionInventory', 'sessionInventoryDetail', 'sessionInventoryTrash', 'reportUiControlClick', 'sessionCrewLogProjections', 'sessionWorkProjection',
   'telemetryStartup', 'telemetryContextTrace', 'telemetryContextTurn', 'usageTurns', 'usageSeries',
   'wakatimeStats', 'wakatimeExportUrl', 'crewBoard', 'crewBoardAction', 'wakatimeExportDownload',
   'sessionSummary', 'dashboardCard', 'generateSessionSummary',
@@ -136,7 +136,7 @@ const API_KEY_ORDER = [
   'dropSlotToColumn', 'tagColumns', 'createTagColumn', 'updateTagColumn',
   'deleteTagColumn', 'reorderTagColumns', 'sendChat', 'sessionsHealth',
   'tasksSummary', 'spawnAdaptive', 'tasksList', 'taskDetail', 'taskCancel',
-  'knowledgeSearch', 'notifications', 'deleteNotification', 'clearNotifications',
+  'knowledgeSearch', 'knowledgeEmbeddingGenerate', 'notifications', 'deleteNotification', 'clearNotifications',
   'ackNotification', 'unackNotification', 'ackAllNotifications', 'notificationChannels',
   'updateNotificationChannelSettings', 'vapidPublicKey', 'subscribePush', 'unsubscribePush', 'sessions', 'sessionsSearch', 'sessionsNamed', 'instancesSearchSessions',
   'instancesCapabilities', 'instancesApprovalState', 'instancesVersions', 'instanceChatSlots', 'crewPeerGet', 'crewPeerPost', 'sessionDetail', 'sessionMeta', 'deleteSession',
@@ -157,7 +157,8 @@ const API_KEY_ORDER = [
   'fileDiff', 'fileSearch', 'pathComplete', 'uploadFiles',
   'screenshot', 'themes', 'dashboardConfig', 'featureVideoNext',
   'featureVideoFeedback', 'featureVideoProbe', 'featureVideoStatus', 'featureVideoFetchAll',
-  'updateDashboardConfig', 'createTheme', 'installTheme', 'updateTheme',
+  'milestones', 'milestoneEvent', 'milestoneMarkDone',
+  'updateDashboardConfig', 'createTheme', 'installTheme', 'installThemeZip', 'updateTheme',
   'deleteTheme', 'themeDetail', 'themeBoot', 'updateThemeConfig',
   'voiceConfig', 'updateVoiceConfig', 'voiceVoices', 'voiceSystemVoices',
   'awsConsent', 'grantAwsConsent', 'revokeAwsConsent', 'credentialRedaction',
@@ -197,7 +198,13 @@ const API_KEY_ORDER = [
   'researchKnowledgeStatus', 'researchToArtifact', 'researchReportStatus', 'researchReport',
   'researchDelete', 'invokeFileMenuItem', 'artifactTeardown', 'publishProviders',
   'publishArtifactToCoreProvider', 'publishToProvider', 'deploySites', 'tipsNext', 'tipsStatus',
-  'tipsFeedback',
+  'tipsFeedback', 'sharedCrewCapabilities', 'sharedCrewSessions', 'sharedCrewPeople', 'sharedCrewMode', 'sharedCrewViewer',
+  'sharedCrewCapacity', 'sharedCrewWork', 'sharedCrewPresence', 'sharedCrewDecisions', 'sharedCrewSendState', 'sharedCrewTypingLease', 'sharedCrewTakeOverTypingLease',
+  'tailscaleInvites', 'tailscaleConnect', 'tailscaleDisconnect', 'tailscaleCreateInvites', 'tailscaleResendInvite',
+  'tailscaleRevokeInvite', 'tailscaleUploadAvatar', 'sharedCrewSetPersonDisplay',
+  'sharedCrewAccess', 'sharedCrewAckFirstShare',
+  'sharedCrewPreview', 'sharedCrewSetPreview',
+  'sharedCrewCancelWork',
 ]
 
 const NESTED_KEY_ORDER: Record<string, string[]> = {

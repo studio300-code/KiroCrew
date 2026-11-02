@@ -64,6 +64,12 @@ A candidate qualifies only if **all three** hold:
    another repository's PR, and outside a checkout it cannot be evaluated),
    `pr_merged` (a PR has merged, also via `gh`, with `repo` required: an open
    PR reads `pending`, one closed without merging reads `fail`),
+   `edition_check` (`{"kind": "edition_check", "check": "<name>", "ref":
+   "<id>"}`: a check an installed edition provides, for work that lands
+   somewhere this evaluator cannot read itself, such as an edition's own code
+   review system; the check names are the edition's to document. With no
+   edition providing the check it answers `error`, and a check that says a
+   person must decide answers `refused`),
    `file` (a path existing), or `human_approval` (the user accepts it —
    legitimate for design reviews and go/no-go gates, but never
    machine-evaluated). **There is deliberately no "run this command" kind**, so
@@ -108,6 +114,20 @@ referee, and the human rules when it is stuck. Read
 participants read each other's files by design, the one exception to
 Independent above, and the ledger carries only a short summary and the path to
 the debate note.
+
+**Offer a debate; do not wait to be asked.** When a goal or an item is a
+design or implementation of real size, put "debate first" in your Round 0
+plan as one Assumption line: the question, the participants and their
+aspects, the rounds, a time estimate and the work items it uses. Real size
+means any of: about 150 lines or more, two or more modules, a security, data,
+approval or trust boundary, a contract others depend on, two or more
+plausible approaches, a prior failed attempt or a design block from a
+reviewer, or an RFC. Do not offer it for a small change with a clear fix, CI
+or rebase work, wording, an emergency, a design the owner already decided, or
+when fewer than half the goal's work items are left. "Skip the debate", "just
+do it" or any gate-skipping message drops it. A standing preference the owner
+stated ("always debate first", "stop suggesting debates") wins over these
+rules.
 
 ## The loop
 
@@ -552,9 +572,31 @@ total from its `conductor.goal_items_used`, not by counting `items`:
   items** in total — every round's items, re-plans included (`item_cap`, set
   with `action=goal` `item_cap=<N>`). Nothing is refused past it. Read
   `goal_items_used` and `cap_exceeded` off `work_ledger_read`'s `conductor`
-  block and put `items used: N of <item_cap>` in every round report; when
-  `cap_exceeded` is true, say so in that report so the user can decide whether
-  the goal is spending more than they meant, then carry on. Only a goal the
+  block. The count is yours to manage, not the user's: keep it out of round
+  reports, where a running "N of M" reads as a quota the user must watch. The
+  first report after `cap_exceeded` turns true, tell the user once, in plain
+  words, so they can stop the goal if it is spending more than they meant (for
+  example, "This goal has needed 23 work items so far, more than the 20 I
+  planned for. I'm carrying on; say stop if that's more than you want."). Make
+  it a statement, not a question, so it never holds up the round's reset. Your
+  chat is reset each round, so the marker records that you gave the notice:
+  in every round-close `session_ledger_record` (the one that carries `goal`,
+  `next` and `patrol_base`), re-record `item_cap_notice` in `artifacts` so it
+  never ages out. Record `none` if a fresh `work_ledger_read` shows
+  `cap_exceeded` false; `told the user at N` only if this turn's report gave
+  the notice; otherwise the stored value, carried forward unchanged. The turn
+  whose report gives the notice records `item_cap_notice` as `told the user at
+  N` with `session_ledger_record` in that same turn, whether or not it closes a
+  round, so a paused round (no progress, a question to the user) cannot lose
+  it. Items are
+  created at dispatch, after the report, so the cap is usually crossed after
+  the report that could have said so; carrying the value forward leaves the
+  notice to the next report. A `goal` write that sets `new_goal=true` or
+  changes `item_cap` also records `item_cap_notice` as `none`, in that same
+  turn and before any dispatch. Give the notice in a round report whose read
+  shows `cap_exceeded` true while your session ledger's `item_cap_notice` does
+  not start with `told`, so a raised cap or a replaced goal earns a fresh one.
+  Then carry on. Only a goal the
   user replaced starts a new count: record it with `action=goal`
   `new_goal=true`. Rewording the goal keeps the count.
 - **No progress.** When **two rounds in a row** land with no item accepted, do
@@ -848,7 +890,8 @@ what the composer renders:
   audit-logged and every call prompts. The evaluator accepts **no command, argv
   array, or shell string from a spec** — it builds every argv it runs from a
   fixed template, so `pr_checks` becomes `gh pr checks <n>`, `pr_merged`
-  becomes `gh pr view <n> --repo <owner/name> --json state`, and nothing else
+  becomes `gh pr view <n> --repo <owner/name> --json state`, `edition_check`
+  becomes `kirocrew acceptance-check --json <check> <ref>`, and nothing else
   executes. That is deliberate and load-bearing: this script is invoked as an
   approved wrapper, so a spec that could name a command would turn it into a
   general way to run one, and Kiro Crew's denied-command floor cannot see inside

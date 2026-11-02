@@ -64,6 +64,7 @@ from kiro_crew.acp.types import (
     ACP_BACKEND_KIRO,
     ACP_BACKEND_OPENCODE,
     ACP_BACKEND_PI,
+    ACP_BACKEND_STRANDS,
     ACP_BACKENDS_ADVERTISED_MODEL_SELECTION,
     ACP_BACKENDS_MEMBER_CAPABILITIES,
     ACP_BACKENDS_SEED_LOCAL_SETTINGS,
@@ -160,6 +161,14 @@ class AcpClient:
         # no filesystem syscall at all.
         self._work_dir_ready = False
         self._model = model or DEFAULT_MODEL
+        # The reasoning effort a launch-time-effort harness starts with
+        # (``ACP_BACKENDS_EFFORT_AT_LAUNCH``), or "" for its own default. Set by the
+        # provider before the first start and by ``acp.launch_tuning`` after.
+        self._launch_effort = ""
+        # Held by a launch-tuning switch across its relaunch, and by the provider's
+        # prompt boundary across ``ensure_ready``, so neither starts a process
+        # inside the other's (``acp.launch_tuning``).
+        self._launch_tuning_lock = asyncio.Lock()
         self._agent = agent
         self._sandbox_mode = sandbox_mode
         self.memory_mode = "persistent"
@@ -319,7 +328,7 @@ class AcpClient:
         # exactly. Recorded by its launch (``acp.harness.opencode``).
         self._opencode_config_mcp_servers: tuple[str, ...] = ()
         # The per-session nonce a gate extension echoes in every dialog it raises;
-        # minted by the pi or DeepSeek Harness launch, placed in the child's
+        # minted by the pi, DeepSeek Harness or Strands launch, placed in the child's
         # environment there, and the only key under which a permission frame is read
         # as an envelope.
         self._pi_gate_nonce = ""
@@ -334,8 +343,8 @@ class AcpClient:
         self._pi_steer_turn: int | None = None
         self._pi_steers_pending: dict[int, str] = {}
         self._pi_steer_lock = asyncio.Lock()
-        # The Copilot CLI launch MCP config file this spawn wrote, removed once the
-        # session exists (``acp.harness.copilot``).
+        # The launch MCP config file this spawn wrote, removed once the session
+        # exists (``acp.harness.copilot``, ``acp.harness.strands``).
         self._copilot_mcp_config_path = ""
         # Length of the notification buffer when the routing write answered: the
         # config reports below it were superseded by that answer.
@@ -435,6 +444,19 @@ class AcpClient:
         #: How many pruned servers the last array build had past
         #: ``MCP_REPORT_BUCKET_CAP``; counted on the report, never listed.
         self._mcp_pruned_omitted = 0
+        #: The MCP array a harness was given at LAUNCH rather than on the wire, or
+        #: ``None`` when the wire array is the whole set. Strands' Python-project
+        #: mode refuses a non-empty ``session/new`` array, so its servers ride the
+        #: ``--mcp-config`` file; the session report and the unresolved-ref guard
+        #: read this instead of the empty wire array. Set by the Strands adapter
+        #: (``acp/harness/strands.py``) at each spawn.
+        self._launch_mcp_servers: list[Any] | None = None
+        # Set by a dashboard MCP write on a relaunch-reload harness; applied before
+        # the next prompt (``acp/relaunch_reload.py``).
+        self._mcp_relaunch_pending = False
+        # A session id a relaunch could not reopen; turns are refused until a
+        # replacement serves it (``acp/relaunch_reload.py``).
+        self._relaunch_owed_session = ""
         # MCP OAuth requests collected during session init from
         # `_kiro.dev/mcp/oauth_request` notifications. Drained by callers via
         # `pop_pending_oauth_requests()` after `ensure_ready()` so the UI can
@@ -899,6 +921,8 @@ class AcpClient:
     @property
     def _is_muse(self) -> bool:
         return self.backend == ACP_BACKEND_MUSE
+    def _is_strands(self) -> bool:
+        return self.backend == ACP_BACKEND_STRANDS
 
     @property
     def _model_registry_namespace(self) -> str:

@@ -175,62 +175,126 @@ A Crew Mode root (a root chat running a conductor) is eligible on the same
 rules as a mate thread, with one stricter trigger: only an explicit page hide
 (`hidden: true`) starts its away episode, because a split-view pane can stay
 visible while another pane holds focus. A pane or sidebar switch, a socket loss
-and a restart never do. Its workers and other chats are not eligible. Its prompt names
-the conductor as the writer and asks which work items finished, which wait on
-the owner, and which still run.
+and a restart never do. Its workers and other chats are not eligible; a plain
+chat never gets a brief. Any thread that owns a work ledger (a conductor
+record or work items), whatever its slot mode, gets the conductor prompt,
+which asks which work items finished, which wait on the owner, and which
+still run.
 
-A qualifying return writes a hidden durable fingerprint claim, then posts a
-short fixed mate opener ("Welcome back, let me catch you up on where we
-are."), picked by the script of the user's request. It starts
-one tool-free background model call. The fingerprint covers the original
-genuine user request, conversation task rows, session ledger, and work ledger.
-The prompt names the facts the owner must come away with and lets the model
-pick tone and layout,
-worded to the user's `dashboard.verbosity` level. It returns one JSON object:
+A qualifying return writes a hidden durable fingerprint claim. The claim also
+stores a ledger digest: a hash of the whole conductor record, every work item
+record and the session ledger, as stored, minus only fields a read derives from
+the clock or other fields (stale, orphaned, unpatrolled, pending_overdue,
+report_undelivered, acceptance_concrete, read_at). Any write changes it, a new
+stored field counts by default, and time passing alone does not. With no earlier
+claim, or when the previous claim's brief failed or was dropped, there is no
+digest to match. The
+fingerprint covers the original genuine user request, conversation task rows,
+session ledger, and work ledger. There is no separate opener message. When
+nothing changed since the previous brief and nothing waits on the owner (the
+"Waiting on you" list, `member_waiting.waiting_items`, is empty: no unanswered
+`[OPTIONS: ...]` reply, question card or change card; no open work item with
+status `question` or `blocked`; the ledger digest matches the one the previous
+brief's claim row stored; and no visible assistant row came after the away
+anchor), the
+brief is one fixed line ("Nothing new since HH:MM.", with the date when it is
+not today), posted as a plain message without a card or status chip, and no
+model call is made. The line claims nothing about what waits:
+a question asked in prose before the owner left is the message right above it.
+Otherwise the slot's `preparing` flag shows "Preparing your catch-up…" in the
+chat's working indicator while the gateway reads its inputs and makes one
+tool-free background model call; the finished message posts while the flag is
+still up, so it replaces the indicator in place. The claim and every staleness
+check use the first read's fingerprint; what the brief says comes from the
+re-read made once the claim is on disk, so a worker report that lands in
+between is not missed. Just before posting, the gateway re-reads the "Waiting on
+you" list and the ledger digest; if either differs from what the prompt used
+(a card answered or a ledger write during the model call), the result is
+dropped and generated once more from the new state, and a second change
+posts nothing that visit.
+
+The model reads one JSON snapshot assembled by `warm_task_brief_inputs.py`.
+Each section has its own character budget and keeps whole entries, most
+important first; the serialized document is never cut. In order:
+`waiting_on_you` (the "Waiting on you" list itself, `member_waiting.waiting_items`,
+read on the loop after the change-card store is warmed off it: the newest
+reply's `[OPTIONS: ...]` choices, question cards and change cards, each with
+its options and time; the list's own rules retire an answered ask, so an older
+ask is never brought back);
+`changes_since_away` (item reports, decisions and closes after the away
+anchor, and session-ledger events after it, each with its source (worker
+report, conductor decision, work ledger or session ledger) and `HH:MM`
+time); `transcript_since_owner` (the
+owner's last genuine message and every turn since, whole; over budget the
+oldest drop first); `open_items` (open items, and terminal ones that changed
+while the owner was away, questions and blocked first); `goal` (conductor
+goal, else session-ledger goal, else the owner's newest message);
+`goal_progress`; and `owner_recent_messages` (the owner's last three genuine
+messages, which pick the reply language and the script of the fixed lines).
+
+The prompt allows merged, green, approved or conflict states only from a
+change newer than the away time; anything else is written as "not checked
+since HH:MM" with the time of the newest report or message that states it.
+
+The prompt asks for parts in order: the goal, what changed since the owner
+left (each fact with source and time), numbered asks (what, why only the
+owner, every option with its consequence, the recommendation and why), problems
+that do not need the owner, and what runs next. It returns one JSON object:
 `status` (`on_track`, `needs_you`, `blocked` or `done`; anything else reads as
 `needs_you` when `needs_you` has items, else `on_track`, and `on_track` or
 `done` beside `needs_you` items reads as `needs_you`), `headline` (at most
-240 characters), `asked` (160), `remaining` (160), `done` (at most four items
-of 120), `needs_you` and `next` (at most three items of 120 each), and `extra`
-(at most two `{title, items}` sections of three items, empty ones dropped).
-The prompt asks only for `status`, `headline`, `needs_you`, a free-form
-plain-text `body` (lines kept, 900 characters) and an optional `widget` (HTML,
-redacted, dropped whole over 6,000 characters); the other fields still parse.
-`headline` is required; an older `now` or `{"message"}` reply is read as it,
-and a missing `asked` falls back to the quoted original request. `progress`
-is never the model's: the gateway stores `{accepted, total}` counted over the
-current goal's work items (the newest `goal_items_used` after a `new_goal`
-write; every item on a board that never recorded a goal), and leaves it out
-when there are none or the goal's items cannot be told apart. The snapshot
-the model reads carries the same count. Each text field is redacted before and after whitespace is
-collapsed and `**` dropped, then control markers (`[OPTIONS:`, `[STEERING`,
-`<!--`, any bracket form) are defanged so no reader of `content` turns a field
-into a live control, then the field is capped. The result is a second mate
-message: `meta.brief` holds the fields and `content` holds the same brief as
-labelled plain text. The transcript draws `meta.brief` as a fixed card
-(`WarmBriefCard`) that renders every field as a plain text node, in the order
-status and headline, Needs you, Progress (an `accepted of total` bar only when
-`progress` exists, plus `remaining`), What you asked, Done, Next, then the
-`extra` sections, with `body` after Progress and the `widget` last, in the
-sandboxed `WidgetFrame` chat widgets use. `content` never holds the widget.
-An older `meta.brief` (`asked`, `now`, `needs_you`, `next`) draws with `now` as the headline and no status chip; a row without a
+240 characters), `needs_you` (at most four items of 200) and a plain-text
+`body` (lines kept, 2,400 characters, 32 lines), words only: the model draws no
+HTML, and a `widget` it returns anyway is ignored. Older fields (`asked`,
+`remaining`, `done`, `next`, `extra`) still parse; `headline` is required and
+an older `now` or `{"message"}` reply is read as it. The gateway lists
+`waiting` itself: every open work item whose status is `blocked` or `question`
+with reason `approval` or `needs_human`, as `{title, ask}` (title and summary,
+cleaned like a model field), in ledger order, at most 50, with `waiting_total`
+counting them all; the prompt tells the model not to repeat them in
+`needs_you`, and a `done` or `on_track` status beside anything waiting reads as
+`needs_you`. `progress` is never the model's: the gateway stores
+`{accepted, total}` only over the current goal's work items after a `new_goal`
+write (the newest `goal_items_used`), and leaves it out when the board never
+recorded a goal or the goal's items cannot be told apart. Each text field is
+redacted before and after whitespace is collapsed and `**` dropped, then
+control markers (`[OPTIONS:`, `[STEERING`, `<!--`, any bracket form) are
+defanged, then the field is capped.
+
+The result is one mate message: `meta.brief` holds the fields and `content`
+holds the same brief as labelled plain text. The transcript draws `meta.brief`
+as a fixed card (`WarmBriefCard`) that renders every field as a plain text
+node, in the order status and headline, the progress orb (`WarmBriefOrb`),
+body, What you asked, Done, Next, then the `extra` sections. The orb is a
+fixed component: its liquid height and glow are `accepted / total`, sparkles
+show when the count is full, and a brief with no count (no current goal, or a
+goal with no items) draws no orb and no caption, only the cards and the status
+tag. Above it float the `waiting` items, then the model's
+`needs_you`, as wrapping cards; the first three show and the rest fold behind
+one "N more" toggle that also counts items past the gateway's list. Every orb
+animation sits inside `prefers-reduced-motion: no-preference`, colours are
+theme variables with a tighter halo on light themes, and the orb reads as a
+`progressbar` labelled with the count. A brief stored before the orb keeps its
+`widget` HTML, drawn last in the sandboxed `WidgetFrame`; an older `now` brief
+with no status and no count keeps its plain Needs you list. A row without a
 valid `meta.brief` keeps the ordinary bubble. The card is the body of the
 ordinary assistant bubble, so the row keeps its timestamp and row actions, and
 Copy takes the plain-text `content`; chat search reads the card's own visible
-text, so its count matches what can be highlighted. Only an assistant row draws it: any other
-role carrying the same `meta.kind` (the send route keeps client `meta` keys on
-the user row) draws as its own role. These generated rows
-are excluded from the task fingerprint. A new user turn, slot replacement,
-reset, close, and a finished task drop a stale result unposted. The owner
-leaving drops the brief only before its opener is posted; after the opener,
-the result still posts as ordinary history while the owner is away. Patrol turns, `[work-ledger wake]` rows, and worker reports change
-the dedup fingerprint but do not make a prepared result stale; a turn running
-at publication defers the result until it ends. Only a live user row the person
-typed cancels a brief in preparation; assistant rows, automation rows and turn
-admission never do. Repeated frames, reconnects and several windows share one
-in-flight task and then the durable claim, so each task state gets at most one
-brief, and the claim's time keeps a patrol-changed fingerprint from briefing
-again until another 30 minutes pass without the owner typing.
+text. Only an assistant row draws it: any other role carrying the same
+`meta.kind` draws as its own role. These generated rows are excluded from the
+task fingerprint. A new user turn, slot replacement, reset, close, and a
+finished task drop a stale result unposted. The owner leaving drops the brief
+only before the indicator shows; after that, the result still posts as
+ordinary history while the owner is away. Patrol turns, `[work-ledger wake]`
+rows, and worker reports change the dedup fingerprint but do not make a
+prepared result stale; a turn running at publication defers the result until
+it ends. Only a live user row the person typed cancels a brief in preparation.
+Repeated frames, reconnects and several windows share one in-flight task and
+then the durable claim, so each task state gets at most one brief, and the
+claim's time keeps a patrol-changed fingerprint from briefing again until
+another 30 minutes pass without the owner typing. Rows from older builds with
+`meta.kind` `warm_task_brief_preparing` (the retired opener) still render and
+stay excluded like the other kinds.
 
 ## Implementation Boundaries
 
@@ -569,16 +633,23 @@ once in `kirocrew.crew_mode.worker_waits`, and a close counts the run in
 `kirocrew.crew_mode.runs_finished` and `steers_per_run`
 (`metrics.crew_mode.board_is_crew_mode`).
 
-**Trust stays with the one it was given to.** `approval_posture.trust_carries` is
-the one decision on whether a slot's `_trust` passes to what it starts: it does for
-a trust a person set on the slot itself, and not for a card-scoped trust
-(`_trust_card_scoped`, the "Trust this crew member" grant the conductor's approval
-card will make; nothing sets it yet, so every trust carries today). A card-scoped
-trust covers that crew member's own tools only: `session_create` gives its children
-no inherited trust, `tool_approval._persistable_session_policy` answers `""` for it
-(so its `spawn_run` is not auto-approved and each subagent is born asking), and the
-Slack turn approvals do not inherit it either; the override-derived trust reset
-reads the same rule. Trust is in memory only and never persisted. A pending
+**Card trust reaches the worker's subagents, not its sessions.** `approval_posture`
+holds the two decisions on whether a slot's `_trust` passes to what it starts.
+`trust_reaches_subagents` is any `_trust`, a card-scoped one (`_trust_card_scoped`,
+the "Trust this crew member" grant on the conductor's approval card) included: every
+writer of the stored `approval_policy` (`tool_approval._persistable_session_policy`,
+the mode route, the card's Trust) reads it, so a card-trusted worker's `spawn_run`
+is auto-approved and each subagent is born `auto`; the Slack/background
+parent-trust gate counts the card trust as a slot trust (`_slot_is_trusted`), and
+the override-derived trust reset counts it as standing trust. For a channel-born
+worker that stored `auto` is also what `messaging.approval` reads for the
+conversation's own text approvals, which the card trust already covers.
+`trust_carries` is `_trust` that is NOT card-scoped: `session_create`, forks and the
+workflow ceiling read it, so the sessions a card-trusted worker opens are born
+asking, on the same card. A revoke clears `_trust` and writes `""`, so a subagent
+spawned after it asks again; one already running keeps the policy it was given at
+spawn (`subagent_manager.turn_session`).
+Trust is in memory only and never persisted. A pending
 approval's slot row carries `trust_grantable` (the slot approve route's own proof
 that Trust may be offered) and, for a coordinator request such as a spawn,
 `request_instance` (names THIS record, since the id can recur), so a card that
@@ -951,6 +1022,87 @@ fail with `Invalid model ID`). A reactive retry in `run_bg_oneliner`
 (retry once with the first advertised model on a mid-prompt rejection) remains a
 thin backstop for the fail-open case where the advertised set was unknown at
 send time.
+
+## Released KAS session records
+
+On the `kas` backend the teardown verb, `_kiro/session/delete`, frees a session and removes
+its record in one step. `session.kas_delete_delay_secs` (default `0`, at most `86400`) keeps
+the record that many seconds instead, for the sessions that end as soon as their work is
+done: a task run's planner, step and review sessions (`open_task_session` sets
+`AcpSessionHandle.delete_delay_secs`) and a reused workflow worker's previous conversation
+(`_WorkflowSessionWorker` sets it through `LLMProvider.set_delete_delay` when it starts and
+again before each reuse, and `AcpSessionProvider.new_conversation` carries it to the next
+conversation). The handle an MCP re-injection loads in place of either
+(`apply_pending_mcp_reinjection`) keeps the delay. A tool that reads the engine's session
+store can then still read a finished step. `open_task_session` reads the value off `SessionManager._cfg`, which the manager's
+`session` applier keeps current, as each task session opens; the workflow worker reads it
+with `KiroCrewConfig.load()` off the event loop before each reuse, as `agent_exec` reads
+`agent.subagent_cwd_allowed_roots`. A change applies to task sessions opened after it, and
+to the conversation the next workflow reuse ends.
+
+- **Release.** `AcpSessionHandle.destroy` asks `AcpRuntime.release_session`, which sends the
+  harness's release verb (`KasHarness.release`): `session/close`, only when this process's
+  `initialize` answer advertises `sessionCapabilities.close`. The close frees the session in
+  memory as the delete does and keeps the record. A delay of `0`, an incognito or temporary
+  session, a process the sandbox launched, an engine that does not advertise the verb, an
+  entry that cannot be stored, or a failed close each end the session with the delete, as
+  before. After a failed close the
+  entry stays: the delete is best-effort too, so a record it could not remove is still
+  removed by the sweep, and one it did remove is an id the engine answers success for. Every
+  other harness has no release (`HarnessAdapter.release` answers `None`): its teardown
+  already keeps the record.
+- **One ending per handle.** The release runs as a task that `destroy` awaits through
+  `asyncio.shield`, so a cancelled `destroy` cannot stop it between writing the entry and
+  sending the close. The task is kept on the handle, and a second `destroy` waits for it
+  rather than writing the entry again with a later due time.
+- **Entry first.** Before the close is sent, `released_sessions.schedule` writes
+  `released-sessions/<session id>.json` under the data home: the session, its backend and
+  when its record is due. A gateway that exits between the two leaves an entry the next
+  gateway's sweep finds, never a record nothing deletes.
+- **Sweep.** The `released_sessions` cleanup hook (`released_sessions.sweep_on_tick`, which
+  runs `released_sessions.sweep`) deletes the due records through the shared `_bg`
+  runtime with `AcpRuntime.delete_session_record`,
+  which sends the teardown verb by id. The process that released a session has usually
+  exited by then, and the engine finds a record by its id from any process. At most 50
+  records are sent per tick, and no further delete starts once the sweep has spent 15
+  seconds on deletes (`_SWEEP_BUDGET_SECS`). The hooks after this one wait for the sweep,
+  so an engine that stops answering costs a tick about the budget, not one teardown
+  timeout per record; the check runs before each delete, once the background session is
+  acquired, so the delete in flight and that session's own setup and teardown come on top.
+  A delete the engine refuses does not stop the rest of the batch. An entry is dropped
+  only once the engine answered, and only if, checked just before the unlink, it still
+  records the due time the sweep read. Entries released on another backend wait until it
+  is selected again; the first sweep that finds one due for over 7 days
+  (`_STRANDED_GRACE_SECS`) logs one warning per backend, once per process, with the count
+  and the switch that deletes them, kept until the sweep has drained them. When the hook
+  starts while admission is closed for a shutdown or an update, nothing is sent
+  (`SessionManager.admission_closed`). The delay is therefore the earliest time a record
+  is deleted, not a bound: a backlog, a failed delete or a backend switch moves it to a
+  later tick. Only a process running the session cleanup loop sweeps, so a standalone
+  `kirocrew run` that ends before its entries are due leaves them for the next process that
+  runs the loop, such as the gateway.
+- **Starting the loop.** The cleanup loop otherwise starts only with the first ordinary
+  allocation (`get_or_create`). `open_task_session` starts it when it sets a delay, and
+  `SessionManager.start_pool` starts it when entries wait from an earlier process. A workflow
+  worker's session comes from `get_or_create`, which starts it already.
+- **Protection.** An entry has the host delete the record it names, so
+  `released-sessions` is a data-home leaf written by Crew's own processes outside the
+  sandbox (the gateway, or a standalone `kirocrew run`), registered where
+  `panel-dismissals` is: `security/paths_lists._CREW_SECRET_LEAVES`, and in `sandbox`
+  `_CREW_HIDDEN_LEAVES`, `_CREW_PRECREATE_HIDDEN_DIR_LEAVES` and `_CREW_NO_ALIAS_LEAVES`.
+- **A run inside a sandbox.** A `kirocrew run` an agent starts inside its own sandbox sees
+  the masked `released-sessions/`. On Linux the mask is an empty writable mount (tmpfs, or a
+  temporary directory as a fallback), so an entry written there would go with the sandbox
+  and leave a record no later process deletes. Such a process therefore ends its sessions
+  with the delete whatever the delay says: `_release_ending` asks
+  `sandbox_launch_mark.launched_in_sandbox()`, which `cli.main()` records before it drops
+  the sandbox marker.
+
+Measured against KAS 0.66.22 and 0.66.26, through kiro-cli 2.27.1 and 2.29.0: the close
+answers `{}` and leaves `session.json` and `messages.jsonl`; a later prompt makes the engine
+hydrate the session from disk; a restarted process loads it and replays the turn; and a
+delete sent later by a process started in another directory removes the record. The
+committed KAS capture (engine 0.63.3) advertises no `close`.
 
 ## Account-identity retirement (identity sweep)
 
@@ -1935,7 +2087,9 @@ against sweep completeness, and are torn down at `close_all`.
   promoting the severity of errors the lifted inline blocks swallowed). The
   hooks are assembled through the `SessionManager` facade so existing
   monkeypatch seams remain observable: `idle_expiry`, `orphan_mcp`,
-  `reap_agent_scopes`, `rss_threshold`, `stuck_turn`, and `bg_drain_reap`.
+  `reap_agent_scopes`, `rss_threshold`, `stuck_turn`, `bg_drain_reap`, and
+  `released_sessions`, whose body is `released_sessions.sweep_on_tick` rather than a
+  `SessionCleanup` method.
   `SessionCleanup._cleanup_loop` then directly coordinates the session-root,
   sandbox-artifact, session-pid-mapping, member-pid-binding, shell-audit-log,
   bytecode-cache, periodic tracked-PID, and untracked-MCP sweeps.

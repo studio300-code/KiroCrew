@@ -206,6 +206,7 @@ Slack Socket Mode → events.py (dispatch) → handler.py → SessionManager →
 | `slack/gateway.py` | `GatewayOrchestrator` — the composition facade: the class declares the orchestrator's fields and binds the methods its owners define. Entry point: `run_gateway()`, defined in `gateway_runtime/process_entry.py` and importable from here. See [Composition](#composition) |
 | `slack/gateway_runtime/` | Private owners the facade composes, one responsibility each (see [Composition](#composition)); nothing else imports them |
 | `slack/events.py` | Socket Mode event routing — dedup (`SeenCache`), slash commands, `member_joined_channel` tracking, message dispatch. The import path and patch surface of the `events_*` owners beside it; see [Event and interaction owners](#event-and-interaction-owners) |
+| `slack/socket_mode_proxy.py` | The Socket Mode client `init_socket_mode` builds (`events.WSSocketModeClient`): slack_sdk's websockets client with an explicit proxy choice. See "Socket Mode proxy choice" |
 | `slack/interactions.py` | Block Kit button routing — tool approval, OPTIONS choices, cron/subagent ack, session resume, track channel approve/deny. The import path and patch surface of the `interactions_*` owners beside it; see [Event and interaction owners](#event-and-interaction-owners) |
 | `slack/blocks.py` | Reusable Block Kit dict builders for slash command UIs (session list). Action IDs: `mc_<command>_<action>[_<id>]` |
 | `slack/allowlist.py` | Tracking-channel allowlist prompts (`prompt_allowlist`, `prompt_track_channel`) + config persistence (`persist_allowed_user`, `persist_tracking_channel`) |
@@ -256,7 +257,7 @@ there; the responsibilities below live in private owners under
 | `slack/gateway_runtime/cron_exec.py` | Running a command or script job while holding the overlap guard, and delivering what a script returns; the live dashboard secret a script's `notify()` authenticates with |
 | `slack/gateway_runtime/cron_turn.py` | A message job's agent turn: the agent sequence, and the single-agent turn with its dispatch, ACP-death and transient retries and cleanup, whose flags stay locals of one method |
 | `slack/gateway_runtime/cron_delivery.py` | Delivering a single-agent cron result: the duplicate and silent paths, the dashboard tab and bell, the channel the job came from, the Slack post and its uploads |
-| `slack/gateway_runtime/cron_failure.py` | Telling the user a cron run failed, once per distinct failure: the four one-spelling helpers and their two callers, the command/script/denial alert and the single-agent turn's failure path |
+| `slack/gateway_runtime/cron_failure.py` | Telling the user a cron run failed, once per distinct failure: the alert threshold and the four one-spelling helpers and their two callers, the command/script/denial alert and the single-agent turn's failure path |
 | `slack/gateway_runtime/orchestrator_init.py` | Constructing the orchestrator: `__init__`, which records the run's options and credentials, runs each channel's hoist, registers the config appliers and gives every service, task and update field its not-yet-started value |
 | `slack/gateway_runtime/channel_boot.py` | Each channel's boot state, the live config appliers and the channel transports: the per-channel `_hoist_*` (`restart_channel` re-runs exactly one), `_register_config_appliers` with `_SLACK_APPLIER_PREFIXES`, `_start_channel_transports` |
 | `slack/gateway_runtime/subagent_wiring.py` | Building the sub-agent manager and the callbacks it reports through (`_init_subagents`): the status and event frames, spawn approval, the orphan notices, and `_subagent_done`, the one consumer every terminal report goes through, which resolves the parent's tab, composes the report, peeks at the wave, then hands the completion to the digest and its delivery route; the manager reads made off the loop, the scale coalescer, the slot a workflow step's spawn answers to |
@@ -1073,7 +1074,7 @@ Each channel can have its own activation mode controlling when the bot responds:
 }
 ```
 
-**Per-channel agent override**: Each channel can specify an agent that overrides the global default. The agent is passed to `SessionManager.get_or_create()`. When the name is a Kiro Crew agent record (a `config.agents` key) and the agent the turn selected is that channel binding (including when `_hydrate_thread_overrides` restores the same name from the transcript header after a restart), both chat call sites (`transport_dispatch.handle_message_transport` and the native `handler_runtime/turn.py`) run the turn as that record, the way the dashboard and the cron path (#13422) already do: `slack/channel_crew.resolve_channel_crew` resolves it through `resolve_agent_bindings` off the loop, and `get_or_create` receives the record's `kiro_agent` as `agent`, the record's name as `crew_agent` (the same member identity `resolve_crew_identity` already derived from the name) and the record's workspace directory, anchored by `workspace_dir_from_entry`, as `cwd`. A name that is not a record (a plain kiro-cli mode), a `!agent` thread override naming a different agent, the configured default, and a thread a dashboard session owns (not Slack-born, so its slot's project stays its cwd) pass through unchanged. The transcript header and the context builder still receive the record's name.
+**Per-channel agent override**: Each channel can specify an agent that overrides the global default. The agent is passed to `SessionManager.get_or_create()`. When the name is a Kiro Crew agent record (a `config.agents` key) and the agent the turn selected is that channel binding (including when `_hydrate_thread_overrides` restores the same name from the transcript header after a restart), both chat call sites (`transport_dispatch.handle_message_transport` and the native `handler_runtime/turn.py`) run the turn as that record, the way the dashboard and the cron path (#13422) already do: `slack/channel_crew.resolve_channel_crew` resolves it through `resolve_agent_bindings` off the loop, and `get_or_create` receives the record's `kiro_agent` as `agent`, the record's name as `crew_agent` (the same member identity `resolve_crew_identity` already derived from the name) and the record's workspace directory, anchored by `workspace_dir_from_entry`, as `cwd`. A name that is not a record (a plain kiro-cli mode), a `!agent` thread override naming a different agent, the configured default, and a thread a dashboard session owns (not Slack-born, so its slot's project stays its cwd) pass through unchanged. The transcript header still receives the record's name. The context builder (`build_message(agent=...)`) receives the execution TEMPLATE, as on the dashboard: `slack/channel_crew.context_template` collapses any record name the turn selected to its `kiro_agent`, including a dashboard-linked thread whose session is not Slack-born, so a private crewmate's essentials never look up a template file named after the record.
 
 **Thread reply behavior** (`thread_follow`, in mention, review and observe mode): When the bot is @mentioned in a group channel, it responds in a thread. A later reply in a thread is admitted without an @mention when the bot has a session for the thread, a session link for it (`get_session_for_thread`), or a conversation log for it; it is then skipped if it is addressed to someone else (below). Replies in threads the bot has none of these for are ignored.
 
@@ -1793,7 +1794,29 @@ Only ordinary `Exception`s are swallowed; `CancelledError` (BaseException)
 still propagates so real task cancellation is not masked. There is no
 background retry of the initial connect — Slack DM stays disabled until the
 next gateway restart. The "connected to Slack" banner prints only after a
-confirmed connect.
+confirmed connect. An exception carrying a `status_reason` (the SOCKS proxy
+error below) shows that text on the settings badge instead of its class name.
+
+**Socket Mode proxy choice** (`slack/socket_mode_proxy.py`). websockets 15
+detects a proxy itself and, for `wss://`, prefers a SOCKS entry over HTTPS. On
+macOS `urllib.request.getproxies()` reads the system proxy settings, which
+local proxy tools fill with HTTP, HTTPS and SOCKS together, and speaking SOCKS
+needs `python-socks`, which is not a dependency. slack_sdk passes no `proxy`
+to `websockets.connect`, so `ProxySelectingSocketModeClient.connect` (the
+parent's body with one added argument; the SDK's reconnects call it too)
+passes `select_socket_mode_proxy(url)`:
+
+| Configured | Socket Mode connects |
+|---|---|
+| host on the bypass list (matched as bare host and as `host:port`) | directly |
+| no proxy | directly |
+| SOCKS, `python-socks` importable | through SOCKS |
+| SOCKS without `python-socks`, plus an HTTPS or HTTP proxy | through that proxy (HTTPS first), the same entries `http_proxy.resolve_proxy` gives every other client |
+| SOCKS only, without `python-socks` | not at all: `SocksProxyUnavailable` names the fix; it never routes around a configured proxy |
+| any other proxy | through it |
+
+With websockets older than 15 nothing is passed and the connect is direct, as
+those releases never used a proxy.
 
 Config example (remote access via URL):
 ```json
