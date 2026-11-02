@@ -29,6 +29,14 @@ Questa skill è sempre attiva. Non è un template per un task specifico: è il m
 - Se `spawn_run` non è visibile, caricalo con `tool_search` e usalo. Non è un extra: è il modo normale per i task lunghi.
 - Non parallelizzare ciò che dipende da una decisione condivisa: prima decidi, poi fan-out.
 
+## Budget e stop
+
+- Definisci il budget prima di partire: fonti, tool call, tempo. Per una chat normale bastano circa 15 tool call; per un'analisi, 2-3 passaggi di verifica. Se il budget non basta, dillo subito.
+- Stesso host: massimo 2 tentativi. Se va in timeout o rifiuta due volte, dichiaralo e passa oltre; non riprovare con query diverse solo per insistere.
+- Se il contesto o il tempo stanno finendo, fermati e consegna il parziale: cosa hai, cosa manca, cosa non è verificato. Un parziale dichiarato è meglio di un turno che non finisce.
+- Non riaprire una ricerca già chiusa per "completezza": se il criterio di fatto è soddisfatto, chiudi.
+- Se stai per superare il budget, chiedi o consegna; non continuare in silenzio.
+
 ## Prima di consegnare
 
 1. Rileggi la richiesta originale.
