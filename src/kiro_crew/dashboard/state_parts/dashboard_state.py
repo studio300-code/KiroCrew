@@ -579,8 +579,6 @@ class DashboardState:
         # away fallback live in the transcript.
         self._warm_task_brief_last_seen: dict[str, float] = {}
         self._warm_task_brief_not_before: dict[str, float] = {}
-        # Per owner view, the thread its explicit page hide left (Crew Mode gate).
-        self._warm_task_brief_hidden_left: dict[int, str] = {}
         self._warm_task_brief_tasks: dict[str, asyncio.Task[Any]] = {}
         self._warm_task_brief_model_active: set[str] = set()
         # Threads whose in-flight model call was dropped by a real cancel.
@@ -627,6 +625,11 @@ class DashboardState:
         self._context_snapshots_flush_lock = threading.Lock()
         self._folders: list[dict[str, Any]] = []  # project folder definitions
         self._cron_folders: list[dict[str, Any]] = []  # cron job folder groupings
+        # False while a present folders.json / cron_folders.json failed to load:
+        # the folder set is unknown, not empty, so the next write re-reads the
+        # file first and refuses when it still cannot be read.
+        self._folders_authoritative: bool = True
+        self._cron_folders_authoritative: bool = True
         # Malformed cron_folders.json entries dropped at load time, kept verbatim
         # so save_cron_folders round-trips them back instead of erasing bytes it
         # could not parse (mirrors the hooks store's unparsed-entry preservation).
@@ -1149,7 +1152,9 @@ class DashboardState:
     # state_parts/sidebar_stores.py
     load_folders = _sidebar_stores.load_folders
     save_folders = _sidebar_stores.save_folders
+    _reload_folders_if_unknown = _sidebar_stores._reload_folders_if_unknown
     load_cron_folders = _sidebar_stores.load_cron_folders
+    _reload_cron_folders_if_unknown = _sidebar_stores._reload_cron_folders_if_unknown
     _persist_cron_folders = _sidebar_stores._persist_cron_folders
     save_cron_folders = _sidebar_stores.save_cron_folders
     create_cron_folder = _sidebar_stores.create_cron_folder

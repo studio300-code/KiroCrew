@@ -535,6 +535,12 @@ BENIGN_PACKAGE_SPAWNS: frozenset[str] = frozenset(
         # created; the sole input is the operator-typed app name.
         "cli_commands_app.py::_register_app_crons_to_scheduler",
         # NOT a subprocess spawn: the AST heuristic matches ``asyncio.run`` (attr
+        # ``run`` on base ``asyncio``) driving the shared ``_remove_member_leftovers``
+        # teardown from the loop-less ``kirocrew agent delete``. No child process is
+        # created here; the only input is the operator-typed agent name. The
+        # worktree step's git calls run inside ``crewmate_worktree``'s own runner.
+        "cli_commands_agent.py::_remove_deleted_agent_leftovers",
+        # NOT a subprocess spawn: the AST heuristic matches ``asyncio.run`` (attr
         # ``run`` on base ``asyncio``) driving ``KasLoginService``'s device-code
         # sign-in and sign-out coroutines from the loop-less ``kirocrew kas
         # login`` / ``kas logout`` verbs. No child process is created: the
@@ -552,6 +558,11 @@ BENIGN_PACKAGE_SPAWNS: frozenset[str] = frozenset(
         # own credential store, and every failure is folded into its result. Same
         # classification as ``cli_doctor.py::_doctor`` above.
         "cli_doctor_parts/host_probes.py::_discord_intent_grants",
+        # ``<kiro-cli> --version`` with a fixed argv and a 5 s timeout, read-only,
+        # for the Connectivity row. The binary is the one ``resolve_kiro_cli``
+        # found; no agent-influenced argument, cwd or env reaches it. Split out
+        # of ``_doctor``; same classification as ``host_probes.py::_report_node``.
+        "cli_doctor.py::_kiro_cli_version_row",
         "cli_doctor_parts/mcp_sections.py::_doctor_mcp_tools",
         # ``node -v`` with a fixed argv and a 5 s timeout, read-only, to judge the
         # installed Node against ``MIN_NODE_VERSION``. Split out of ``_doctor``
