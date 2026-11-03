@@ -20,6 +20,7 @@ import { ToolDetails } from '../pages/chat/ToolDetails'
 import { safeGetItem, safeSetItem } from '../utils/safeStorage'
 import { savePrefExplicitly } from '../lib/uiPrefs'
 import { offlineProps } from '../utils/offline'
+import { pathBasename, stripTrailingSeparators } from '../utils/pathBasename'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useReducedMotion } from '../hooks/useReducedMotion'
 import { useComposerSpellcheck } from '../hooks/useComposerSpellcheck'
@@ -58,6 +59,7 @@ import { Glass } from './Glass'
 import type { ChatInputProps } from './chat-input/props'
 import { LexicalComposerInput, ComposerLoadBoundary, useComposerEngine } from './chat-input/engine'
 import { useTextareaListContinuation } from './chat-input/listContinuation'
+import { useFollowUpGhost } from './chat-input/followUpGhost'
 import { approvalBtnClass, useSpawnApprovals, useToolApproval } from './chat-input/approval'
 import { SpawnApprovalCard } from './chat-input/SpawnApprovalCard'
 import { useComposerPickers } from '../chat-core/composer/pickers'
@@ -531,7 +533,7 @@ function ChatInput({
   const midTurnProjectNote = useMemo(() => {
     if (!isRunning) return ''
     const name = turnStartProject
-      ? turnStartProject.split('/').filter(Boolean).pop() || turnStartProject
+      ? pathBasename(stripTrailingSeparators(turnStartProject)) || turnStartProject
       : i18nT('components.chatInput.project')
     return `${i18nT('components.chatInput.project_switch_applies_next_turn', { project: name })}\n${i18nT('components.chatInput.project_switch_links_follow_pick')}`
   }, [isRunning, turnStartProject])
@@ -874,11 +876,12 @@ function ChatInput({
     return () => { ro.disconnect(); forgetAfterSlide(measure) }
   }, [inlineToolbarWhileFits, value, showGhost, composerCollapsed])
   // Every status line the box draws above or below the text is a strip too:
-  // the send-held notice while an upload is in flight, and the voice bar's
-  // idle states (an error, a model download, a cancellable drain, the
-  // mic-held-elsewhere and dictation-landed notices). On the single row each
-  // would be one more flex item beside the text and squeeze it.
-  const inBoxStatusStrip = (holdSend && (composerHasDraft || hasSessionRefs)) ||
+  // the send-held notice while an upload is in flight, the voice bar's
+  // Recording strip (drawn while recording whenever the dictation panel is
+  // not), and its idle states (an error, a model download, a cancellable
+  // drain, the mic-held-elsewhere and dictation-landed notices). On the single
+  // row each would be one more flex item beside the text and squeeze it.
+  const inBoxStatusStrip = (holdSend && (composerHasDraft || hasSessionRefs)) || voiceRecording ||
     !!voiceError || !!voiceDownload || voiceDrainCancellable || micHeldElsewhere || voiceHeldLanded
   const inlineToolbar = inlineToolbarWhileFits && textFitsOneRow && !pendingFiles.length && !pendingDirs.length && !hasQuote && !hasSessionRefs && !inBoxStatusStrip && manualHeight === null &&
     !terminal.active && !voiceHoldMode && !showDictation && !lexicalLoadFailed
@@ -939,7 +942,11 @@ function ChatInput({
     return () => ro.disconnect()
   }, [inlineToolbarWhileFits, showGhost, composerCollapsed])
   const sizerPinned = inlineToolbarWhileFits && manualHeight === null && box !== null
-  const activePlaceholder = !connected ? i18nT('components.chatInput.gateway_offline_message_will_not_send') : typingLock ? typingLockLabel(typingLock) : disabledProp ? (lockedPlaceholder ?? i18nT('components.chatInput.stopping')) : voiceRecording ? i18nT('components.chatInput.recording_click_mic_to_stop') : transcribingIsHonest ? i18nT('components.chatInput.transcribing_please_wait') : continuePlaceholder || voiceModePlaceholder || resolvedPlaceholder
+  // Shown only where nothing above it in the chain below would win, so Tab never fills a box whose placeholder says something else.
+  const fillFromSuggestion = useCallback((v: string) => { valueFromUserRef.current = true; onChange(v) }, [onChange])
+  const followUpGhost = useFollowUpGhost({ options: followUpOptions, value, onUserEdit: fillFromSuggestion, composerControl, claimKey: ime.claimKey,
+    enabled: !touchInput && !!onFollowUpSelect && !showGhost && connected && !typingLock && !disabledProp && !voiceRecording && !transcribingIsHonest && !continuePlaceholder && !voiceModePlaceholder && !optimizing })
+  const activePlaceholder = !connected ? i18nT('components.chatInput.gateway_offline_message_will_not_send') : typingLock ? typingLockLabel(typingLock) : disabledProp ? (lockedPlaceholder ?? i18nT('components.chatInput.stopping')) : voiceRecording ? i18nT('components.chatInput.recording_click_mic_to_stop') : transcribingIsHonest ? i18nT('components.chatInput.transcribing_please_wait') : continuePlaceholder || voiceModePlaceholder || followUpGhost.placeholder || resolvedPlaceholder
   // The sigil hint is a label and may be cut to one line. Every other
   // placeholder here is a sentence the user needs whole, so it still wraps —
   // including a caller's own `placeholder`, which `resolvedPlaceholder` carries.
@@ -1022,7 +1029,7 @@ function ChatInput({
             <span className="min-w-0 [overflow-wrap:anywhere]" title={terminalValidation ? undefined : project || undefined}>
               {terminalValidation || (project && onProjectClick && !shelfCompact
                 ? i18nT('components.chatInput.terminal_panel')
-                : i18nT('components.chatInput.terminal_hint', { workspace: project ? (project.split('/').filter(Boolean).pop() || project) : i18nT('components.chatInput.terminal_default_directory') }))}
+                : i18nT('components.chatInput.terminal_hint', { workspace: project ? (pathBasename(stripTrailingSeparators(project)) || project) : i18nT('components.chatInput.terminal_default_directory') }))}
             </span>
           </div>
           {!showGhost && !composerCollapsed && (
@@ -1468,14 +1475,15 @@ function ChatInput({
           // Composing in either editor (textarea or rich text) re-arms a
           // reclaimed session's resume prefetch; the sender throttles.
           onFocusCapture={() => emitComposeIntent(slotId)}
-          onKeyDownCapture={() => emitComposeIntent(slotId)}
+          onKeyDownCapture={e => { emitComposeIntent(slotId); followUpGhost.onKeyDownCapture(e) }}
         >
         {/* The one-row fit probe: the textarea's type and horizontal padding,
             no vertical padding, wrapping as the textarea wraps, measured at the
             single row's column width (see `textFitsOneRow`). Never painted.
-            `data-composer-typo` gives it the textarea's touch font floor
-            (16px): without it the probe measured at 14px, the textarea
-            wrapped first, and the pill grew tall before the box changed shape. */}
+            `data-composer-typo` gives it every rule the textarea's hook gets, so
+            the probe wraps exactly where the textarea does; otherwise the
+            textarea could wrap first and the pill grow tall before the box
+            changed shape. */}
         {inlineToolbarWhileFits && (
           <div ref={oneRowProbeRef} aria-hidden="true" data-composer-typo="" data-testid="composer-one-row-probe" className="absolute left-0 top-0 invisible pointer-events-none whitespace-pre-wrap break-words px-4 mc-message-font-text font-body leading-normal [scrollbar-gutter:stable] overflow-y-auto" />
         )}
@@ -1911,7 +1919,7 @@ function ChatInput({
             <span className="inline-flex items-center gap-1.5 h-7 min-w-0 text-[12px] text-muted px-2.5" title={projectChipTitle} data-testid="composer-project-readonly">
               <FolderOpen size={13} className="shrink-0 opacity-70" aria-hidden="true" />
               {/* Compact, the name stays for screen readers: the icon alone names nothing. */}
-              <span className={shelfCompact ? 'sr-only' : 'truncate max-w-[160px]'}>{projectProp.split('/').filter(Boolean).pop() || projectProp}</span>
+              <span className={shelfCompact ? 'sr-only' : 'truncate max-w-[160px]'}>{pathBasename(stripTrailingSeparators(projectProp)) || projectProp}</span>
             </span>
           )}
           {onProjectClick && !remoteEnvironment && (
@@ -1950,7 +1958,7 @@ function ChatInput({
                 the ambiguity this label exists to remove. The enclosing shelf
                 group is flex-1/min-w-0, so both segments still shrink below
                 these caps on a narrow window. */}
-            {!shelfCompact && <span className="truncate max-w-[160px]">{project ? (project.split('/').filter(Boolean).pop() || project) : i18nT('components.chatInput.project')}</span>}
+            {!shelfCompact && <span className="truncate max-w-[160px]">{project ? (pathBasename(stripTrailingSeparators(project)) || project) : i18nT('components.chatInput.project')}</span>}
           </button>
           {!shelfCompact && !!projectBranch && (
             <>

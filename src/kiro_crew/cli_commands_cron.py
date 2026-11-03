@@ -97,6 +97,21 @@ def _cron_add_bounds(field_name: str) -> tuple[int, int]:
     return int(spec.min_val), int(spec.max_val)
 
 
+def _cron_update_not_found(job_id: str) -> NoReturn:
+    """Audit a ``cron update`` of an unknown id, report it on stderr, exit 1."""
+    sel().log_api_access(
+        caller="cli",
+        operation="cron.update",
+        outcome="not_found",
+        source="cli",
+        resources=f"job_id={job_id} reason=not_found",
+    )
+    print(f"Job not found: {job_id}", file=sys.stderr)
+    # Same exit and stream as remove/pause/resume/trigger on a missing job, so a
+    # script that updates a stale id sees the failure.
+    sys.exit(1)
+
+
 def _cron_add_fail(msg: str, *, audit_kind: str = "") -> NoReturn:
     """Refuse a ``cron add`` on stderr with exit 1.
 
@@ -249,6 +264,13 @@ def _cron_add(svc: CronService, args: argparse.Namespace) -> None:
         )
 
     # ── Schedule: exactly one of --every / --cron / --at ──
+    # A zero or blank value is the schedule flag the caller DID pass (the parser
+    # admits only one of the three), so it gets its own reason rather than the
+    # "provide exactly one" line meant for a missing one.
+    if every is not None and every == 0:
+        _cron_add_fail("--every must be a positive number of seconds, got 0")
+    if getattr(args, "cron_expr", None) is not None and cron_expr is None:
+        _cron_add_fail("--cron must not be empty")
     given = [
         flag for flag, val in (("--every", every), ("--cron", cron_expr), ("--at", at_raw)) if val
     ]
@@ -681,7 +703,27 @@ def _cron_dispatch(args: argparse.Namespace) -> None:
             kwargs["agent_id"] = agent_val
         if getattr(args, "approval_mode", None) is not None:
             kwargs["approval_mode"] = "" if args.approval_mode == "default" else args.approval_mode
+        # ``--every 0`` and a blank ``--cron`` name no schedule, and the store
+        # treats an empty schedule value as "unchanged". Say so instead of
+        # reporting an update that did not happen; the other fields still apply.
+        blank_schedule = False
+        if "every_secs" in kwargs and kwargs["every_secs"] == 0:
+            del kwargs["every_secs"]
+            blank_schedule = True
+            print("Warning: --every 0 leaves the schedule unchanged", file=sys.stderr)
+        if "cron_expr" in kwargs and not str(kwargs["cron_expr"]).strip():
+            del kwargs["cron_expr"]
+            blank_schedule = True
+            print("Warning: an empty --cron leaves the schedule unchanged", file=sys.stderr)
         if not kwargs:
+            # A blank schedule was the only field: nothing is written, but a
+            # stale id still fails as it does with any other field. An
+            # unreadable store reads as empty, so probe it first: a corrupt
+            # file must refuse, not report every id as missing.
+            if blank_schedule:
+                svc.raise_if_store_unreadable()
+                if svc.get_job(args.job_id) is None:
+                    _cron_update_not_found(args.job_id)
             print("Provide at least one field to update")
             return
         if "every_secs" in kwargs and "cron_expr" in kwargs:
@@ -712,18 +754,7 @@ def _cron_dispatch(args: argparse.Namespace) -> None:
             if never_fires := never_fires_warning(updated.schedule):
                 print(f"Warning: {never_fires}", file=sys.stderr)
         else:
-
-            sel().log_api_access(
-                caller="cli",
-                operation="cron.update",
-                outcome="not_found",
-                source="cli",
-                resources=f"job_id={args.job_id} reason=not_found",
-            )
-            print(f"Job not found: {args.job_id}")
-            # Same exit as remove/pause/resume/trigger on a missing job, so a
-            # script that updates a stale id sees the failure.
-            sys.exit(1)
+            _cron_update_not_found(args.job_id)
 
     elif action == "remove":
         job_id = getattr(args, "job_id", None)
@@ -763,14 +794,14 @@ def _cron_dispatch(args: argparse.Namespace) -> None:
         if svc.enable_job(args.job_id, enabled=False):
             print(f"Paused job: {args.job_id}")
         else:
-            print(f"Job not found: {args.job_id}")
+            print(f"Job not found: {args.job_id}", file=sys.stderr)
             sys.exit(1)
 
     elif action == "resume":
         if svc.enable_job(args.job_id, enabled=True):
             print(f"Resumed job: {args.job_id}")
         else:
-            print(f"Job not found: {args.job_id}")
+            print(f"Job not found: {args.job_id}", file=sys.stderr)
             sys.exit(1)
 
     elif action == "trigger":
@@ -780,7 +811,9 @@ def _cron_dispatch(args: argparse.Namespace) -> None:
         port, _evidence_backed = resolve_client_port_ex(None)
         secret_path = config_dir() / ".local_secret"
         ok, msg = trigger_cron_job(args.job_id, port, secret_path)
-        print(msg)
+        # The success line is the command's output; a failure reason goes to
+        # stderr like every other cron refusal.
+        print(msg, file=sys.stdout if ok else sys.stderr)
         sel().log_api_access(
             caller="cli",
             operation="cron.trigger",
@@ -815,7 +848,7 @@ def _cron_preview(args: argparse.Namespace) -> None:
             source="cli",
             resources=f"script={args.script} reason={type(e).__name__}",
         )
-        print(f"Error: {e}")
+        print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
     # Set env vars before loading module so top-level code can see them
@@ -827,7 +860,7 @@ def _cron_preview(args: argparse.Namespace) -> None:
     # Load the script module
     spec = importlib.util.spec_from_file_location("_cron_preview_module", script_path)
     if spec is None or spec.loader is None:
-        print(f"Error: cannot load {script_path}")
+        print(f"Error: cannot load {script_path}", file=sys.stderr)
         sys.exit(1)
     module = importlib.util.module_from_spec(spec)
     # Registered before exec, as the production child does: dataclasses resolves
@@ -836,11 +869,12 @@ def _cron_preview(args: argparse.Namespace) -> None:
     spec.loader.exec_module(module)
     func = getattr(module, func_name, None)
     if func is None:
-        print(f"Error: function '{func_name}' not found in {script_path}")
+        print(f"Error: function '{func_name}' not found in {script_path}", file=sys.stderr)
         sys.exit(1)
     if inspect.iscoroutinefunction(func):
         print(
-            f"Error: function '{func_name}' is async; cron preview only supports synchronous functions"
+            f"Error: function '{func_name}' is async; cron preview only supports synchronous functions",
+            file=sys.stderr,
         )
         sys.exit(1)
 
