@@ -6148,7 +6148,6 @@
       "credentials_remain_with_their_source_rules_hooks": "Les identifiants restent avec leur source. L’historique des conversations, les hooks, les définitions d’agents et l’identité de persona d’une source ne sont pas importés. Vos règles et instructions écrites sont importées comme mémoire prioritaire.",
       "deduplicated": "Dédupliqué",
       "existing_kirocrew_setup_is_never_overwritten_mat": "Par défaut, la configuration {{productName}} existante n’est jamais écrasée. Les éléments identiques sont dédupliqués, et un élément en conflit conserve votre version actuelle, sauf si vous choisissez autrement après l’import.",
-      "found": "trouvés",
       "import_agent_setup": "Importer la configuration de l’agent",
       "import_all_your_supported_work_or_handpick_what": "Importe tout ce qui est pris en charge, ou choisis précisément ce que tu veux récupérer.",
       "import_another": "En importer une autre",
@@ -6158,7 +6157,6 @@
       "imported": "Importé",
       "importing": "Import en cours",
       "items_already_exist_with_different_content": "éléments existent déjà avec un contenu différent.",
-      "items_selected": "éléments sélectionnés",
       "keep_both": "Conserver les deux",
       "kiro_crew_found_agent_setup_on_this_gateway_host": "{{productName}} a trouvé une configuration d’agent sur cet hôte passerelle. Sélectionne les sources à examiner.",
       "kirocrew_did_not_find_supported_setup_to_import": "{{productName}} n’a trouvé aucune configuration prise en charge à importer sur cet hôte de passerelle.",
@@ -6191,7 +6189,17 @@
       "import_setup_stage": "Importer la configuration · {{stage}} sur {{stages}}",
       "source_item_count_one": "{{name}}, {{count}} élément",
       "source_item_count_many": "{{name}}, {{count}} éléments",
-      "source_item_count_other": "{{name}}, {{count}} éléments"
+      "source_item_count_other": "{{name}}, {{count}} éléments",
+      "category_count_one": "{{count}} catégorie",
+      "category_count_many": "{{count}} catégories",
+      "category_count_other": "{{count}} catégories",
+      "source_categories": "Catégories de {{name}}",
+      "items_selected_count_one": "{{count}} élément sélectionné",
+      "items_selected_count_many": "{{count}} éléments sélectionnés",
+      "items_selected_count_other": "{{count}} éléments sélectionnés",
+      "found_count_one": "{{count}} trouvé",
+      "found_count_many": "{{count}} trouvés",
+      "found_count_other": "{{count}} trouvés"
     },
     "agentSpecNotRewrittenNotice": {
       "saved_but_not_applied": "Enregistré, mais cette copie de {{productName}} n’a pas pu mettre à jour la configuration de l’agent : les nouveaux chats gardent l’ancienne configuration. Ouvre la page « Journaux » pour en connaître la raison."
@@ -10803,6 +10811,20 @@
       "grant_role_user": "{{title}} : tes propres messages aussi, pas seulement les réponses",
       "grant_role_assistant": "{{title}} : réponses de l'assistant",
       "grant_format_markdown": "{{title}} : le Markdown du message, avec les adresses des liens"
+    },
+    "linkOpen": {
+      "ask_title": "Ouvrir les liens {{host}} dans {{app}} ?",
+      "ask_body": "{{app}} reçoit uniquement le lien affiché ci-dessous.",
+      "always": "Toujours faire ainsi pour {{host}}",
+      "open_in_app": "Ouvrir dans {{app}}",
+      "open_in_browser": "Ouvrir dans le navigateur",
+      "opening": "Ouverture dans {{app}}…",
+      "failed": "{{app}} n'a pas pu ouvrir ce lien.",
+      "panel_label": "{{app}} : {{host}}",
+      "offer_copy": "Copier",
+      "offer_open": "Ouvrir {{host}}",
+      "copy_failed": "Copie impossible. Sélectionne le texte dans l'app et copie-le toi-même.",
+      "more_actions": "Plus d'actions"
     }
   },
   "hooks": {
@@ -11189,7 +11211,13 @@
       "grants_reconsent_link_patterns": "Motifs de texte : permet aux cartes de survol de l’app de voir le texte du chat qui correspond à ces motifs.",
       "grants_reconsent_link_full_url": "Adresses de lien complètes : les cartes de survol de l’app voient aussi la partie d’un lien après « ? » ou « # », qui peut contenir un code de connexion.",
       "grants_reconsent_message_actions": "Actions sur les messages : ce que les éléments de menu de l'app sur les messages du chat peuvent lire.",
-      "grants_approved": "Approuvées : {{entries}}. L’app peut les utiliser dès maintenant."
+      "grants_approved": "Approuvées : {{entries}}. L’app peut les utiliser dès maintenant.",
+      "grants_reconsent_link_open_hosts": "Liens ouverts : permet à l'app d'ouvrir les liens vers ces sites quand tu cliques sur l'un d'eux dans un message du chat.",
+      "grants_reconsent_link_open_full_url": "Adresses complètes des liens ouverts : l'app voit aussi la partie d'un lien après le point d'interrogation ou le dièse, qui peut contenir un code de connexion.",
+      "link_open_remembered": "Choix de liens mémorisés",
+      "link_open_choice_app": "S'ouvre dans {{name}}",
+      "link_open_choice_browser": "S'ouvre dans ton navigateur",
+      "link_open_forget": "Oublier"
     },
     "appPage": {
       "loading_app": "Chargement de l'application…",
@@ -14966,7 +14994,6 @@
         "search_explore_and_manage_your_knowledge_base": "Recherchez, explorez et gérez votre base de connaissances",
         "search_knowledge_press_enter_to_search": "Rechercher dans les connaissances... (appuyez sur Enter pour lancer la recherche)",
         "select_all": "Tout sélectionner",
-        "selected": "sélectionnés",
         "sources_tab": "Sources",
         "status_active": "Actif",
         "status_archived": "Archivées",
@@ -14994,7 +15021,10 @@
         "error_no_reason": "La requête a échoué sans raison indiquée.",
         "delete_items_permanently_one": "Supprimer définitivement {{count}} élément ?",
         "delete_items_permanently_many": "Supprimer définitivement {{count}} éléments ?",
-        "delete_items_permanently_other": "Supprimer définitivement {{count}} éléments ?"
+        "delete_items_permanently_other": "Supprimer définitivement {{count}} éléments ?",
+        "selected_count_one": "{{count}} sélectionné",
+        "selected_count_many": "{{count}} sélectionnés",
+        "selected_count_other": "{{count}} sélectionnés"
       },
       "itemCard": {
         "copied": "Copié !",
@@ -15177,6 +15207,9 @@
       "by_category": "Par catégorie",
       "clear": "Effacer",
       "clear_old_caches": "Effacer les caches de défilement",
+      "delete_all_keys_one": "Supprimer {{count}} clé",
+      "delete_all_keys_other": "Supprimer les {{count}} clés",
+      "delete_all_keys_many": "Supprimer les {{count}} clés",
       "delete_cached_scroll_positions_from_old_sessions": "Supprimer les hauteurs de ligne mises en cache et les positions de lecture enregistrées de toutes les sessions (sans risque — reconstruites au défilement)",
       "delete_key": "Supprimer la clé",
       "export": "Exporter",

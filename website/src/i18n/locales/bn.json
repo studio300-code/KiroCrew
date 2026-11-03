@@ -6030,7 +6030,6 @@
       "credentials_remain_with_their_source_rules_hooks": "ক্রেডেনশিয়াল তাদের সোর্সেই থেকে যায়। কথোপকথনের ইতিহাস, হুক, এজেন্ট ডেফিনিশন এবং সোর্সের পারসোনা পরিচয় ইমপোর্ট করা হয় না। আপনার লেখা নিয়ম ও নির্দেশনা উচ্চ-প্রাধান্যের মেমরি হিসেবে ইমপোর্ট করা হয়।",
       "deduplicated": "ডুপ্লিকেট বাদ দেওয়া হয়েছে",
       "existing_kirocrew_setup_is_never_overwritten_mat": "ডিফল্টভাবে বিদ্যমান {{productName}} সেটআপ কখনও ওভাররাইট করা হয় না। মিলে যাওয়া আইটেমের ডুপ্লিকেট বাদ দেওয়া হয়, এবং সাংঘর্ষিক আইটেমে আপনার বর্তমান সংস্করণই থাকে—যদি ইমপোর্টের পরে আপনি অন্য কিছু বেছে না নেন।",
-      "found": "পাওয়া গেছে",
       "import_agent_setup": "এজেন্ট সেটআপ ইমপোর্ট করুন",
       "import_all_your_supported_work_or_handpick_what": "তোমার সমর্থিত সব কাজ ইমপোর্ট করো, বা কী আনবে তা বেছে নাও।",
       "import_another": "আরেকটি ইমপোর্ট করুন",
@@ -6040,7 +6039,6 @@
       "imported": "ইমপোর্ট হয়েছে",
       "importing": "ইমপোর্ট করা হচ্ছে",
       "items_already_exist_with_different_content": "আইটেম ভিন্ন কনটেন্ট নিয়ে ইতিমধ্যেই রয়েছে।",
-      "items_selected": "আইটেম নির্বাচিত",
       "keep_both": "দুটোই রাখুন",
       "kiro_crew_found_agent_setup_on_this_gateway_host": "{{productName}} এই গেটওয়ে হোস্টে এজেন্ট সেটআপ পেয়েছে। রিভিউ করার জন্য সোর্স বেছে নাও।",
       "kirocrew_did_not_find_supported_setup_to_import": "এই গেটওয়ে হোস্টে ইমপোর্ট করার মতো সমর্থিত সেটআপ {{productName}} খুঁজে পায়নি।",
@@ -6072,7 +6070,14 @@
       "your_selected_setup_is_ready_in_kiro_crew": "তোমার নির্বাচিত সেটআপ {{productName}}-এ তৈরি।",
       "import_setup_stage": "সেটআপ ইমপোর্ট করো · {{stages}}টির মধ্যে {{stage}}",
       "source_item_count_one": "{{name}}, {{count}}টি আইটেম",
-      "source_item_count_other": "{{name}}, {{count}}টি আইটেম"
+      "source_item_count_other": "{{name}}, {{count}}টি আইটেম",
+      "category_count_one": "{{count}}টি বিভাগ",
+      "category_count_other": "{{count}}টি বিভাগ",
+      "source_categories": "{{name}}-এর বিভাগ",
+      "items_selected_count_one": "{{count}}টি আইটেম নির্বাচিত",
+      "items_selected_count_other": "{{count}}টি আইটেম নির্বাচিত",
+      "found_count_one": "{{count}}টি পাওয়া গেছে",
+      "found_count_other": "{{count}}টি পাওয়া গেছে"
     },
     "agentSpecNotRewrittenNotice": {
       "saved_but_not_applied": "সংরক্ষিত হয়েছে, কিন্তু এই {{productName}} এজেন্ট কনফিগারেশন আপডেট করতে পারেনি, তাই নতুন চ্যাটগুলো আগের সেটআপ রাখবে। কারণ জানতে 'লগ' পেজ খোলো।"
@@ -10628,6 +10633,20 @@
       "grant_role_user": "{{title}}: তোমার নিজের বার্তাও, শুধু উত্তর নয়",
       "grant_role_assistant": "{{title}}: অ্যাসিস্ট্যান্টের উত্তর",
       "grant_format_markdown": "{{title}}: বার্তার Markdown, লিংকের ঠিকানাসহ"
+    },
+    "linkOpen": {
+      "ask_title": "{{host}} লিংক {{app}}-এ খুলবে?",
+      "ask_body": "{{app}} শুধু নিচে দেখানো লিংকটি পাবে।",
+      "always": "{{host}}-এর জন্য সবসময় এটি করো",
+      "open_in_app": "{{app}}-এ খোলো",
+      "open_in_browser": "ব্রাউজারে খোলো",
+      "opening": "{{app}}-এ খোলা হচ্ছে…",
+      "failed": "{{app}} এই লিংকটি খুলতে পারেনি।",
+      "panel_label": "{{app}}: {{host}}",
+      "offer_copy": "কপি করো",
+      "offer_open": "{{host}} খোলো",
+      "copy_failed": "কপি করা যায়নি। অ্যাপে লেখাটি নির্বাচন করে নিজে কপি করো।",
+      "more_actions": "আরও কাজ"
     }
   },
   "hooks": {
@@ -11012,7 +11031,13 @@
       "grants_reconsent_link_patterns": "টেক্সট প্যাটার্ন: চ্যাটের যে লেখা এই প্যাটার্নগুলোর সাথে মেলে, তা অ্যাপের হোভার কার্ডকে দেখতে দেয়।",
       "grants_reconsent_link_full_url": "পুরো লিংক ঠিকানা: অ্যাপের হোভার কার্ড লিংকের ? বা # এর পরের অংশও দেখবে, যেখানে সাইন-ইন কোড থাকতে পারে।",
       "grants_reconsent_message_actions": "বার্তা অ্যাকশন: চ্যাট বার্তায় অ্যাপের মেনু আইটেম কী পড়তে পারে।",
-      "grants_approved": "অনুমোদিত: {{entries}}। অ্যাপটি এখন এগুলো ব্যবহার করতে পারে।"
+      "grants_approved": "অনুমোদিত: {{entries}}। অ্যাপটি এখন এগুলো ব্যবহার করতে পারে।",
+      "grants_reconsent_link_open_hosts": "খোলা লিংক: চ্যাট বার্তায় এই সাইটগুলোর কোনো লিংকে ক্লিক করলে অ্যাপটিকে সেটি খুলতে দেয়।",
+      "grants_reconsent_link_open_full_url": "খোলা লিংকের পুরো ঠিকানা: অ্যাপটি লিংকের ? বা # এর পরের অংশও দেখে, যেখানে সাইন-ইন কোড থাকতে পারে।",
+      "link_open_remembered": "মনে রাখা লিংক পছন্দ",
+      "link_open_choice_app": "{{name}}-এ খোলে",
+      "link_open_choice_browser": "তোমার ব্রাউজারে খোলে",
+      "link_open_forget": "ভুলে যাও"
     },
     "appPage": {
       "loading_app": "অ্যাপ লোড হচ্ছে…",
@@ -14687,7 +14712,6 @@
         "search_explore_and_manage_your_knowledge_base": "আপনার নলেজ বেস সার্চ করুন, অন্বেষণ করুন এবং পরিচালনা করুন",
         "search_knowledge_press_enter_to_search": "নলেজ সার্চ করুন... (সার্চ করতে Enter চাপুন)",
         "select_all": "সব নির্বাচন করুন",
-        "selected": "নির্বাচিত",
         "sources_tab": "উৎস",
         "status_active": "সক্রিয়",
         "status_archived": "সংরক্ষণাগারে",
@@ -14710,7 +14734,9 @@
         "entity_items_load_failed": "এই এন্টিটির আইটেম লোড করা যায়নি",
         "error_no_reason": "কোনো কারণ ছাড়াই অনুরোধ ব্যর্থ হয়েছে।",
         "delete_items_permanently_one": "{{count}}টি আইটেম স্থায়ীভাবে মুছবে?",
-        "delete_items_permanently_other": "{{count}}টি আইটেম স্থায়ীভাবে মুছবে?"
+        "delete_items_permanently_other": "{{count}}টি আইটেম স্থায়ীভাবে মুছবে?",
+        "selected_count_one": "{{count}}টি নির্বাচিত",
+        "selected_count_other": "{{count}}টি নির্বাচিত"
       },
       "itemCard": {
         "copied": "কপি হয়েছে!",
@@ -14891,6 +14917,8 @@
       "by_category": "বিভাগ অনুযায়ী",
       "clear": "সাফ করুন",
       "clear_old_caches": "স্ক্রল ক্যাশ সাফ করো",
+      "delete_all_keys_one": "{{count}}টি কী মুছে ফেলুন",
+      "delete_all_keys_other": "সব {{count}}টি কী মুছে ফেলুন",
       "delete_cached_scroll_positions_from_old_sessions": "সব সেশনের ক্যাশ করা সারির উচ্চতা এবং সংরক্ষিত পড়ার অবস্থান মুছে ফেলুন (নিরাপদ — স্ক্রল করলে আবার তৈরি হয়)",
       "delete_key": "কী মুছে ফেলুন",
       "export": "এক্সপোর্ট",

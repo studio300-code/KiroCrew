@@ -5879,7 +5879,6 @@
       "credentials_remain_with_their_source_rules_hooks": "認証情報はソースに留まります。会話履歴、フック、エージェント定義、ソースのペルソナ識別情報はインポートされません。書かれたルールと指示は優先度の高いメモリとしてインポートされます。",
       "deduplicated": "重複排除",
       "existing_kirocrew_setup_is_never_overwritten_mat": "既存の {{productName}} セットアップはデフォルトではオーバーライドされません。マッチするアイテムは重複排除され、競合するアイテムはインポート後に選択しない限り、現在のバージョンが保持されます。",
-      "found": "見つかりました",
       "import_agent_setup": "エージェントセットアップをインポート",
       "import_all_your_supported_work_or_handpick_what": "サポートされているすべての作業をインポートするか、持ち込むものを手選択します。",
       "import_another": "別のものをインポート",
@@ -5889,7 +5888,6 @@
       "imported": "インポート済み",
       "importing": "インポート中",
       "items_already_exist_with_different_content": "アイテムは既に異なるコンテンツで存在します。",
-      "items_selected": "アイテムが選択されました",
       "keep_both": "両方を保持",
       "kiro_crew_found_agent_setup_on_this_gateway_host": "{{productName}} はこのゲートウェイホストでエージェントセットアップを見つけました。レビューするソースを選択します。",
       "kirocrew_did_not_find_supported_setup_to_import": "{{productName}} はこのゲートウェイホストでインポートするサポートされているセットアップを見つけませんでした。",
@@ -5920,7 +5918,11 @@
       "your_existing_kirocrew_setup_will_not_be_affecte": "既存の {{productName}} セットアップは影響を受けません。",
       "your_selected_setup_is_ready_in_kiro_crew": "選択されたセットアップは {{productName}} で準備ができています。",
       "import_setup_stage": "セットアップをインポート · {{stages}} 中 {{stage}}",
-      "source_item_count_other": "{{name}}、{{count}} 件"
+      "source_item_count_other": "{{name}}、{{count}} 件",
+      "category_count_other": "{{count}} 件のカテゴリ",
+      "source_categories": "{{name}} のカテゴリ",
+      "items_selected_count_other": "{{count}} 件のアイテムを選択済み",
+      "found_count_other": "{{count}} 件見つかりました"
     },
     "agentSpecNotRewrittenNotice": {
       "saved_but_not_applied": "保存しましたが、この {{productName}} ではエージェント設定を更新できなかったため、新しいチャットでは以前の設定が使われます。理由は「ログ」ページで確認してください。"
@@ -10453,6 +10455,20 @@
       "grant_role_user": "{{title}}：返信だけでなく、あなた自身のメッセージも",
       "grant_role_assistant": "{{title}}：アシスタントの返信",
       "grant_format_markdown": "{{title}}：メッセージの Markdown（リンクのアドレスを含む）"
+    },
+    "linkOpen": {
+      "ask_title": "{{host}} のリンクを {{app}} で開きますか？",
+      "ask_body": "{{app}} に渡されるのは下のリンクだけです。",
+      "always": "{{host}} では常にこうする",
+      "open_in_app": "{{app}} で開く",
+      "open_in_browser": "ブラウザーで開く",
+      "opening": "{{app}} で開いています…",
+      "failed": "{{app}} はこのリンクを開けませんでした。",
+      "panel_label": "{{app}}: {{host}}",
+      "offer_copy": "コピー",
+      "offer_open": "{{host}} を開く",
+      "copy_failed": "コピーできませんでした。アプリ内のテキストを選択して自分でコピーしてください。",
+      "more_actions": "その他の操作"
     }
   },
   "hooks": {
@@ -10835,7 +10851,13 @@
       "grants_reconsent_link_patterns": "テキストパターン: これらのパターンに一致するチャットのテキストを、アプリのホバーカードが見られるようにします。",
       "grants_reconsent_link_full_url": "リンクの完全なアドレス: アプリのホバーカードは、リンクの ? や # 以降の部分も見られます。ここにはサインイン用のコードが含まれることがあります。",
       "grants_reconsent_message_actions": "メッセージアクション：チャットメッセージ上のアプリのメニュー項目が読み取れる内容。",
-      "grants_approved": "承認しました: {{entries}}。アプリは今から使用できます。"
+      "grants_approved": "承認しました: {{entries}}。アプリは今から使用できます。",
+      "grants_reconsent_link_open_hosts": "開くリンク: チャットメッセージ内のこれらのサイトへのリンクをクリックしたとき、アプリがそのリンクを開けるようにします。",
+      "grants_reconsent_link_open_full_url": "開くリンクの完全なアドレス: アプリはリンクの ? や # 以降の部分も見ます。ここにはサインインコードが含まれることがあります。",
+      "link_open_remembered": "記憶したリンクの選択",
+      "link_open_choice_app": "{{name}} で開く",
+      "link_open_choice_browser": "ブラウザーで開く",
+      "link_open_forget": "削除"
     },
     "appPage": {
       "loading_app": "アプリを読み込み中…",
@@ -14408,7 +14430,6 @@
         "search_explore_and_manage_your_knowledge_base": "ナレッジベースを検索・探索・管理する",
         "search_knowledge_press_enter_to_search": "ナレッジを検索… (Enterキーで検索)",
         "select_all": "すべて選択",
-        "selected": "選択済み",
         "sources_tab": "ソース",
         "status_active": "アクティブ",
         "status_archived": "アーカイブ済み",
@@ -14426,7 +14447,8 @@
         "bulk_delete_failed": "選択したアイテムを削除できませんでした",
         "entity_items_load_failed": "このエンティティのアイテムを読み込めませんでした",
         "error_no_reason": "理由が示されないままリクエストが失敗しました。",
-        "delete_items_permanently_other": "{{count}} 件の項目を完全に削除しますか？"
+        "delete_items_permanently_other": "{{count}} 件の項目を完全に削除しますか？",
+        "selected_count_other": "{{count}} 件選択済み"
       },
       "itemCard": {
         "copied": "コピーしました！",
@@ -14605,6 +14627,7 @@
       "by_category": "カテゴリ別",
       "clear": "クリア",
       "clear_old_caches": "スクロールキャッシュをクリア",
+      "delete_all_keys_other": "{{count}} 件のキーをすべて削除",
       "delete_cached_scroll_positions_from_old_sessions": "すべてのセッションのキャッシュされた行の高さと保存された読書位置を削除します (安全 — スクロール時に再構築されます)",
       "delete_key": "キーを削除",
       "export": "エクスポート",
