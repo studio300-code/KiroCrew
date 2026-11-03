@@ -2718,19 +2718,24 @@
       "stats": {
         "busiest_day": "Chattiest day: {{date}} ({{count}} msgs)",
         "companion_days": "Together for {{time}}",
-        "drags": "Dragged {{count}} times",
+        "drags_one": "Dragged {{n}} time",
+        "drags_other": "Dragged {{n}} times",
         "earliest_time": "Earliest: up at {{time}}",
         "first_use": "Your story with {{name}} just began",
         "latest_time": "Latest: stayed up till {{time}}",
-        "longest_chat": "Longest chat: {{count}} messages",
+        "longest_chat_one": "Longest chat: {{n}} message",
+        "longest_chat_other": "Longest chat: {{n}} messages",
         "messages": "{{total}} messages ({{sent}} you · {{received}} {{name}})",
         "mood_top": "Moods",
-        "peeks": "Peeked {{count}} times",
-        "screenshots": "Looked at your screen {{count}} times",
+        "peeks_one": "Peeked {{n}} time",
+        "peeks_other": "Peeked {{n}} times",
+        "screenshots_one": "Looked at your screen {{n}} time",
+        "screenshots_other": "Looked at your screen {{n}} times",
         "streak": "({{streak}}-day streak)",
         "thinking_time": "Thought for {{time}}",
         "title": "Memories",
-        "walks": "{{count}} steps"
+        "walks_one": "{{n}} step",
+        "walks_other": "{{n}} steps"
       },
       "tip": {
         "bedtime": "Try: \"tell me to wind down at 11\"",
@@ -4295,7 +4300,9 @@
       "some_setup_could_not_be_read": "{{productName}} could not read {{sources}} — not listed below.",
       "files_could_not_be_read": "Files could not be read",
       "your_existing_kirocrew_setup_will_not_be_affecte": "Your existing {{productName}} setup will not be affected.",
-      "import_setup_stage": "Import setup · {{stage}} of {{stages}}"
+      "import_setup_stage": "Import setup · {{stage}} of {{stages}}",
+      "source_item_count_one": "{{name}}, {{count}} item",
+      "source_item_count_other": "{{name}}, {{count}} items"
     },
     "agentSpecNotRewrittenNotice": {
       "saved_but_not_applied": "Saved, but this copy of {{productName}} could not update the agent config, so new chats keep the old setup. Open the Logs page to see why."
@@ -5000,7 +5007,8 @@
       "toggle_line_numbers": "Toggle line numbers",
       "toggle_word_wrap": "Toggle word wrap",
       "unsaved_changes": "Unsaved changes",
-      "word_wrap": "Word wrap"
+      "word_wrap": "Word wrap",
+      "match_position": "{{current}} of {{total}}"
     },
     "markdownRenderer": {
       "click_to_copy": "Click to copy",
@@ -5418,7 +5426,9 @@
       "find_in_chat": "Find in chat",
       "find_in_chat_2": "Find in chat…",
       "next_match": "Next match",
-      "previous_match": "Previous match"
+      "previous_match": "Previous match",
+      "result_position_one": "{{current}} of {{count}} result",
+      "result_position_other": "{{current}} of {{count}} results"
     },
     "searchResultsList": {
       "search_results": "Search results",
@@ -5582,7 +5592,9 @@
       "overwrite": "Overwrite",
       "select_a_skill_to_preview": "Select a skill to preview",
       "skill_search_results": "Skill search results",
-      "source": "Source"
+      "source": "Source",
+      "installed_files_one": "Installed {{count}} file",
+      "installed_files_other": "Installed {{count}} files"
     },
     "skillDirectoryBrowser": {
       "description": "Description",
@@ -8038,7 +8050,9 @@
         "selected": "selected",
         "to_search_esc_to_back_to_page": "/ to search, Esc to back, ←→ to page",
         "try_a_different_type_status_or_namespace": "Try a different type, status, or namespace",
-        "try_different_keywords_or_filters": "Try different keywords or filters"
+        "try_different_keywords_or_filters": "Try different keywords or filters",
+        "delete_items_permanently_one": "Delete {{count}} item permanently?",
+        "delete_items_permanently_other": "Delete {{count}} items permanently?"
       },
       "knowledgeGraph": {
         "edges": "edges",
@@ -9465,7 +9479,8 @@
       "status_error": "ended",
       "status_running": "running",
       "title": "Session Breakdown",
-      "tool_count": "{{count}} tools",
+      "tool_count_one": "{{n}} tool",
+      "tool_count_other": "{{n}} tools",
       "unknown_agent": "sub-agent",
       "unknown_model": "unknown"
     },
@@ -9511,7 +9526,8 @@
       "prev_page": "Previous",
       "preview_sweep": "Preview sweep",
       "reclaim_by_age": "Reclaim by age",
-      "refused_heading": "{{count}} sessions could not be moved",
+      "refused_heading_one": "{{n}} session could not be moved",
+      "refused_heading_other": "{{n}} sessions could not be moved",
       "refused_in_use": "session is in use",
       "refused_resumable": "still resumable",
       "refused_too_fresh": "session is too recent",
@@ -9755,6 +9771,10 @@
         "a_folder_with_no_chats_takes_one_row_instead_of": "A folder with no chats takes one row instead of two, and its New chat button moves onto the folder's own row",
         "full_titles_on_scroll": "Show Full Titles While Scrolling",
         "full_titles_on_scroll_description": "While you scroll the session list, cut-off titles show in full",
+        "session_title_lines": "Title Lines on Session Cards",
+        "session_title_lines_desc": "How many lines a session title can use before it is cut off",
+        "session_preview_lines": "Preview Lines on Session Cards",
+        "session_preview_lines_desc": "How many lines the latest-message preview can use before it is cut off",
         "content_width": "Content Width",
         "context": "Context",
         "turns": "Turns",

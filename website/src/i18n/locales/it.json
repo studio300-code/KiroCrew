@@ -4129,19 +4129,29 @@
       "stats": {
         "busiest_day": "Giorno più chiacchierone: {{date}} ({{count}} msg)",
         "companion_days": "Insieme da {{time}}",
-        "drags": "Trascinato {{count}} volte",
+        "drags_one": "Trascinato {{n}} volta",
+        "drags_many": "Trascinato {{n}} volte",
+        "drags_other": "Trascinato {{n}} volte",
         "earliest_time": "Il più presto: sveglio alle {{time}}",
         "first_use": "La tua storia con {{name}} è appena iniziata",
         "latest_time": "Il più tardi: sveglio fino alle {{time}}",
-        "longest_chat": "Chat più lunga: {{count}} messaggi",
+        "longest_chat_one": "Chat più lunga: {{n}} messaggio",
+        "longest_chat_many": "Chat più lunga: {{n}} messaggi",
+        "longest_chat_other": "Chat più lunga: {{n}} messaggi",
         "messages": "{{total}} messaggi ({{sent}} tu · {{received}} {{name}})",
         "mood_top": "Umori",
-        "peeks": "Ha sbirciato {{count}} volte",
-        "screenshots": "Ha guardato il tuo schermo {{count}} volte",
+        "peeks_one": "Ha sbirciato {{n}} volta",
+        "peeks_many": "Ha sbirciato {{n}} volte",
+        "peeks_other": "Ha sbirciato {{n}} volte",
+        "screenshots_one": "Ha guardato il tuo schermo {{n}} volta",
+        "screenshots_many": "Ha guardato il tuo schermo {{n}} volte",
+        "screenshots_other": "Ha guardato il tuo schermo {{n}} volte",
         "streak": "(serie di {{streak}} giorni)",
         "thinking_time": "Ha pensato per {{time}}",
         "title": "Ricordi",
-        "walks": "{{count}} passi"
+        "walks_one": "{{n}} passo",
+        "walks_many": "{{n}} passi",
+        "walks_other": "{{n}} passi"
       },
       "tip": {
         "bedtime": "Prova: \"dimmi di rallentare alle 23\"",
@@ -6178,7 +6188,10 @@
       "files_could_not_be_read": "Non è stato possibile leggere i file",
       "your_existing_kirocrew_setup_will_not_be_affecte": "La tua configurazione esistente di {{productName}} non verrà modificata.",
       "your_selected_setup_is_ready_in_kiro_crew": "La configurazione selezionata è pronta in {{productName}}.",
-      "import_setup_stage": "Importa la configurazione · {{stage}} di {{stages}}"
+      "import_setup_stage": "Importa la configurazione · {{stage}} di {{stages}}",
+      "source_item_count_one": "{{name}}, {{count}} elemento",
+      "source_item_count_many": "{{name}}, {{count}} elementi",
+      "source_item_count_other": "{{name}}, {{count}} elementi"
     },
     "agentSpecNotRewrittenNotice": {
       "saved_but_not_applied": "Salvato, ma questa copia di {{productName}} non è riuscita ad aggiornare la configurazione dell’agente, quindi le nuove chat mantengono la configurazione precedente. Apri la pagina «Log» per vedere il motivo."
@@ -7946,7 +7959,8 @@
       "knowledge_status_failed": "Impossibile controllare la libreria della conoscenza.",
       "artifact_status_failed": "Impossibile verificare se questo file è un artefatto.",
       "diff_status_failed": "Impossibile controllare le modifiche git di questo file.",
-      "open_in_app": "Apri in {{app}}"
+      "open_in_app": "Apri in {{app}}",
+      "match_position": "{{current}} di {{total}}"
     },
     "markdownRenderer": {
       "download_failed": "Impossibile scaricare il diagramma. Riprova.",
@@ -8748,7 +8762,10 @@
       "previous": "Precedente ({{mod}})",
       "previous_match": "Corrispondenza precedente",
       "no_results_loaded_only": "Nessun risultato nella cronologia caricata",
-      "results_loaded_only": "{{current}}/{{total}} risultati nella cronologia caricata"
+      "results_loaded_only": "{{current}}/{{total}} risultati nella cronologia caricata",
+      "result_position_one": "{{current}} di {{count}} risultato",
+      "result_position_many": "{{current}} di {{count}} risultati",
+      "result_position_other": "{{current}} di {{count}} risultati"
     },
     "searchResultsList": {
       "assistant": "Assistente",
@@ -8987,7 +9004,10 @@
       "provider_did_not_answer": "{{provider}} non ha risposto.",
       "select_a_skill_to_preview": "Seleziona una skill di cui vedere l'anteprima",
       "skill_search_results": "Risultati della ricerca delle skill",
-      "source": "Origine"
+      "source": "Origine",
+      "installed_files_one": "{{count}} file installato",
+      "installed_files_many": "{{count}} file installati",
+      "installed_files_other": "{{count}} file installati"
     },
     "skillDirectoryBrowser": {
       "description": "Descrizione",
@@ -14084,6 +14104,15 @@
       "commits_behind_main_2_many": "{{count}} commit di ritardo rispetto a main",
       "commits_behind_main_2_one": "{{count}} commit di ritardo rispetto a main",
       "commits_behind_main_2_other": "{{count}} commit di ritardo rispetto a main",
+      "prune_failed_count_many": "Eliminazione: {{count}} non riusciti",
+      "prune_failed_count_one": "Eliminazione: {{count}} non riuscito",
+      "prune_failed_count_other": "Eliminazione: {{count}} non riusciti",
+      "pruned_worktrees_many": "{{count}} worktree eliminati",
+      "pruned_worktrees_one": "{{count}} worktree eliminato",
+      "pruned_worktrees_other": "{{count}} worktree eliminati",
+      "pruned_worktrees_some_failed_many": "{{count}} worktree eliminati ({{failed}} non riusciti)",
+      "pruned_worktrees_some_failed_one": "{{count}} worktree eliminato ({{failed}} non riusciti)",
+      "pruned_worktrees_some_failed_other": "{{count}} worktree eliminati ({{failed}} non riusciti)",
       "confirm": "Conferma",
       "conflicts_aborted": "Conflitti — interrotto",
       "created_recently": "creato di recente",
@@ -14121,7 +14150,6 @@
       "hide_legacy_worktrees": "Nascondi {{n}} worktree legacy",
       "hide_logs": "Nascondi i log",
       "issues": "Issue:",
-      "just_now": "proprio ora",
       "kept_discard_untracked_hint": "Righe trattenute solo da file temporanei non tracciati: selezionarne una scarta i file elencati in quella riga.",
       "kept_force_hint": "Seleziona per forzare la rimozione — elimina il lavoro non unito.",
       "kept": "Mantenuto",
@@ -14963,7 +14991,10 @@
         "bulk_archive_failed": "Impossibile archiviare gli elementi selezionati",
         "bulk_delete_failed": "Impossibile eliminare gli elementi selezionati",
         "entity_items_load_failed": "Impossibile caricare gli elementi di questa entità",
-        "error_no_reason": "La richiesta non è riuscita senza indicare un motivo."
+        "error_no_reason": "La richiesta non è riuscita senza indicare un motivo.",
+        "delete_items_permanently_one": "Eliminare definitivamente {{count}} elemento?",
+        "delete_items_permanently_many": "Eliminare definitivamente {{count}} elementi?",
+        "delete_items_permanently_other": "Eliminare definitivamente {{count}} elementi?"
       },
       "itemCard": {
         "copied": "Copiato!",
@@ -17015,7 +17046,9 @@
       "status_error": "terminato",
       "status_running": "in corso",
       "title": "Dettaglio della sessione",
-      "tool_count": "{{count}} strumenti",
+      "tool_count_one": "{{n}} strumento",
+      "tool_count_many": "{{n}} strumenti",
+      "tool_count_other": "{{n}} strumenti",
       "unknown_agent": "subagente",
       "unknown_model": "sconosciuto"
     },
@@ -17061,7 +17094,9 @@
       "prev_page": "Indietro",
       "preview_sweep": "Anteprima pulizia",
       "reclaim_by_age": "Recupera per data",
-      "refused_heading": "{{count}} sessioni non sono state spostate",
+      "refused_heading_one": "{{n}} sessione non è stata spostata",
+      "refused_heading_many": "{{n}} sessioni non sono state spostate",
+      "refused_heading_other": "{{n}} sessioni non sono state spostate",
       "refused_in_use": "la sessione è in uso",
       "refused_resumable": "ancora riprendibile",
       "refused_too_fresh": "la sessione è troppo recente",
@@ -17571,6 +17606,10 @@
         "a_folder_with_no_chats_takes_one_row_instead_of": "Una cartella senza chat occupa una riga invece di due, e il pulsante per una nuova chat passa sulla riga della cartella",
         "full_titles_on_scroll": "Mostra i titoli completi durante lo scorrimento",
         "full_titles_on_scroll_description": "Mentre scorri l'elenco delle sessioni, i titoli troncati dalla barra laterale vengono mostrati per intero",
+        "session_title_lines": "Righe del titolo nelle schede sessione",
+        "session_title_lines_desc": "Quante righe può occupare il titolo di una sessione prima di essere troncato",
+        "session_preview_lines": "Righe di anteprima nelle schede sessione",
+        "session_preview_lines_desc": "Quante righe può occupare l'anteprima dell'ultimo messaggio prima di essere troncata",
         "content_width": "Larghezza del contenuto",
         "context": "Contesto",
         "turns": "Turni",

@@ -4138,19 +4138,24 @@
       "stats": {
         "busiest_day": "Gesprächigster Tag: {{date}} ({{count}} Nachr.)",
         "companion_days": "Zusammen seit {{time}}",
-        "drags": "{{count}}-mal gezogen",
+        "drags_one": "{{n}}-mal gezogen",
+        "drags_other": "{{n}}-mal gezogen",
         "earliest_time": "Am frühesten: wach um {{time}}",
         "first_use": "Deine Geschichte mit {{name}} hat gerade begonnen",
         "latest_time": "Am spätesten: wach bis {{time}}",
-        "longest_chat": "Längster Chat: {{count}} Nachrichten",
+        "longest_chat_one": "Längster Chat: {{n}} Nachricht",
+        "longest_chat_other": "Längster Chat: {{n}} Nachrichten",
         "messages": "{{total}} Nachrichten ({{sent}} du · {{received}} {{name}})",
         "mood_top": "Stimmungen",
-        "peeks": "{{count}}-mal gelugt",
-        "screenshots": "{{count}}-mal auf deinen Bildschirm geschaut",
+        "peeks_one": "{{n}}-mal gelugt",
+        "peeks_other": "{{n}}-mal gelugt",
+        "screenshots_one": "{{n}}-mal auf deinen Bildschirm geschaut",
+        "screenshots_other": "{{n}}-mal auf deinen Bildschirm geschaut",
         "streak": "({{streak}}-Tage-Serie)",
         "thinking_time": "{{time}} nachgedacht",
         "title": "Erinnerungen",
-        "walks": "{{count}} Schritte"
+        "walks_one": "{{n}} Schritt",
+        "walks_other": "{{n}} Schritte"
       },
       "tip": {
         "bedtime": "Versuch: \"sag mir, dass ich um 11 runterfahren soll\"",
@@ -6065,7 +6070,9 @@
       "files_could_not_be_read": "Dateien konnten nicht gelesen werden",
       "your_existing_kirocrew_setup_will_not_be_affecte": "Ihre bestehende {{productName}}-Einrichtung bleibt unberührt.",
       "your_selected_setup_is_ready_in_kiro_crew": "Deine ausgewählte Konfiguration ist in {{productName}} bereit.",
-      "import_setup_stage": "Einrichtung importieren · {{stage}} von {{stages}}"
+      "import_setup_stage": "Einrichtung importieren · {{stage}} von {{stages}}",
+      "source_item_count_one": "{{name}}, {{count}} Element",
+      "source_item_count_other": "{{name}}, {{count}} Elemente"
     },
     "agentSpecNotRewrittenNotice": {
       "saved_but_not_applied": "Gespeichert, aber diese {{productName}}-Instanz konnte die Agent-Konfiguration nicht aktualisieren, daher behalten neue Chats die alte Einrichtung. Den Grund findest du auf der Seite „Protokolle“."
@@ -7810,7 +7817,8 @@
       "knowledge_status_failed": "Die Wissensbibliothek konnte nicht geprüft werden.",
       "artifact_status_failed": "Es konnte nicht geprüft werden, ob diese Datei ein Artefakt ist.",
       "diff_status_failed": "Die git-Änderungen dieser Datei konnten nicht geprüft werden.",
-      "open_in_app": "In {{app}} öffnen"
+      "open_in_app": "In {{app}} öffnen",
+      "match_position": "{{current}} von {{total}}"
     },
     "markdownRenderer": {
       "download_failed": "Das Diagramm konnte nicht heruntergeladen werden. Versuche es erneut.",
@@ -8601,7 +8609,9 @@
       "previous": "Zurück ({{mod}})",
       "previous_match": "Vorheriger Treffer",
       "no_results_loaded_only": "Keine Ergebnisse im geladenen Verlauf",
-      "results_loaded_only": "{{current}}/{{total}} Ergebnisse im geladenen Verlauf"
+      "results_loaded_only": "{{current}}/{{total}} Ergebnisse im geladenen Verlauf",
+      "result_position_one": "{{current}} von {{count}} Ergebnis",
+      "result_position_other": "{{current}} von {{count}} Ergebnissen"
     },
     "searchResultsList": {
       "assistant": "Assistent",
@@ -8838,7 +8848,9 @@
       "provider_did_not_answer": "{{provider}} hat nicht geantwortet.",
       "select_a_skill_to_preview": "Wählen Sie einen Skill für die Vorschau",
       "skill_search_results": "Skill-Suchergebnisse",
-      "source": "Quelle"
+      "source": "Quelle",
+      "installed_files_one": "{{count}} Datei installiert",
+      "installed_files_other": "{{count}} Dateien installiert"
     },
     "skillDirectoryBrowser": {
       "description": "Beschreibung",
@@ -13817,6 +13829,12 @@
       "commits_behind_main": "Commits hinter main",
       "commits_behind_main_2_one": "{{count}} Commit hinter main",
       "commits_behind_main_2_other": "{{count}} Commits hinter main",
+      "prune_failed_count_one": "Bereinigen: {{count}} fehlgeschlagen",
+      "prune_failed_count_other": "Bereinigen: {{count}} fehlgeschlagen",
+      "pruned_worktrees_one": "{{count}} Worktree bereinigt",
+      "pruned_worktrees_other": "{{count}} Worktrees bereinigt",
+      "pruned_worktrees_some_failed_one": "{{count}} Worktree bereinigt ({{failed}} fehlgeschlagen)",
+      "pruned_worktrees_some_failed_other": "{{count}} Worktrees bereinigt ({{failed}} fehlgeschlagen)",
       "confirm": "Bestätigen",
       "conflicts_aborted": "Konflikte — abgebrochen",
       "created_recently": "kürzlich erstellt",
@@ -13854,7 +13872,6 @@
       "hide_legacy_worktrees": "{{n}} veraltete Worktrees ausblenden",
       "hide_logs": "Protokolle ausblenden",
       "issues": "Issues:",
-      "just_now": "gerade eben",
       "kept_discard_untracked_hint": "Zeilen, die nur durch nicht verfolgten Scratch aufgehalten werden: Ankreuzen einer verwirft die in dieser Zeile aufgeführten Dateien.",
       "kept_force_hint": "Ankreuzen zum erzwungenen Entfernen — löscht nicht zusammengeführte Arbeit.",
       "kept": "Behalten",
@@ -14691,7 +14708,9 @@
         "bulk_archive_failed": "Ausgewählte Elemente konnten nicht archiviert werden",
         "bulk_delete_failed": "Ausgewählte Elemente konnten nicht gelöscht werden",
         "entity_items_load_failed": "Elemente dieser Entität konnten nicht geladen werden",
-        "error_no_reason": "Die Anfrage ist ohne Angabe eines Grundes fehlgeschlagen."
+        "error_no_reason": "Die Anfrage ist ohne Angabe eines Grundes fehlgeschlagen.",
+        "delete_items_permanently_one": "{{count}} Element endgültig löschen?",
+        "delete_items_permanently_other": "{{count}} Elemente endgültig löschen?"
       },
       "itemCard": {
         "copied": "Kopiert!",
@@ -16692,7 +16711,8 @@
       "status_error": "beendet",
       "status_running": "aktiv",
       "title": "Sitzungsaufschlüsselung",
-      "tool_count": "{{count}} Tools",
+      "tool_count_one": "{{n}} Tool",
+      "tool_count_other": "{{n}} Tools",
       "unknown_agent": "Unteragent",
       "unknown_model": "unbekannt"
     },
@@ -16737,7 +16757,8 @@
       "prev_page": "Zurück",
       "preview_sweep": "Durchlauf vorschauen",
       "reclaim_by_age": "Nach Alter freigeben",
-      "refused_heading": "{{count}} Sitzungen konnten nicht verschoben werden",
+      "refused_heading_one": "{{n}} Sitzung konnte nicht verschoben werden",
+      "refused_heading_other": "{{n}} Sitzungen konnten nicht verschoben werden",
       "refused_in_use": "Sitzung wird verwendet",
       "refused_resumable": "noch fortsetzbar",
       "refused_too_fresh": "Sitzung ist zu aktuell",
@@ -17239,6 +17260,10 @@
         "a_folder_with_no_chats_takes_one_row_instead_of": "Ein Ordner ohne Chats belegt eine Zeile statt zwei, und seine Schaltfläche für einen neuen Chat wandert in die Ordnerzeile",
         "full_titles_on_scroll": "Vollständige Titel beim Scrollen anzeigen",
         "full_titles_on_scroll_description": "Beim Scrollen der Sitzungsliste werden von der Seitenleiste abgeschnittene Titel vollständig angezeigt",
+        "session_title_lines": "Titelzeilen auf Sitzungskarten",
+        "session_title_lines_desc": "Wie viele Zeilen ein Sitzungstitel nutzen darf, bevor er abgeschnitten wird",
+        "session_preview_lines": "Vorschauzeilen auf Sitzungskarten",
+        "session_preview_lines_desc": "Wie viele Zeilen die Vorschau der letzten Nachricht nutzen darf, bevor sie abgeschnitten wird",
         "content_width": "Inhaltsbreite",
         "context": "Kontext",
         "turns": "Züge",

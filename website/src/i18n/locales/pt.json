@@ -4129,19 +4129,29 @@
       "stats": {
         "busiest_day": "Dia mais tagarela: {{date}} ({{count}} msgs)",
         "companion_days": "Juntos há {{time}}",
-        "drags": "Arrastado {{count}} vezes",
+        "drags_one": "Arrastado {{n}} vez",
+        "drags_many": "Arrastado {{n}} vezes",
+        "drags_other": "Arrastado {{n}} vezes",
         "earliest_time": "Mais cedo: acordado às {{time}}",
         "first_use": "Sua história com {{name}} acabou de começar",
         "latest_time": "Mais tarde: acordado até às {{time}}",
-        "longest_chat": "Conversa mais longa: {{count}} mensagens",
+        "longest_chat_one": "Conversa mais longa: {{n}} mensagem",
+        "longest_chat_many": "Conversa mais longa: {{n}} mensagens",
+        "longest_chat_other": "Conversa mais longa: {{n}} mensagens",
         "messages": "{{total}} mensagens ({{sent}} você · {{received}} {{name}})",
         "mood_top": "Humores",
-        "peeks": "Espiou {{count}} vezes",
-        "screenshots": "Olhou sua tela {{count}} vezes",
+        "peeks_one": "Espiou {{n}} vez",
+        "peeks_many": "Espiou {{n}} vezes",
+        "peeks_other": "Espiou {{n}} vezes",
+        "screenshots_one": "Olhou sua tela {{n}} vez",
+        "screenshots_many": "Olhou sua tela {{n}} vezes",
+        "screenshots_other": "Olhou sua tela {{n}} vezes",
         "streak": "(sequência de {{streak}} dias)",
         "thinking_time": "Pensou por {{time}}",
         "title": "Memórias",
-        "walks": "{{count}} passos"
+        "walks_one": "{{n}} passo",
+        "walks_many": "{{n}} passos",
+        "walks_other": "{{n}} passos"
       },
       "tip": {
         "bedtime": "Tente: \"me diga para desacelerar às 23h\"",
@@ -6178,7 +6188,10 @@
       "files_could_not_be_read": "Não foi possível ler os arquivos",
       "your_existing_kirocrew_setup_will_not_be_affecte": "A sua configuração existente do {{productName}} não será afetada.",
       "your_selected_setup_is_ready_in_kiro_crew": "A configuração selecionada está pronta no {{productName}}.",
-      "import_setup_stage": "Importar configuração · {{stage}} de {{stages}}"
+      "import_setup_stage": "Importar configuração · {{stage}} de {{stages}}",
+      "source_item_count_one": "{{name}}, {{count}} item",
+      "source_item_count_many": "{{name}}, {{count}} itens",
+      "source_item_count_other": "{{name}}, {{count}} itens"
     },
     "agentSpecNotRewrittenNotice": {
       "saved_but_not_applied": "Salvo, mas esta cópia do {{productName}} não conseguiu atualizar a configuração do agente, então os novos chats mantêm a configuração anterior. Abra a página “Logs” para ver o motivo."
@@ -7946,7 +7959,8 @@
       "knowledge_status_failed": "Não foi possível verificar a biblioteca de conhecimento.",
       "artifact_status_failed": "Não foi possível verificar se este arquivo é um artefato.",
       "diff_status_failed": "Não foi possível verificar as alterações git deste arquivo.",
-      "open_in_app": "Abrir em {{app}}"
+      "open_in_app": "Abrir em {{app}}",
+      "match_position": "{{current}} de {{total}}"
     },
     "markdownRenderer": {
       "download_failed": "Não foi possível baixar o diagrama. Tente novamente.",
@@ -8748,7 +8762,10 @@
       "previous": "Anterior ({{mod}})",
       "previous_match": "Ocorrência anterior",
       "no_results_loaded_only": "Nenhum resultado no histórico carregado",
-      "results_loaded_only": "{{current}}/{{total}} resultados no histórico carregado"
+      "results_loaded_only": "{{current}}/{{total}} resultados no histórico carregado",
+      "result_position_one": "{{current}} de {{count}} resultado",
+      "result_position_many": "{{current}} de {{count}} resultados",
+      "result_position_other": "{{current}} de {{count}} resultados"
     },
     "searchResultsList": {
       "assistant": "Assistente",
@@ -8987,7 +9004,10 @@
       "provider_did_not_answer": "{{provider}} não respondeu.",
       "select_a_skill_to_preview": "Selecione uma habilidade para visualizar",
       "skill_search_results": "Resultados da pesquisa de habilidades",
-      "source": "Origem"
+      "source": "Origem",
+      "installed_files_one": "{{count}} arquivo instalado",
+      "installed_files_many": "{{count}} arquivos instalados",
+      "installed_files_other": "{{count}} arquivos instalados"
     },
     "skillDirectoryBrowser": {
       "description": "Descrição",
@@ -14084,6 +14104,15 @@
       "commits_behind_main_2_many": "{{count}} commits atrás do main",
       "commits_behind_main_2_one": "{{count}} commit atrás do main",
       "commits_behind_main_2_other": "{{count}} commits atrás do main",
+      "prune_failed_count_many": "Limpeza: {{count}} com falha",
+      "prune_failed_count_one": "Limpeza: {{count}} com falha",
+      "prune_failed_count_other": "Limpeza: {{count}} com falha",
+      "pruned_worktrees_many": "{{count}} worktrees limpos",
+      "pruned_worktrees_one": "{{count}} worktree limpo",
+      "pruned_worktrees_other": "{{count}} worktrees limpos",
+      "pruned_worktrees_some_failed_many": "{{count}} worktrees limpos ({{failed}} com falha)",
+      "pruned_worktrees_some_failed_one": "{{count}} worktree limpo ({{failed}} com falha)",
+      "pruned_worktrees_some_failed_other": "{{count}} worktrees limpos ({{failed}} com falha)",
       "confirm": "Confirmar",
       "conflicts_aborted": "Conflitos — abortado",
       "created_recently": "criada recentemente",
@@ -14121,7 +14150,6 @@
       "hide_legacy_worktrees": "Ocultar {{n}} worktrees legadas",
       "hide_logs": "Ocultar logs",
       "issues": "Issues:",
-      "just_now": "agora mesmo",
       "kept_discard_untracked_hint": "Linhas retidas apenas por arquivos temporários não rastreados: marcar uma descarta os arquivos listados nessa linha.",
       "kept_force_hint": "Marque para forçar a remoção — exclui trabalho não mesclado.",
       "kept": "Mantidas",
@@ -14963,7 +14991,10 @@
         "bulk_archive_failed": "Não foi possível arquivar os itens selecionados",
         "bulk_delete_failed": "Não foi possível excluir os itens selecionados",
         "entity_items_load_failed": "Não foi possível carregar os itens desta entidade",
-        "error_no_reason": "A solicitação falhou sem informar o motivo."
+        "error_no_reason": "A solicitação falhou sem informar o motivo.",
+        "delete_items_permanently_one": "Excluir {{count}} item permanentemente?",
+        "delete_items_permanently_many": "Excluir {{count}} itens permanentemente?",
+        "delete_items_permanently_other": "Excluir {{count}} itens permanentemente?"
       },
       "itemCard": {
         "copied": "Copiado!",
@@ -17015,7 +17046,9 @@
       "status_error": "encerrado",
       "status_running": "em execução",
       "title": "Detalhamento da sessão",
-      "tool_count": "{{count}} ferramentas",
+      "tool_count_one": "{{n}} ferramenta",
+      "tool_count_many": "{{n}} ferramentas",
+      "tool_count_other": "{{n}} ferramentas",
       "unknown_agent": "subagente",
       "unknown_model": "desconhecido"
     },
@@ -17061,7 +17094,9 @@
       "prev_page": "Anterior",
       "preview_sweep": "Pré-visualizar limpeza",
       "reclaim_by_age": "Recuperar por idade",
-      "refused_heading": "{{count}} sessões não puderam ser movidas",
+      "refused_heading_one": "{{n}} sessão não pôde ser movida",
+      "refused_heading_many": "{{n}} sessões não puderam ser movidas",
+      "refused_heading_other": "{{n}} sessões não puderam ser movidas",
       "refused_in_use": "sessão está em uso",
       "refused_resumable": "ainda retomável",
       "refused_too_fresh": "sessão é muito recente",
@@ -17571,6 +17606,10 @@
         "a_folder_with_no_chats_takes_one_row_instead_of": "Uma pasta sem conversas ocupa uma linha em vez de duas, e o botão de nova conversa passa para a linha da pasta",
         "full_titles_on_scroll": "Mostrar títulos completos ao rolar",
         "full_titles_on_scroll_description": "Ao rolar a lista de sessões, os títulos cortados pela barra lateral aparecem completos",
+        "session_title_lines": "Linhas de título nos cartões de sessão",
+        "session_title_lines_desc": "Quantas linhas o título de uma sessão pode ocupar antes de ser cortado",
+        "session_preview_lines": "Linhas de prévia nos cartões de sessão",
+        "session_preview_lines_desc": "Quantas linhas a prévia da última mensagem pode ocupar antes de ser cortada",
         "content_width": "Largura do conteúdo",
         "context": "Contexto",
         "turns": "Turnos",
