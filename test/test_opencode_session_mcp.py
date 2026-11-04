@@ -478,19 +478,20 @@ class TestPerToolDenyRules:
         reason = OpenCodeMirror().rulings()[Concern.DENIED_TOOLS].reason
         assert "deny" in reason and "fused" in reason
 
-    def test_crews_other_managed_servers_are_withheld_rather_than_mounted_unusable(
-        self, agents_dir, monkeypatch
+    def test_crews_managed_servers_are_mounted_in_this_install(
+        self, agents_dir
     ):
-        """A managed Crew server that is not the control plane reaches the array from
-        the spec unreplaced, so it would come up bound to no session and answer
-        ``not_bound`` to every call -- the present-but-unusable shape this folder
-        exists to remove."""
+        """THIS INSTALL RUNS CREWMATE SESSIONS ON OPENCODE, so the identity-bound
+        withhold is off: the conductor spec is host-written and a broker stub
+        carries the session identity, so ``mate``/``guide``/``work`` must mount
+        rather than sit advertised-but-absent. A per-tool restriction is still
+        withheld (see the sibling test above)."""
         bound = sorted(identity_bound_crew_servers())
         assert bound, "the identity-bound set is empty, so this test proves nothing"
         name = bound[0]
         _write_spec(agents_dir, servers={name: {"command": "/bin/x"}}, tools=[f"@{name}"])
         names = [e["name"] for e in opencode_projection("kirocrew").params["mcpServers"]]
-        assert name not in names
+        assert name in names
 
     def test_the_identity_bound_set_never_includes_the_control_plane(self):
         assert not identity_bound_crew_servers() & set(session_mcp.CONTROL_PLANE_SERVERS)

@@ -396,6 +396,19 @@ def test_aws_stays_masked_with_only_config_reexposed() -> None:
     assert gate.adapter_expose_files(ACP_BACKEND_CODEX, hidden) == (
         os.path.join(home, ".aws", "config"),
     )
+
+
+def test_opencode_exposes_only_the_gateway_credential() -> None:
+    """THIS INSTALL RUNS CREWMATE SESSIONS ON OPENCODE: its raw dashboard/panel
+    stdio children must read ``.local_secret`` and ``run/``, so those two leaves
+    are re-exposed. Every other floor leaf (``.ssh``, ``.aws``, the consent
+    records) stays masked, and every other backend keeps the full mask."""
+    masked = set(gate.adapter_hidden_credential_dirs(ACP_BACKEND_OPENCODE))
+    home = os.path.expanduser("~")
+    assert os.path.join(home, ".local_secret") not in masked
+    assert os.path.join(home, ".kiro", "crew", "run") not in masked
+    assert os.path.join(home, ".ssh") in masked
+    assert gate.adapter_hidden_credential_dirs(ACP_BACKEND_CODEX) != ()
     assert (
         ".aws" in sensitive_home_dirs()
     ), "the agent's own file tools must still be fenced from ~/.aws"
@@ -1271,6 +1284,15 @@ def test_a_withheld_leaf_leaves_the_mask_only_by_a_narrower_grant(backend, leaf)
                 f"{backend} must be able to reach {target}: its child loads Crew's own "
                 "gate out of that leaf, and a masked directory is what refused "
                 "every one of its sessions before."
+            )
+        elif backend == ACP_BACKEND_OPENCODE and leaf in {".local_secret", "run"}:
+            # THIS INSTALL RUNS CREWMATE SESSIONS ON OPENCODE. The raw
+            # dashboard/panel stdio children need the gateway credential; these
+            # two leaves are the documented exception, and every other floor leaf
+            # below stays masked for this backend too.
+            assert target not in masked, (
+                f"{backend} runs crewmate sessions in this install and must reach "
+                f"{target} so its session-level Crew servers authenticate."
             )
         elif spelling in floor:
             assert target in masked, (

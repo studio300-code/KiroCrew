@@ -338,6 +338,7 @@ def place_single_binary_array(
     channel_id: str = "",
     session_token: str = "",
     admit_work_ledger_stub: bool = False,
+    relax_identity_withhold: bool = False,
 ) -> list[dict[str, Any]]:
     """The ``mcpServers`` array for a single-binary harness, both halves of it.
 
@@ -362,8 +363,18 @@ def place_single_binary_array(
     server is not withheld for an unhonoured restriction. It still passes the
     ``tools`` allowlist, which also refuses a server switched off whole. A
     spec-described work-ledger entry stays withheld and is never handed a credential.
+
+    *relax_identity_withhold* drops the identity-bound withhold. This install
+    passes True: crewmate sessions run on opencode, the conductor spec is
+    host-written, and a broker stub carries the session identity, so
+    ``kirocrew-mate``/``kirocrew-guide``/``kirocrew-work`` can be mounted. A
+    per-tool restriction (``unhonoured``) is still withheld — that is an
+    operator decision, not a transport limitation.
     """
-    withheld = withheld_servers(frozenset()) | unhonoured
+    identity_withheld = (
+        frozenset() if relax_identity_withhold else withheld_servers(frozenset())
+    )
+    withheld = identity_withheld | unhonoured
     kept: list[dict[str, Any]] = []
     for element in projection.servers:
         name = element.get("name")
@@ -496,6 +507,12 @@ def opencode_projection(
         channel_id=channel_id,
         session_token=session_token,
         admit_work_ledger_stub=True,
+        # THIS INSTALL RUNS CREWMATE SESSIONS ON OPENCODE. The conductor's
+        # host-written spec is the source of these servers and the broker stubs
+        # carry the session identity, so the transport can mount them. Keeping
+        # the withhold would leave ``mate``/``guide``/``work`` advertised but
+        # permanently absent.
+        relax_identity_withhold=True,
     )
     return SessionProjection(
         params={"mcpServers": out},

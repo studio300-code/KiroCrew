@@ -66,6 +66,7 @@ from kiro_crew.agent_sdk.backends import (
     ACP_BACKEND_CODEX,
     ACP_BACKEND_DEEPSEEK,
     ACP_BACKEND_LAUNCH,
+    ACP_BACKEND_OPENCODE,
     ACP_BACKEND_PI,
     ACP_BACKEND_STRANDS,
     Readback,
@@ -386,7 +387,25 @@ def adapter_hidden_credential_dirs(backend: str) -> tuple:
     excluded_leaves = tuple(
         sorted(set(ADAPTER_OWN_CREDENTIAL_LEAVES.get(backend, ())) | host_runtime | gate_artifacts)
     )
-    return sandbox_credential_targets(excluded_leaves)
+    targets = sandbox_credential_targets(excluded_leaves)
+    if backend == ACP_BACKEND_OPENCODE:
+        # THIS INSTALL RUNS CREWMATE SESSIONS ON OPENCODE, AND THE CONTROL PLANE
+        # MUST WORK. A crewmate chat on opencode mounts its Crew servers (the
+        # dashboard and panel session-level entries, and the platform servers the
+        # conductor spec declares) as stdio children inside the session sandbox.
+        # The mask hid ``.local_secret`` and ``run/`` from those children, so
+        # every gateway-backed call was refused ``internal_secret_missing``.
+        #
+        # Only the two gateway-credential leaves are re-exposed: ``.ssh``,
+        # ``.aws``, the consent records and every other floor leaf stay masked.
+        # The trade-off is explicit — this backend's agent shell can also read
+        # the gateway secret. Every other backend keeps the full mask.
+        targets = tuple(
+            p
+            for p in targets
+            if PurePosixPath(p).name not in {".local_secret", "run"}
+        )
+    return targets
 
 
 def adapter_expose_files(backend: str, hidden: tuple) -> tuple:

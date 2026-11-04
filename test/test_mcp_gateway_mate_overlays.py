@@ -80,6 +80,42 @@ def _agent_flag(entry: dict) -> str:
     return flags[flags.index("--agent") + 1]
 
 
+class TestTheConductorExtraSource:
+    """The conductor is a service agent, so the crewmate half skips it and it
+    lives outside ``~/.kiro/agents`` by design. As an extra source it must still
+    get a regular overlay: otherwise its platform servers run as stdio children
+    inside a sandbox that masks the gateway credential
+    (``internal_secret_missing``)."""
+
+    def test_the_conductor_gets_a_regular_overlay_with_a_stub(self, home):
+        conductor = _write(
+            home.mates / "kirocrew-mate-conductor.json",
+            {
+                "name": "kirocrew-mate-conductor",
+                "mcpServers": {SERVER: {"command": sys.executable, "args": ["-V"]}},
+            },
+        )
+        results, _target_env = rewriter.rewrite_agents(
+            source_dir=home.agents,
+            overlay_dir=home.overlay,
+            socket_path=home.tmp / "gw.sock",
+            work_dir=home.tmp / "work",
+            stub_servers=frozenset({SERVER}),
+            pooling_enabled=True,
+            mate_source_dir=home.mates,
+            extra_source_files=(conductor,),
+        )
+        overlay = json.loads((home.overlay / "kirocrew-mate-conductor.json").read_text())
+        entry = overlay["mcpServers"][SERVER]
+        assert entry[_WRAPPER_MARKER] is True
+        assert _agent_flag(entry) == "kirocrew-mate-conductor"
+        assert results["kirocrew-mate-conductor.json"] == 1
+        # The crewmate half still skips the service agent.
+        assert not (
+            mate_overlays.mate_overlay_dir(home.overlay) / "kirocrew-mate-conductor.json"
+        ).exists()
+
+
 class TestTheRewritePass:
     def test_a_crewmate_server_gets_a_stub_under_the_crewmate_identity(self, home):
         results, target_env = _rewrite(home)

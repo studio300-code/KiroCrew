@@ -57,6 +57,10 @@ def test_rewrite_agents_signature_is_pinned_to_fingerprint_inputs() -> None:
         "approvals",
         # Fingerprinted as the ``mate_sources`` input.
         "mate_source_dir",
+        # Fingerprinted in ``sources`` alongside the directory listing: a spec
+        # outside ``source_dir`` (the crewmate conductor) whose content changes
+        # must invalidate its overlay exactly as an in-directory source does.
+        "extra_source_files",
     }
 
 

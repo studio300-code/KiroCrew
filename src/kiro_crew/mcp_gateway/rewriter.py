@@ -165,6 +165,7 @@ def _rewrite_inputs_fingerprint(
     identity_keys: Collection[str],
     read_buffer_limit: int,
     mate_sources: dict[str, Any] | None = None,
+    extra_source_files: Collection[Path] = (),
 ) -> dict[str, Any]:
     """Return a JSON-serializable snapshot of every input that can change
     :func:`rewrite_agents`'s output.
@@ -219,6 +220,8 @@ def _rewrite_inputs_fingerprint(
     sources: dict[str, list[Any] | None] = {
         p.name: _source_sig(p) for p in iter_agent_spec_files(source_dir)
     }
+    for extra_path in extra_source_files:
+        sources[extra_path.name] = _source_sig(extra_path)
     extra: dict[str, Any] = {} if mate_sources is None else {"mate_sources": mate_sources}
     return {
         **extra,
@@ -605,6 +608,7 @@ def rewrite_agents(
     pooling_enabled: bool = True,
     approvals: LaunchApprovals | None = None,
     mate_source_dir: Path | None = None,
+    extra_source_files: Collection[Path] = (),
 ) -> tuple[dict[str, int], dict[str, str]]:
     """Populate ``overlay_dir`` with rewritten copies of ``source_dir/*.json``.
 
@@ -657,6 +661,17 @@ def rewrite_agents(
             unapproved target is discarded for a full pass, and the object
             records what the pass captured and refused for the caller to
             persist. ``None`` enforces nothing.
+        extra_source_files: Specs outside ``source_dir`` this pass still
+            rewrites into ``<overlay_dir>/<stem>.json``, with the same
+            fingerprint, keep, prune and sidecar rules as a source found by the
+            directory listing. The crewmate conductor
+            (``kirocrew-mate-conductor.json``) lives in ``~/.kiro/mates/agents``
+            rather than ``~/.kiro/agents`` because kiro-cli lists every spec in
+            the latter, so without this parameter its platform servers
+            (``kirocrew-core``, ``kirocrew-cron``, ``kirocrew-work``) never
+            become broker stubs and a member session on a sandboxed harness
+            launches them as stdio children with the gateway credential masked.
+            An absent file contributes no signature and no overlay.
 
     Returns:
         A ``(results, target_env)`` tuple:
@@ -753,6 +768,7 @@ def rewrite_agents(
         identity_keys=identity_keys,
         read_buffer_limit=read_buffer_limit,
         mate_sources=mate_fingerprint,
+        extra_source_files=extra_source_files,
     )
     if approvals is not None:
         current_inputs["launch_approvals"] = approvals.digest()
@@ -960,7 +976,9 @@ def rewrite_agents(
     # skipped for bad content claims nothing, so it cannot cost its valid twin
     # the overlay (and the pruning of the twin's stale one) below.
     overlay_keys_claimed: dict[str, str] = {}
-    for path in iter_agent_spec_files(source_dir):
+    source_paths = list(iter_agent_spec_files(source_dir))
+    source_paths.extend(p for p in extra_source_files if p.is_file())
+    for path in source_paths:
         # The overlay is JSON whatever the source: ``session_servers`` resolves
         # ``<agent>.json``. The fingerprint's ``sources`` stays keyed by the
         # SOURCE name, so a markdown edit invalidates its overlay.
