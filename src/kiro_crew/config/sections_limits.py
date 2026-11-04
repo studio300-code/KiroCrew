@@ -36,9 +36,9 @@ logger = logging.getLogger("kiro_crew.config.loader")
 # untrusted above range no matter which consumer reads it, and also means the
 # GET /api/config/kirocrew response (which serializes a freshly loaded config)
 # reports the clamped value rather than the tampered one.
-SUBAGENT_AUTO_MAX_CEILING = 64  # agent.subagent_auto_max — concurrent subagent ceiling
-SUBAGENT_MAX_TURNS_CEILING = 1000  # agent.subagent_max_turns — per-subagent turn budget
-POOL_SIZE_MAX = 10  # session.pool_size — pre-warmed process pool
+SUBAGENT_AUTO_MAX_CEILING = 512  # agent.subagent_auto_max — concurrent subagent ceiling
+SUBAGENT_MAX_TURNS_CEILING = 10_000_000  # agent.subagent_max_turns — per-subagent turn budget
+POOL_SIZE_MAX = 64  # session.pool_size — pre-warmed process pool
 
 # agent.chat_turn_timeout_secs — wall-clock ceiling for one chat turn. The ACP
 # transport's per-prompt wait follows this value (acp/client_timeouts.py
@@ -56,7 +56,7 @@ POOL_SIZE_MAX = 10  # session.pool_size — pre-warmed process pool
 # turn does not. The floor keeps the backstop from being set so low it cuts
 # ordinary work.
 CHAT_TURN_TIMEOUT_MIN = 300
-CHAT_TURN_TIMEOUT_MAX = 86400
+CHAT_TURN_TIMEOUT_MAX = 31_536_000
 
 # agent.session_start_timeout_secs — budget for ACP session/new + session/load
 # on the shared runtime (acp/runtime_start.py ``_SESSION_NEW_TIMEOUT`` is the built-in
@@ -71,7 +71,7 @@ CHAT_TURN_TIMEOUT_MAX = 86400
 # value: a session start slower than 15 minutes is pathological and should
 # surface as a timeout, not wait forever.
 SESSION_START_TIMEOUT_MIN = 90
-SESSION_START_TIMEOUT_MAX = 900
+SESSION_START_TIMEOUT_MAX = 86_400
 
 # agent.tool_approval_timeout_secs — how long a chat turn parks waiting for a
 # human to answer a tool-approval prompt. The floor keeps the window long enough
@@ -84,7 +84,7 @@ SESSION_START_TIMEOUT_MAX = 900
 # ``_clamp_security_bounds``, which pulls the window APPROVAL_TURN_MARGIN_SECS
 # under the configured turn ceiling.
 TOOL_APPROVAL_TIMEOUT_MIN = 30
-TOOL_APPROVAL_TIMEOUT_MAX = 7200
+TOOL_APPROVAL_TIMEOUT_MAX = 86_400
 
 # The turn ceiling assumed when config omits ``agent.chat_turn_timeout_secs``.
 # Read from the dataclass default so the two cannot drift apart.
@@ -166,7 +166,7 @@ def parse_autocompact_pct(value: int | float, *, name: str = "pct") -> float:
 # (``value if value == 0 else max(value, MIN)``); the resolver treats <= 0 as
 # unset and falls back to the built-in default.
 COMPACT_WAIT_SECS_MIN = 60.0
-COMPACT_WAIT_SECS_MAX = 3600.0
+COMPACT_WAIT_SECS_MAX = 86_400.0
 
 # ── Load/write bound parity ────────────────────────────────────────────────────
 # Ranges for bounded numeric fields the LOAD path clamps, while `_EDITABLE_CONFIG`
@@ -234,13 +234,13 @@ SESSION_SORT_MODES: tuple[str, ...] = (
 # the frontend's ``liquidGlass.ts`` mirrors the two non-empty values.
 TRANSLUCENT_PANELS_VALUES: tuple[str, ...] = ("", "on", "off")
 SESSION_TIMEOUT_MIN = 0
-SESSION_TIMEOUT_MAX = 86400
+SESSION_TIMEOUT_MAX = 31_536_000
 POOL_TTL_SECS_MIN = 0
-POOL_TTL_SECS_MAX = 7200
+POOL_TTL_SECS_MAX = 86_400
 SOFT_STOP_BUDGET_MIN = 0.5
 SOFT_STOP_BUDGET_MAX = 60.0
 EXTRACTION_POOL_SIZE_MIN = 1
-EXTRACTION_POOL_SIZE_MAX = 10
+EXTRACTION_POOL_SIZE_MAX = 64
 # Load-only bounds. Unlike the parity block above these are NOT consumed by
 # `_EDITABLE_CONFIG` — the field is config-file-only (no dashboard write path),
 # so the only clamp site is the loader. Kept out of the shared block so its

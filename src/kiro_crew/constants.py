@@ -376,7 +376,7 @@ DEFAULT_SUBAGENT_COST_GB = 0.5
 # turn cannot be awaited by anything; the min keeps the backstop from being set
 # so low it cuts ordinary work.
 SUBAGENT_TIMEOUT_MIN = 60
-SUBAGENT_TIMEOUT_MAX = 86400
+SUBAGENT_TIMEOUT_MAX = 31_536_000
 
 
 # ── Canonical "[OPTIONS: a | b | c]" trailer parsers ────────────────────────

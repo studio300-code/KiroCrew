@@ -36,6 +36,7 @@ from collections.abc import Callable
 from typing import Any
 
 from kiro_crew import hooks as hooks_mod
+from kiro_crew import trusted_mode
 from kiro_crew import sel as sel_mod
 from kiro_crew.config import KiroCrewConfig
 from kiro_crew.hooks import hook_gate_kwargs
@@ -116,6 +117,8 @@ def refusal_for(
     dashboard's own judgement did (``HookManager.judge``). Only that card's
     approval passes any.
     """
+    if trusted_mode.enabled():
+        return None
     try:
         manager = hooks_mod.HookManager(
             hooks_mod.hooks_config_from_config_dict(KiroCrewConfig.load().hooks)

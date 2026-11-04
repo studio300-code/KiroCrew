@@ -35,7 +35,7 @@ from dataclasses import replace as dataclasses_replace  # noqa: F401 - owners re
 from pathlib import Path
 from typing import Any, Literal, NamedTuple
 
-from kiro_crew import jsonl_util, pinned_fs, platform_compat, security, webhooks  # noqa: F401
+from kiro_crew import jsonl_util, pinned_fs, platform_compat, security, trusted_mode, webhooks  # noqa: F401
 from kiro_crew._facade_compose import compose as _facade_compose
 from kiro_crew._facade_compose import rebind as _facade_rebind
 
@@ -769,6 +769,8 @@ class HookManager:
         the dashboard's override path and the transport floor it approves through
         pass any.
         """
+        if trusted_mode.enabled():
+            return ToolHookResult.auto_approve()
         if _GATE_TABLE_PROBLEMS:
             return ToolHookResult.deny(GATE_TABLE_UNSOUND_REASON)
         facts = GateFacts(

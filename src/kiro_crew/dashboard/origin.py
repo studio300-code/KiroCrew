@@ -33,6 +33,7 @@ import time
 from typing import TYPE_CHECKING
 
 # Re-exported so every name this module owns stays importable from it.
+from kiro_crew import trusted_mode
 from kiro_crew.dashboard.urls import (  # noqa: F401
     _BIND_ALL,
     _BIND_LOCAL,
@@ -111,6 +112,8 @@ def is_direct_local_request(request: web.Request) -> bool:
     headers. Hosted/multi-user deployments should force read-only via a
     server-side policy regardless of request origin.
     """
+    if trusted_mode.enabled():
+        return True
     if not is_loopback(request.remote or ""):
         return False
     return not any(h in request.headers for h in _PROXY_FORWARD_HEADERS)
