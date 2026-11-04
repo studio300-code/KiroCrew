@@ -164,8 +164,8 @@ describe('WhatsAppPanel — status', () => {
 describe('WhatsAppPanel — the neonize dependency', () => {
   // What the gateway leaves in `connect_error` (MISSING_EXTRA_HINT): a bare pip
   // line that may target another interpreter.
-  const RAW_HINT = 'The WhatsApp channel needs its optional dependency: pip install neonize==0.4.3.post0'
-  const CMD = '/opt/gw/bin/python -m pip install neonize==0.4.3.post0'
+  const RAW_HINT = 'The WhatsApp channel needs its optional dependency: pip install neonize==0.9.0'
+  const CMD = '/opt/gw/bin/python -m pip install neonize==0.9.0'
   const missing = {
     connected: false,
     state: 'unpaired' as const,

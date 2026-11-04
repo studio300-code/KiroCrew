@@ -461,7 +461,7 @@ class WhatsAppConfig:
     no bot token. Pairing state lives in a local session database under the
     data home (``whatsapp/session.db``), created by the Settings > Messaging Channels QR
     flow. Requires the optional ``whatsapp`` dependency
-    (``pip install 'neonize==0.4.3.post0'``; see :mod:`kiro_crew.extras`).
+    (``pip install 'neonize==0.9.0'``; see :mod:`kiro_crew.extras`).
 
     Uses the unofficial WhatsApp Web protocol; automation on a personal
     account is against WhatsApp's Terms of Service and carries a small risk

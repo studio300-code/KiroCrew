@@ -50,7 +50,7 @@ const WA_MISSING = {
   configured: false,
   enabled: true,
   // What the gateway writes on a missing extra; the panel must not show it.
-  connect_error: 'The WhatsApp channel needs its optional dependency: pip install neonize==0.4.3.post0',
+  connect_error: 'The WhatsApp channel needs its optional dependency: pip install neonize==0.9.0',
   connect_failed: true,
   sdk_installed: false,
 }
@@ -81,7 +81,7 @@ const SCENARIOS = [
     config: {
       ...WA_MISSING,
       sdk_install_supported: true,
-      sdk_install_command: '/opt/kirocrew/.venv/bin/python -m pip install neonize==0.4.3.post0',
+      sdk_install_command: '/opt/kirocrew/.venv/bin/python -m pip install neonize==0.9.0',
     },
     expectText: /-m pip install neonize==0\.4\.3\.post0/,
   },

@@ -97,7 +97,7 @@ RUN --mount=type=bind,source=dist,target=/tmp/wheels \
 # WhatsApp and local STT are optional extras in Kiro Crew; the appliance wants
 # both. neonize ships a manylinux Go shared object for amd64/arm64.
 RUN pip install --no-cache-dir \
-        'neonize==0.4.3.post0' \
+        'neonize==0.9.0' \
         'pywhispercpp>=1.5,<2' \
         'PyJWT[crypto]==2.15.0' \
         'lark-oapi>=1.4,<2'
