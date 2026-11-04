@@ -1,6 +1,13 @@
 import { i18nT } from '../../i18n/t'
 import type { BackendStatus } from '../../utils/backendStatus'
 
+/** An app row's `composerActionGrant`: the approved composer buttons, and the ids
+ *  of the ones an update added that wait (`apps/composer_action_grants.py`). */
+export interface ComposerActionGrantRow {
+  actions?: Array<{ id?: string; title?: string; icon?: string }>
+  staged?: string[]
+}
+
 /** An app row's `linkPreviewGrant`: approved hosts and text patterns, and the ones held back. */
 export interface LinkPreviewGrantRow {
   hosts?: string[]
@@ -27,6 +34,13 @@ export interface LinkOpenGrantRow {
   /** Whole URLs (query and fragment) approved, and asked for but waiting. */
   fullUrl?: boolean
   stagedFullUrl?: boolean
+}
+
+/** An app row's `selectionActionGrant`: item ids the owner approved, and changed entries that wait. */
+export interface SelectionActionGrantRow {
+  approved?: string[]
+  /** Grant entries (`<id>:<sources>:<min>-<max>:<effects>`) an update added or changed. */
+  staged?: string[]
 }
 
 /**
@@ -146,6 +160,9 @@ export type InstalledApp = {
   messageActionGrant?: MessageActionGrantRow
   /** Approved link-open hosts, and the ones an update holds back. */
   linkOpenGrant?: LinkOpenGrantRow
+  composerActionGrant?: ComposerActionGrantRow
+  /** Approved selection-action items, and the changed ones an update holds back. */
+  selectionActionGrant?: SelectionActionGrantRow
   installedAt: string
   source?: string
   origin?: string     // "builtin" | "registry" | "local" | "external"

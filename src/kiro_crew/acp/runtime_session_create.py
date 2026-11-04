@@ -17,7 +17,8 @@ Instance fields read: ``_agent``, ``_agent_capabilities``, ``_crew_agent``, ``_d
 ``_entitlement_probe_lock``, ``_expect_mcp_reports``, ``_initialized``,
 ``_mcp_gateway_overlay``, ``_member_context``, ``_pending_init_notifications``, ``_pid``,
 ``_pool_lookup``, ``_process``, ``_refuse_over_ceiling_start``, ``_remote_session_servers``,
-``_remote_workspace_agents``, ``_start_collect_timeout``, ``_wire_mode_id``, ``_work_dir``,
+``_remote_workspace_agents``, ``_session_label_elements``, ``_start_collect_timeout``,
+``_wire_mode_id``, ``_work_dir``,
 ``_write_remote_token``.
 """
 
@@ -38,6 +39,8 @@ from kiro_crew.acp._dispatch import (
 from kiro_crew.acp.kas_agents import hoist_servers_for_session
 from kiro_crew.acp.runtime_session_setup import (
     _disable_check_scope,
+    _drop_withdrawn_stubs,
+    _kas_worker_stub_names,
     _pooled_session_servers_and_ref_spec,
 )
 from kiro_crew.acp.runtime_start import _START_COLLECT_TIMEOUT_DEFAULT, StartCollector, StartPermit
@@ -196,6 +199,8 @@ async def create_session(
     mirrored_snapshot: Any = None
     consumed_spec: Any = None
     ref_spec: Any = None
+    # The KAS crewmate worker's stub names, set beside its one overlay lookup.
+    worker_stubs: frozenset[str] | None = None
     if mcp_servers is None:
         # A mirrored host takes its whole array from the mirror; every other host
         # takes the pooled stubs it always took. Which one is a synchronous
@@ -226,11 +231,19 @@ async def create_session(
                 self.acp_backend,
                 session_work_dir,
                 launch_spec,
+                session_key or "",
             )
             mcp_servers = await self._unpooled_control_planes(
                 pooled, agent or self._agent, session_work_dir
             )
+            worker_stubs = _kas_worker_stub_names(
+                self.acp_backend, pool_agent, session_key or "", pooled
+            )
             mcp_servers, stub_token = await self._own_stub_session(mcp_servers, session_key)
+            # After the token stamp, so a label element never carries the token.
+            mcp_servers = await self._session_label_elements(
+                mcp_servers, agent or self._agent, session_work_dir, session_key
+            )
     else:
         # An explicit array is the caller's own composition (a mirror's
         # projection, a test double); it is not this method's to re-key, and it
@@ -321,6 +334,7 @@ async def create_session(
         # the mount and the grant together so the two cannot disagree.
         crew_panel=panel_mounted,
         session_key=session_key,
+        **({} if worker_stubs is None else {"worker_stub_names": worker_stubs}),
     )
     kas_agents = kas_extras.custom_agents
     # The generation the wire payload was built from, or None when this host takes its
@@ -337,6 +351,8 @@ async def create_session(
     # Read BEFORE the hoist: it moves app launcher entries out of the batch, and
     # the recorded batch then lacks the snapshots this projection wrote.
     launch_snapshots = kas_env_launch.batch_snapshot_names(kas_agents)
+    # A worker stub whose server the payload's later read of the spec muted.
+    mcp_servers = _drop_withdrawn_stubs(mcp_servers, kas_extras.withdrawn_stub_names)
     kas_agents, mcp_servers = hoist_servers_for_session(
         kas_agents,
         active_agent,

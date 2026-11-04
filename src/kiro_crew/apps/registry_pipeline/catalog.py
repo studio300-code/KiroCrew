@@ -537,6 +537,29 @@ async def refresh_registries(repo: str | None = None) -> dict[str, Any]:
     }
 
 
+#: Why a manifest shell string (``detectInstalled``, ``openCommand``) is not run
+#: on native Windows. The one copy of the text: the install precheck and the open
+#: route report it too. It sits here, not beside ``NATIVE_WINDOWS_HOOK_REFUSAL`` in
+#: ``install``, because this module is the lowest owner that needs it.
+NATIVE_WINDOWS_SHELL_REFUSAL = (
+    "manifest shell commands are not supported on native Windows (they run through /bin/sh)"
+)
+
+
+def _manifest_shell_platform_refusal() -> str | None:
+    """Why a manifest shell string cannot run on this host, or None when it can.
+
+    ``detectInstalled`` and ``openCommand`` run through ``/bin/sh -c``, and native
+    Windows has no ``/bin/sh``: the spawn would raise ``FileNotFoundError``, which
+    a caller swallowing ``OSError`` reads as a wrong answer ("not installed"), and
+    the open route never gets that far (a display-less host reads as remote). The
+    same policy as ``NATIVE_WINDOWS_HOOK_REFUSAL`` for the lifecycle hooks.
+    """
+    if platform_compat.IS_POSIX:
+        return None
+    return NATIVE_WINDOWS_SHELL_REFUSAL
+
+
 async def _detect_installed_probe(
     entries: list[dict[str, Any]],
     installed_map: dict[str, dict[str, Any]],
@@ -545,12 +568,16 @@ async def _detect_installed_probe(
 
     Names already known to the app manager (present in *installed_map*) are
     skipped, as are names whose execution policy denies the probe. A probe
-    timeout or ``OSError`` is swallowed and treated as not-installed. Shared by
+    timeout or ``OSError`` is swallowed and treated as not-installed. On native
+    Windows no probe starts, since there is no ``/bin/sh`` to run it through: the
+    names read not-installed and one WARNING names the reason. Shared by
     ``list_registry`` (offline path) and ``_append_external_registry_apps``
     (online path) so both probe identically -- an app installed OUTSIDE the app
     manager reads installed on either path.
     """
     detected: set[str] = set()
+    platform_refusal = _manifest_shell_platform_refusal()
+    not_run: list[str] = []
     for entry in entries:
         name = entry.get("name", "")
         if name in installed_map:
@@ -566,6 +593,9 @@ async def _detect_installed_probe(
         )
         if denied:
             logger.debug("Skipping registry detectInstalled for %s: %s", name, denied)
+            continue
+        if platform_refusal:
+            not_run.append(name)
             continue
         try:
 
@@ -607,6 +637,8 @@ async def _detect_installed_probe(
                 logger.info("Detected external install: %s", name)
         except (asyncio.TimeoutError, OSError):
             pass  # detection failed, treat as not installed
+    if not_run:
+        logger.warning("detectInstalled not run for %s: %s", ", ".join(not_run), platform_refusal)
     return detected
 
 
@@ -1051,8 +1083,15 @@ def _resolve_registry_row(name: str) -> tuple[dict[str, Any] | None, str]:
 
     catalog_row: dict[str, Any] | None = None
     catalog_failed = False
+    no_install_source = False
     try:
         catalog_row = official_catalog.inventory_for_install(name)
+    except official_catalog.CatalogNoInstallSource:
+        # The catalog answered: it lists this app with no install coordinates.
+        # Still a refusal (the catalog is curating the name), but not an outage.
+        catalog_failed = True
+        no_install_source = True
+        logger.warning("official catalog lists the app without install coordinates")
     except official_catalog.CatalogUnavailable:
         catalog_failed = True
         # The caller may be classifying a config-derived grant name, and catalog
@@ -1078,6 +1117,12 @@ def _resolve_registry_row(name: str) -> tuple[dict[str, Any] | None, str]:
         # code under a name the owner already permitted for execution. The local
         # cache cannot be consulted to decide -- it is agent-writable, which is the
         # surface `inventory_for_install` refuses to read in the first place.
+        if no_install_source:
+            return None, (
+                "the official catalog lists the requested app but gives it no "
+                "install source, so it cannot be installed from the registry yet "
+                "— refusing to resolve it from another source."
+            )
         detail = (
             "is bundled and may carry an official commit pin"
             if seed_row is not None

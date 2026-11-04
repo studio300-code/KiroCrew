@@ -107,7 +107,7 @@ _MEMBERS: dict[str, tuple[str, object, str, str]] = {
         "fa6cfecd5574",
         "runtime_mode_activation",
     ),
-    "_kas_custom_agents": ("function", True, "997f5903aa65", "runtime_session_setup"),
+    "_kas_custom_agents": ("function", True, "1cacd0d91137", "runtime_session_setup"),
     "_kill_failed_start_escapees": ("function", True, "ccaec8d76f05", "runtime_spawn_launch"),
     "_kill_inner": ("function", True, "4f9ced5c4b86", "runtime_tree_kill"),
     "_mark_dead": ("function", False, "e8c36427bffd", "runtime_liveness"),
@@ -315,7 +315,7 @@ _BASE_IMPORTS = frozenset("""
     apply_pod_bundle_spawn assert_voice_runtime_outside_agent_workspace asyncio
     attach_kas_custom_agents attach_stub_session_token augmented_path authorize_runtime_kill
     backends_retired_by_host_logout bind_voice_safe_agent_workspace_async
-    browser_session_env browser_socket_env build_session_new_params cgroup_scope_argv
+    build_session_new_params cgroup_scope_argv
     create_subprocess_limited data_home deque emit_counter encode_frame
     ensure_agent_materialized ensure_directory finish_suspended_spawn functools
     group_vouching_available harness_for has_mirror hoist_servers_for_session importlib

@@ -77,6 +77,7 @@ from kiro_crew.config.sections import (
     BACKGROUND_WORKER_AGENTS,
     DEFAULT_MODEL,
     AgentConfig,
+    BrowserConfig,
     ChannelConfig,
     ComputerUseConfig,
     CronHistoryConfig,
@@ -231,6 +232,14 @@ class KiroCrewConfig:
             "How a session's choice between the two monitoring paths is framed. "
             "Neither path is gated by this section; both are armable with it at "
             "its default.",
+        ),
+    )
+    browser: BrowserConfig = field(
+        default_factory=BrowserConfig,
+        metadata=_meta(
+            "Browser",
+            "Which browser the agent drives and how its live view streams into the "
+            "chat. Settings -> Browser edits every key; nothing here is gated by it.",
         ),
     )
     decisions: DecisionsConfig = field(
@@ -494,8 +503,9 @@ class KiroCrewConfig:
         default="",
         metadata=_meta(
             "Timezone",
-            "IANA timezone name (e.g. 'America/Los_Angeles'). "
-            "Used to display cron schedules in local time.",
+            "IANA timezone name (e.g. 'America/Los_Angeles'), or 'local' to follow "
+            "this computer's time zone wherever it travels. The default zone for cron "
+            "jobs that name none and for the agent's sense of 'now'. Empty means 'local'.",
         ),
     )
     snapshot_dir: str = field(
@@ -698,6 +708,7 @@ class KiroCrewConfig:
             "heartbeat": asdict(self.heartbeat),
             "monitoring": asdict(self.monitoring),
             "decisions": asdict(self.decisions),
+            "browser": asdict(self.browser),
             "skills": asdict(self.skills),
             "session_summary": asdict(self.session_summary),
             "session_environments": asdict(self.session_environments),
@@ -872,7 +883,7 @@ class KiroCrewConfig:
                             },
                         }
                     d = _subtract_overlay(d, raw_local)
-            except (json.JSONDecodeError, OSError):
+            except (json.JSONDecodeError, UnicodeDecodeError, OSError):
                 pass
         # An equal overlay value must not erase a choice the base file owns.
         _restore_stored_harness_fields(d)

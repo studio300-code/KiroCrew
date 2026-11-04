@@ -47,16 +47,17 @@ prompt-injected agent chooses what it writes:
 
 * a containment check against the approved roots (:func:`approved_roots`):
   the provider's working directory the channel authorized, plus the browser
-  CLI's own output directory. Anywhere else -- ``![x](~/Pictures/id.png)`` --
+  tool's own screenshot directory. Anywhere else -- ``![x](~/Pictures/id.png)`` --
   is refused before a single metadata probe, because "any readable raster on
   the host" is not what the reader of a chat channel agreed to receive. The
-  browser directory is admitted because it holds only what ``playwright-cli``
-  wrote while the agent drove it, and because the gateway pins that directory
-  under its data home (:func:`kiro_crew.browser_cli.snapshots.snapshot_dir`)
-  rather than under any working directory, so a screenshot the agent was asked
-  to send could otherwise never be sent inline -- and admitting it grants
-  nothing the explicit ``file_send`` tool does not already deliver from that
-  same directory. The read below is pinned to whichever root admitted the
+  browser directory is admitted because it holds only what the ``browser``
+  tool's ``screenshot`` op wrote while the agent drove it, and because the
+  gateway pins that directory under its data home
+  (:func:`kiro_crew.browser_snapshots.snapshot_dir`) rather than under any
+  working directory, so a screenshot the agent was asked to send could
+  otherwise never be sent inline -- and admitting it grants nothing the
+  explicit ``file_send`` tool does not already deliver from that same
+  directory. The read below is pinned to whichever root admitted the
   path, so a linked ancestor inside one root cannot reach outside it -- and the
   browser root is pinned by its CANONICAL spelling (real data home, literal
   leaf), so replacing the snapshot directory itself with a link admits nothing.
@@ -102,7 +103,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from kiro_crew.agent_scratch import scratch_root as managed_scratch_root
-from kiro_crew.browser_cli.snapshots import snapshot_dir
+from kiro_crew.browser_snapshots import snapshot_dir
 from kiro_crew.hooks import (
     FileTooLargeError,
     is_unc_shape,
@@ -696,6 +697,15 @@ def _literal_image_marker(text: str, offset: int, fenced: list[tuple[int, int]])
     return _MarkerReader(text, fenced).literal(offset)
 
 
+def is_code_indent(line_head: str) -> bool:
+    """Whether *line_head*, the start of a line, indents it as code (four columns).
+
+    Four columns depend on at most the first four characters, since every
+    character expands to at least one column.
+    """
+    return line_head[:4].expandtabs(4).startswith("    ")
+
+
 class _MarkerReader:
     """Whether a marker in one text is literal, in O(log n) per marker after one linear pass.
 
@@ -731,7 +741,12 @@ class _MarkerReader:
         i = bisect.bisect_right(self._fenced_starts, offset) - 1
         return i >= 0 and offset < self._fenced_ends[i]
 
-    def literal(self, offset: int) -> bool:
+    def literal(self, offset: int, *, first_line_indent_is_code: bool = True) -> bool:
+        """Whether the marker at *offset* is literal text.
+
+        ``first_line_indent_is_code=False`` reads an indent on the text's first
+        line as prose; an escape, a fence or inline code still makes it literal.
+        """
         text = self._text
         backslashes = 0
         while offset - backslashes > 0 and text[offset - backslashes - 1] == "\\":
@@ -740,9 +755,11 @@ class _MarkerReader:
             return True
         i = bisect.bisect_left(self._newlines, offset)
         line_start = self._newlines[i - 1] + 1 if i else 0
-        # Four columns of indent depend on at most the first four characters,
-        # since every character expands to at least one column.
-        if text[line_start : min(offset, line_start + 4)].expandtabs(4).startswith("    "):
+        # Slice at most four characters: the indent depends on no more, and a
+        # whole-line slice per marker would re-read a long line once per marker.
+        if (first_line_indent_is_code or line_start > 0) and is_code_indent(
+            text[line_start : min(offset, line_start + 4)]
+        ):
             return True
         bounds = self.block_bounds(offset)
         mask = self._masks.get(bounds)
@@ -901,15 +918,14 @@ def approved_roots(within_root: str, scratch_root: str = "") -> tuple[ApprovedRo
 
     *within_root* is the provider's resolved working directory, handed over by
     the channel dispatcher once the provider is acquired; its read pin is
-    unchanged from before the browser root existed. The browser CLI's output
-    directory comes second: the gateway forces every ``playwright-cli``
-    invocation to write there (``PLAYWRIGHT_MCP_OUTPUT_DIR``), so it is the one
-    place a screenshot the agent just took can be, and it is never inside a
-    working directory by construction.
+    unchanged from before the browser root existed. The browser tool's
+    screenshot directory comes second: its ``screenshot`` op writes only there,
+    so it is the one place a screenshot the agent just took can be, and it is
+    never inside a working directory by construction.
 
     The browser root's read pin is CANONICAL: the data home around it resolved
     (a ``/home`` alias or a dotfile manager's link to the data home is an
-    ordinary layout), the ``playwright-snapshots`` leaf kept literal and never
+    ordinary layout), the ``browser-snapshots`` leaf kept literal and never
     followed. The read compares the opened descriptor's real path against that
     literal spelling, so a snapshot directory replaced by a link -- at rest or
     swapped in after this call -- resolves the file somewhere else and fails the

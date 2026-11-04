@@ -1559,7 +1559,8 @@ URL, on the `bg-card ring-1 ring-border` notice surface — an unset enum is han
 no option carries so `''` stays a real choice, a fraction in an integer field and an
 integer past the safe range are each refused before submission with their own hint rather
 than sent changed, and every field input carries a per-instance `useId` so two cards on one
-page cannot share a label target;
+page cannot share a label target; a field's description is the `aria-describedby` of its
+control, since each control's own `aria-label` replaces the label text as its name;
 once resolved it retitles ("A tool asked you") and shows the answer that was sent;
 a refused answer renders through the shared `ErrorNotice`, a required-field hint as
 status text.
@@ -2258,7 +2259,11 @@ spec the same way kiro-cli v2 does where the wire allows it:
   request stated, or for a call the frame classified as a shell command, KAS's
   shell tool (`spec_hooks.post_tool_hook_tool_id`), with the call's trusted MCP server and tool name kept beside it, because KAS's `tool_call`
   frame names no built-in tool and titles the call in prose. Pinned through a real
-  `chat_runner._run_chat` turn by `test_kas_spec_hooks_turn_loop.py`.
+  `chat_runner._run_chat` turn by `test_kas_spec_hooks_turn_loop.py`. A command
+  over its form's limit (20,480 characters in the object form, 4,096 in a hook
+  document) does not run; a new session gets one `notice` row naming the hook,
+  its length, that limit and the script-file fix
+  (`test_kas_spec_hook_command_length.py`).
 
 For a derived worker, the projected payload carries both its checked specification
 snapshot and its runtime session key through create and load. Activation checks
@@ -2314,6 +2319,23 @@ adds a pointer to `kirocrew doctor`, whose MCP Governance section checks the
 account's identity before advising the setting. A server the host did report
 (still connecting, or a same-named entry that is not `client` origin) gets the
 plain timeout.
+
+A governed host is not always silent. KAS 0.66.62 under an enterprise registry
+sends a `_kiro/mcp/status` snapshot for the session with `servers` empty and the
+dropped name in `accessModeFilteredServers`. (`unresolvedRegistryServers` is
+not read: no capture shows whether a server listed there is final or still
+resolving.) That is the host's own positive answer, so a required
+server listed there is decided on that frame, with no settle and no deadline,
+unless the same snapshot also has a status entry under that name, of any state
+or origin (then the usual states and timeout rule, so a foreign same-named
+server still times out).
+With registry mode on, the session starts as soon as every pending server is
+such a listed drop, recorded failed with the governed-drop reason; a server
+still connecting beside it keeps the full budget. With registry mode off, the
+start fails at once with `AcpRuntimeError` naming each listed server and the
+field that listed it, and how to declare registry mode; it never starts
+without the servers and never waits out the budget for them. The upstream wire
+limitation is tracked as kirodotdev/Kiro#12231.
 Errors name the required server and sanitize backend failure text. On failure,
 runtime death, or cancellation, no handle escapes. A failed fresh `session/new`
 is terminated through the bounded per-session teardown, freeing its resident state
@@ -2364,7 +2386,8 @@ stdout while no request waits. Design record:
   `ensure_ready`, `_initialize_session`, `_wait_for_response`,
   `_drain_notifications`, `wait_for_compaction`,
   `_drain_post_compaction_metadata`, `_read_steer_answers` and `_prompt_loop`
-  in a stdout claim, and
+  in a stdout claim, binds a `_read_message` that holds a pending turn's frames
+  for it (below), and
   makes `_kill_process` and `_reset_state` drop the reader first. The first
   call runs inside the first `ensure_ready`, so only the `_initialize_session`
   claim covers that handshake; the `ensure_ready` claim stops the reader when a
@@ -2421,11 +2444,23 @@ stdout while no request waits. Design record:
   or `plan`, ends the reader: it records that frame as the turn's start and
   calls `on_agent_turn(client)`. A frame that only reports state
   (`usage_update`, `session_info_update`) starts nothing. The hand-off stays
-  pending while the start frame is still in `_buffer`, so whichever reader
-  takes it ends the hand-off. A request wait files a start `session/update` in
-  `_mcp_notifications`, as it files every agent frame it reads, and the
-  restarted reader hands off the next activity frame; a start request (a
-  permission request) goes back to `_buffer`, and the hand-off stands.
+  pending while the start frame is still in `_buffer`, and a turn that takes it
+  ends the hand-off by reading it as its own.
+- **Other readers keep the turn's frames.** A wrapped reader other than a turn
+  (a request wait, `wait_for_compaction`, `_drain_post_compaction_metadata`,
+  or any other method named above) that claims stdout while a hand-off is
+  pending holds each frame of the kind that starts a turn, the start frame
+  included, instead of handling it. When that reader returns, the held frames
+  go back to the front of `_buffer` in arrival order, so the turn still starts
+  on its first frame and the hand-off stands. A request from the agent is held
+  in the same list, so a permission request keeps its place among the chunks
+  around it, and so is the autonomous `usage_update` that closes the turn, so
+  the turn still ends on it; a response is never held. Every other frame gets that reader's own handling: a request wait
+  still files a `usage_update` or `session_info_update` in
+  `_mcp_notifications`. A frame that would not fit in `_buffer` beside the held
+  ones gets that handling too, so putting them back pushes none out. A kill or
+  reset drops what is held. `_agent_turn_pending()` reads False while the
+  frames are held, so `stream_unsolicited()` does not read beside that reader.
 - **Reading the turn.** `stream_unsolicited()` reads the pending turn through
   `_dispatch_events` under request id `-1` and sends nothing. After the turn's
   first activity frame, the bound `_prompt_loop` ends it on the `usage_update`
@@ -2517,7 +2552,9 @@ When kiro-cli needs OAuth authentication for an MCP server, `AcpClient` surfaces
 2. `_kiro.dev/mcp/server_initialized` — flips the banner to authenticated state. Clears the per-server dedupe entry so a future token expiry can re-prompt.
 3. `_kiro.dev/mcp/server_init_failure` — flips the banner to failed state with the error string. Also clears dedupe so a retry surfaces a fresh banner.
 
-**Dedupe**: Per-server dedupe via `_oauth_emitted_servers: set[str]` prevents kiro-cli's per-probe retries from spamming the user. Works across both buffered (init drain) and live (mid-session) paths. Cleared on new session.
+**Dedupe**: Per-server dedupe via `_oauth_emitted_servers: set[str]` prevents kiro-cli's per-probe retries from spamming the user. Works across both buffered (init drain) and live (mid-session) paths. Cleared on new session, and cleared for a server by its `mcp_server_init_failure`, so it does not hold across turns: kiro-cli retries a signed-out server's sign-in on each turn.
+
+**Rejected-banner dedupe** (`dashboard/mcp_banner_dedupe.py`): a rejected-URL banner (unsafe scheme, or a URL the credential gate refuses) is posted once per server per sign-in state in a chat, not on every user turn and auto-nudge cycle. `_emit_mcp_oauth_request` skips one whose text and error match the last rejected banner shown for that server in the same chat, in the same ACP session and the same sign-in round. It is shown again when the rejection changes, the ACP session changes (a new chat), the server signs in (a mid-turn event, or the session MCP report listing it as connected when the report is published) or gets an Authorize banner in between, or the user starts that server's sign-in from the MCP Servers page or a Connections card (`POST /api/connections/mint` bumps a process-wide round for the name and its kiro-safe alias). A gateway restart shows it once more: the record lives in memory only. No dedupe applies without a session id or to a name redaction rewrote. The per-chat record holds at most 64 servers and the round table 256 names, oldest evicted first, and keeps only digests of the session id and the banner text. Retry rounds come from one growing counter, so an evicted name never reads as an older round. Authorize banners are never suppressed, because each one carries a fresh link. The MCP Servers page's "Sign-in required" status is not affected.
 
 **Card-owned requests**: a request for a server that a rendered Connections card owns (`_connections_managed_mcp_names`) is tagged `card_owned` on both paths, the init drain and the mid-session `_on_mcp_oauth_request`. The tag rides through every later state of the banner (completed, failed, superseded, expired), and the chat hides tagged banners while `connections_ui` is on, because the card shows the same Authorize action. The KAS sign-in offer re-requests every unauthorized server at each turn start, so an untagged mid-session request would repeat the prompt on every turn of every session.
 
@@ -3650,7 +3687,7 @@ The `audit_source` constructor param of `AcpClient` (default `None`) tags a clie
 7. Replaces the path in the text with `[image: filename.png]`
 8. Sends both text and image blocks in the `prompt` array
 
-**Only the user's own segment is upgraded** (`kiro_crew.prompt_segments`). A prompt is a `SegmentedPrompt`: a `str` whose value is the concatenation of `(source, text)` segments, where `user` is the turn's own text and `injected` is everything the assembly added (memory, lessons, a member's rules and notes, steering, replayed history, a ledger snapshot, a cron job's previous result, the blocks re-sent after a compaction). `build_prompt_blocks` builds extra blocks (an image today; a file, PDF or `resource_link` later goes through the same gate) only from text inside a `user` segment, and sends every `injected` segment as written: no path or rule in it is rewritten. The one edit made in every segment is the backslash before a typed `[image` marker, because an unescaped one reads to the model as a picture attached to this request. A plain `str` is one `user` segment, so a caller that has not moved to segments behaves as before. `ContextBuilder.build_message` returns the segmented prompt, with the measured user span as the `user` segment (or the whole turn part when the caller gave no range), so every channel that sends its result unchanged is covered; when nothing attributable was typed (an `@prompt` body or a quick-prompt expansion), the `user` segment runs from where the typed text stood to the end of the turn, so a prefixed envelope stays injected. The dashboard runner keeps `build_message`'s segments on the turn and re-applies them under its own prefixes, never sending a plain string once segments exist: if the sent tail no longer matches, the whole prompt is marked injected and nothing is upgraded. The subagent run keeps the builder's segments under its hook prefix with `prepend_injected`, marking only the added prefix injected (an empty prefix leaves the prompt object unchanged); initial sends and zero-activity resends reuse that segmented prompt. And the provider's essential-envelope dedup rewrites through `replace_in_injected`, which keeps the segments.
+**Only the user's own segment is upgraded** (`kiro_crew.prompt_segments`). A prompt is a `SegmentedPrompt`: a `str` whose value is the concatenation of `(source, text)` segments, where `user` is the turn's own text and `injected` is everything the assembly added (memory, lessons, a member's rules and notes, steering, replayed history, a ledger snapshot, a cron job's previous result, the blocks re-sent after a compaction). `build_prompt_blocks` builds extra blocks (an image today; a file, PDF or `resource_link` later goes through the same gate) only from text inside a `user` segment, and sends every `injected` segment as written: no path or rule in it is rewritten. The one edit made in every segment is the backslash before a typed `[image` marker, because an unescaped one reads to the model as a picture attached to this request. A plain `str` is one `user` segment, so a caller that has not moved to segments behaves as before. `ContextBuilder.build_message` returns the segmented prompt, with the measured user span as the `user` segment (or the whole turn part when the caller gave no range), so every channel that sends its result unchanged is covered; when nothing attributable was typed (an `@prompt` body or a quick-prompt expansion), the `user` segment runs from where the typed text stood to the end of the turn, so a prefixed envelope stays injected. The dashboard runner keeps `build_message`'s segments on the turn and re-applies them under its own prefixes, never sending a plain string once segments exist: if the sent tail no longer matches, the whole prompt is marked injected and nothing is upgraded. The subagent run keeps the builder's segments under its hook prefix with `prepend_injected`, marking only the added prefix injected (an empty prefix leaves the prompt object unchanged); initial sends and zero-activity resends reuse that segmented prompt. And the provider's essential-envelope dedup rewrites through `replace_in_injected`, which keeps the segments. A path written as literal text inside a `user` segment -- fenced or inline code, a 4-space-indented line, escaped `\![x](...)` markup -- attaches nothing (`image_refs.mask_literal_spans`, the view the replay scrubber reads too), and each `user` segment is judged on its own: injected text that ends inside a fence it never closes (a cancelled turn's partial answer, a Slack thread root) cannot pair with the user's next fence line and turn the picture between them into code.
 
 **One prompt's own rules** (`build_prompt_blocks`). The marker lands only where the path grammar matched: a URL's own path or a longer path that merely contains the same characters is left alone (one pass over the grammar's match spans, never a whole-text replace), while a local path quoted as a URL query value (`?src=/tmp/a.png`) is a path to the grammar and is rewritten like any other; and the shared path grammar refuses a name that merely begins with a picture's path (`/var/a.png.backup`, `/var/a.png~`, `/var/a.png/other`), so neither this builder nor the replay scrubber treats it as a picture -- nothing is read, rewritten or scrubbed for it; a period followed by a capital letter is sentence punctuation (`/var/a.png.Then`), so the path ends there and the picture is attached. A second distinct file with the same basename in one message gets `[image: filename.png (2)]`, and so on, so every block's marker is unique within the prompt. The same bytes under two names are one block, marked at both places with the first name: the digest of the file's bytes is compared before any cap is consulted, so a duplicate of an attached picture past the cap maps to that picture's block instead of being dropped. A `[image: ...]` or `[image not attached: ...]` token the user typed, in any case, is escaped with a backslash, so only a marker this builder wrote reads as an attachment; the replay scrubber's own `[image not carried into this context]` is left as it is. A kept-out picture written as a markdown image (`![alt](path)`, `![alt](<path>)` or `![alt](path "title")`) gets its note after the closing parenthesis, so the link stays intact. A typed marker is escaped even when the agent takes no images, since the text still reaches the model. One prompt inlines at most `MAX_PROMPT_IMAGE_BLOCKS` (20) images and `MAX_PROMPT_IMAGE_B64_BYTES` (12 MiB) of base64; a picture past either cap stays a path in the text, followed by `[image not attached: prompt image limit]`, exactly as one over the per-image cap (or one that cannot be rendered within the size caps) is followed by `[image not attached: image size limit]`, so neither the user nor the model takes a dropped picture as seen (the notes speak about images, so only bytes that sniff as a raster earn one -- a text file named like a picture stays plain text, and so does an oversize picture reached through a hardlink, which the bounded sniff refuses to read); each is logged, the pictures past the block cap tallied into one line, and a picture past the block cap is read only to tell a duplicate from a new one, never decoded. The byte cap is half of the images' share (three quarters) of the smallest backend request-body ceiling measured so far -- 32 MiB, bracketed by a replayed request of 30.4 MB of base64 that was accepted and one of 33.8 MB that was refused as improperly formed; the count is where the backend's many-image dimension rule begins, and each replayed image costs about 1,600 tokens on every later turn. Both caps bound one prompt alone; what the conversation's replayed history carries in total is not measured here. Nothing here remembers earlier prompts: what a conversation's replayed history may carry in total is the backend's contract, not this builder's.
 
@@ -4018,9 +4055,10 @@ Dependencies and Connectivity rows, its per-harness `kas auth:` row, the
 diagnostics bundle's `versions.txt` (`kiro_cli_version:` says the binary is not
 used; `kas_engine:` names the installed engine and the pin), `kirocrew update`'s
 and the unattended auto-apply's `kiro-cli update` step (skipped, the reason
-printed or logged: the route never runs kiro-cli, and the update does not
-install the engine either -- a changed pin needs `kirocrew kas install`, which
-the printed or logged line names) and the gateway's boot-time outdated-kiro-cli
+printed or logged: the route never runs kiro-cli; the engine the new release
+pins is installed by the release install every update path runs,
+`platform/release_apply.apply_release`, see [cli.md](cli.md) § The release is
+the unit of install) and the gateway's boot-time outdated-kiro-cli
 warning (skipped) all agree on when kiro-cli is not part of the installation, and all keep their
 relay-route behaviour byte for byte when the predicate is false.
 

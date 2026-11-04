@@ -81,6 +81,15 @@ distinguishes a governed account from an ungoverned one. Leave the setting
 `false` on a personal account — there the filter inverts and the marked entries
 are the ones dropped.
 
+`kirocrew-core` and `kirocrew-cron` are the one exception. When no API key is
+set (in the environment or in the data home's `.env`, where the Docker image
+keeps it) and both the local store and `kiro-cli whoami` say the sign-in is
+Builder ID or social, so no admin
+registry can apply, Kiro Crew writes these two without the marker even with the
+declaration on, and they keep loading. If any check is unsure, they keep the
+marker. After you switch this machine to an Identity Center or API-key sign-in,
+run `kirocrew restart` so the spec is written again with the marker.
+
 Verify with `kirocrew doctor`, which grows an `MCP Governance (enterprise)`
 section when the local identity is one an administrator's registry can govern
 (an IAM Identity Center or API-key sign-in), when `agent.mcp_registry_mode` is
@@ -195,6 +204,15 @@ What you see is a session that starts and chats normally with no MCP tools at
 all: no `spawn_run`, no `cron_add`, no `learn_add`, no artifacts, knowledge or
 monitoring, and no error from the host explaining it. Declaring registry mode
 does not fix it there, because the marker it writes cannot reach the filter.
+
+The limitation is tracked upstream as
+[kirodotdev/Kiro#12231](https://github.com/kirodotdev/Kiro/issues/12231).
+
+When the host names the servers it filtered (KAS lists them in its MCP status as
+`accessModeFilteredServers`), Kiro Crew acts on that at once instead of waiting
+out the session-start budget. With `agent.mcp_registry_mode` on, the session
+starts without those servers. With it off, the session start fails straight
+away with an error that names each filtered server and the setting to declare.
 
 Kiro Crew makes the failure visible rather than silent. Projecting an agent onto
 that backend under registry mode logs a warning naming exactly this, and the

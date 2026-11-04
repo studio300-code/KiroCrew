@@ -44,6 +44,7 @@ import sys  # noqa: F401
 import tempfile  # noqa: F401
 import threading  # noqa: F401
 import time
+import unicodedata  # noqa: F401 - owner: uploads
 import urllib.parse  # noqa: F401
 import uuid  # noqa: F401
 import zipfile  # noqa: F401
@@ -291,7 +292,9 @@ from kiro_crew.dashboard.file_api.uploads import (  # noqa: F401
     _content_mismatch_message,
     _fit_stored_name,
     _log_upload_diagnostic,
+    _name_max,
     _resolve_raster_ext,
+    _safe_upload_name,
     _sniff_media_type,
     _stream_media_part,
     _upload_dir,
@@ -581,6 +584,13 @@ _MAX_UPLOAD_FILES = 20  # max files per request
 #: at 255 bytes on ext4, APFS and NTFS, and the stored name adds a 32-hex UUID
 #: and ``_`` (``_fit_stored_name``).
 _MAX_STORED_NAME_BYTES = 200
+#: Bytes the stored name spends before the tail: 32 hex digits and ``_``.
+_STORED_NAME_PREFIX_BYTES = 33
+#: Bytes the cap also leaves free: a streamed part is written under the stored
+#: name plus this temp suffix before it is committed.
+_STORED_NAME_TEMP_BYTES = len(part_stream.TEMP_SUFFIX)
+#: File-name byte limit assumed where the file system cannot report its own.
+_DEFAULT_NAME_MAX = 255
 
 # Fallback-walk budgets. ``_WALK_MAX_SCAN_*`` bounds entries scored PER KIND
 # (anti-starvation); ``_WALK_MAX_DIRS_VISITED`` bounds directories entered and is

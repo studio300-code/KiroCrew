@@ -23,7 +23,8 @@ To report a problem, collect a bundle instead of pasting logs by hand:
 kirocrew doctor --bundle
 ```
 
-This writes a zip to `~/.kiro/crew/diagnostics/` holding the gateway logs and
+This writes a zip to `~/.kiro/crew/diagnostics/` holding the gateway logs (the
+current run and up to four earlier ones, `gateway.log.prev` and `logs/gateway-boots/`) and
 crash reports, `versions.txt` and `manifest.json`. Every text file in it passes
 through the credential redaction first, and the command prints how many secrets it
 removed. It then prints a GitHub new-issue link on the bug-report form; drag the
@@ -39,8 +40,12 @@ too.
 ### The default kiro-cli backend is not on PATH
 
 `agent.provider` is fixed to ACP, while `agent.acp_backend` selects the ACP
-harness. With the default blank backend, `kiro-cli` is required and the gateway
-spawns `kiro-cli acp --agent <name>`. If you selected another ACP backend,
+harness. With the default blank backend, the gateway runs the KAS harness
+through `kiro-cli`'s ACP relay when `kiro-cli` is installed and can sign in, and
+through Kiro Crew's own bundled KAS engine otherwise (the `route:` line under
+KAS backend in `kirocrew doctor` names which). A stored `kiro` pick needs `kiro-cli`: it uses the relay when `kiro-cli`
+offers v3, and `kiro-cli acp --agent <name>` when it does not. If you selected
+another ACP backend,
 `kirocrew doctor` reports that backend's executable and setup instead.
 
 ```bash

@@ -103,6 +103,11 @@ def _to_llm_event(e: Any) -> LLMEvent:
         # spec-write-allowlist row reads this.
         spec_write_allowlist=e.spec_write_allowlist,
         spec_write_cwd=e.spec_write_cwd,
+        # Dropping this would let a native KAS sub-agent's call inherit the
+        # parent's in-session deny overrides on this surface.
+        native_child_call=e.native_child_call,
+        # Dropping this would offer no deny override on this surface (fail closed).
+        child_calls_marked=e.child_calls_marked,
         # Dropping this would refuse every deepseek read on a side turn.
         deepseek_tool_name=e.deepseek_tool_name,
         # Dropping this would let a READ_ONLY turn on an unproved dsh
@@ -154,6 +159,11 @@ def _to_llm_event(e: Any) -> LLMEvent:
         # nothing to render: an empty card the person cannot answer, while
         # the engine holds the tool call open for the whole window.
         elicitation=e.elicitation,
+        # The engine's fallback decision on EVENT_MODEL_FALLBACK. Dropping it
+        # zeroes the payload to None, so the dashboard enters its branch with
+        # nothing to record: no notice line and no promotion of the slot to
+        # the model the engine moved to (acp/engine_fallback.py).
+        model_fallback=e.model_fallback,
     )
 
 

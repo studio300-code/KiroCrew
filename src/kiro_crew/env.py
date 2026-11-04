@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from kiro_crew import env_node_windows, platform_compat
-from kiro_crew.config.paths import data_home, peek_data_home
+from kiro_crew.config.paths import data_home
 from kiro_crew.subprocess_utf8 import UTF8_TEXT
 
 # ``uv`` is a declared dependency shipped as a wheel (``setup.cfg``), so this
@@ -910,27 +910,6 @@ def git_build_info() -> tuple[str, str]:
     )
 
 
-def _managed_browser_cli_dirs() -> list[str]:
-    """Managed browser CLI directories exposed to agent shell commands.
-
-    The resolver in ``browser_cli.install`` never consumes this search path. It
-    resolves the same crew-home leaf by absolute path. These entries exist only
-    so an approved agent shell command can spell ``playwright-cli`` normally;
-    the OS sandbox seals the whole prefix read-only before that shell starts.
-    """
-    try:
-        root = peek_data_home() / "playwright-cli"
-    except Exception:
-        logger.debug("could not resolve managed browser CLI path", exc_info=True)
-        return []
-    entries: tuple[Path, ...]
-    if platform_compat.IS_WINDOWS:
-        entries = (root / "managed-bin", root / "bin", root)
-    else:
-        entries = (root / "managed-bin", root / "bin")
-    return [value for entry in entries if (value := _validated_bin_dir(str(entry)))]
-
-
 def _windows_toolbox_bin_dir(resolved_home: str, pinned_home: str | None) -> str | None:
     """Builder Toolbox's Windows bin dir, ``%LOCALAPPDATA%\\Toolbox\\bin``.
 
@@ -1030,8 +1009,9 @@ def augmented_path(base_path: str = "", *, home: str | None = None) -> str:
     ``/opt/homebrew/bin``, and still precede ``/usr/bin``. An inherited dir
     that sits behind a system dir is not an anchor and is prepended as on
     main, so a :func:`~kiro_crew.service.common.service_path` ``PATH``
-    (``~/.local/bin:/usr/local/bin:/usr/bin:/bin:<installer PATH>``) resolves
-    in the same order as before. With no anchor at all the output equals main.
+    (``~/.local/bin:/usr/local/bin:/usr/bin:/bin:<installer PATH>``, with
+    mise's shims after ``~/.local/bin`` on Linux) resolves in the same order
+    as before. With no anchor at all the output equals main.
     Anchoring is POSIX-only: on Windows the system section (``System32``) comes
     FIRST and user dirs such as ``~/.local/bin`` come last, so there is no
     "ahead of the system dirs" to anchor in, and every extra is prepended
@@ -1045,8 +1025,7 @@ def augmented_path(base_path: str = "", *, home: str | None = None) -> str:
     # would otherwise put a relative "{mise_data}/shims" entry on every spawned
     # subprocess's PATH, re-resolved against the CHILD's cwd — letting a
     # work-dir-relative executable shadow the configured command.
-    extra = _managed_browser_cli_dirs() if home is None else []
-    extra += [
+    extra = [
         e
         for d in _EXTRA_PATH_DIRS
         if (e := _validated_bin_dir(d.format(home=resolved_home, mise_data=mise_data)))
