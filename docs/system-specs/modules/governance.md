@@ -1206,19 +1206,44 @@ onto their own crewmate file (crew-mode.md, "Existing crewmates move at startup"
 row still bound to one the ceiling holds two ways. KAS never takes grants from the file:
 Crew projects the spec at session start and filters both lists against the live ceiling
 there (`acp.kas_agents._ceiling_permitted`, `kas_permissions.merge_user_permissions`).
-kiro-cli does read them, so a kiro-cli start on a crew-bound spec Crew does not own is
-REFUSED while the two governance passes would remove a grant (an `allowedTools` entry or a
-server's `autoApprove` entry; an empty list is no grant) from any file that claims the
-agent, or while such a file cannot be read or has a second hard link
-(`fork_refresh.require_shared_template_within_ceiling`, called from the kiro-cli harness and
-from `AcpClient` for every host in `ACP_BACKENDS_SPEC_FILE_GRANTS`), and
-again when a shared runtime activates another agent's spec from disk at `session/set_mode`
-(`acp.runtime_mode_activation._activate_mode_bracketed`, which ends the session first), since
-that spec is read there and not at the spawn. A runtime on such a host also checks the
-session's effective agent before each `session/new` and `session/load`
-(`acp.runtime_session_setup._refuse_over_ceiling_start`), because a session that names no
-agent inherits the spawn agent on a warm runtime, and its spec may have gained a grant since
-the spawn checked it. A binding counts when it records the agent's
+kiro-cli does read them, but on kiro-cli a session normally runs a Crew-owned copy of the
+spec, not the file: the native skill projection (`acp.skill_projection`) writes each agent's
+skill view into the agents directory and hands kiro-cli the view's name on `--agent` and
+`session/set_mode`. For every name a crew binding records (either spelling, below) and every
+agent a crewmate ran on before the migration, the view loses every grant the two governance
+passes remove (`agent_materialization.shared_template_view`, over the same
+`may_skip_gate_now` predicate the KAS projection filters with), so both hosts withhold the
+same grants and the file is never written. The removal is logged and recorded in the SEL as
+`mcp_auto_approve_withheld` once per distinct removal per process; the tools stay mounted and
+their calls go through the gate. A set of bindings that cannot be known whole governs every
+view. The view is rebuilt from the file at every spawn and every `set_mode` re-preparation,
+under a name derived from its content, so it follows an edit of the file and a change of the
+ceiling. Broker stubs injected into a governed agent's session array pass through the same
+`autoApprove` filter at `mcp_gateway.session_servers.pooled_session_servers`, before they can
+override the skill view's server entry; unbound agents' injected entries remain unchanged.
+
+The start check judges the name kiro-cli is handed. A kiro-cli start on a crew-bound spec Crew
+does not own is REFUSED while the two governance passes would remove a grant (an
+`allowedTools` entry or a server's `autoApprove` entry; an empty list is no grant) from any
+file that claims the agent, or while such a file cannot be read or has a second hard link.
+When kiro-cli is handed a skill view, the check independently judges the view file that
+kiro-cli reads, even when the authored claimants are within the ceiling; a view that is
+absent, does not parse or still carries a denied grant is refused
+(`fork_refresh.require_shared_template_within_ceiling` with `launch_name`, called after the
+projection by `acp.runtime_spawn_launch._refuse_over_ceiling_launch` and by `AcpClient` for
+every host in `ACP_BACKENDS_SPEC_FILE_GRANTS`). An absent view is allowed only when every
+spelling of the agent has its own Crew writer or saved capability materialization and its
+claimants are within the ceiling. This preserves client construction for managed specs whose
+synthetic launch alias has no file, without exempting any existing stale view. With no view
+(projection off, a busy alias
+lock, an unreadable settings file) kiro-cli reads the file, and the start is refused as
+before. The same check runs again when a shared runtime activates another agent at
+`session/set_mode` (`acp.runtime_mode_activation._activate_mode_bracketed`, which ends the
+session first), on each view name it sends, since that spec is read there and not at the
+spawn. A runtime on such a host also checks the session's effective agent before each
+`session/new` and `session/load` (`acp.runtime_session_setup._refuse_over_ceiling_start`, on
+the name that agent runs under), because a session that names no agent inherits the spawn
+agent on a warm runtime, and its spec may have gained a grant since the spawn checked it. A binding counts when it records the agent's
 name or the file stem kiro-cli is dispatched under its declared name
 (`config.loader_snapshots.dispatch_kiro_agent`), and a config load that could not read a
 config file whole checks the agent's claimants as if it were bound, because the missing
@@ -1874,8 +1899,17 @@ resolves to `None` (policy-ceiling-only), **not** `deny_all_profile`; only `_bg`
 and `_hb` fall to deny-all. That is correct for every scope that remains.
 
 **Unattended turns at the PreToolUse gate.** A cron turn hands
-`stream_and_collect` its own `cron:<job>` session key, so the gate resolves that
-session's profile the same way it does for a chat turn. Cron, heartbeat and
+`stream_and_collect` its own `cron:<job>` session key and the agent's alias or
+crew record name (each step's alias on an `agent_sequence`), the name a chat turn
+on that agent hands the gate, so the gate resolves that session's profile the
+same way it does for a chat turn, including a `task` bind on that name. A
+schedule whose capture selected a member runs as that member, so its gate name
+is the member's own live alias (the record `member_config_for_id` finds for the
+captured `member_id`, the one dispatch resolves through, else the captured
+`selection_name`), even when the job's `agent` names a template or another
+member; the job's `agent` is the gate name only for a capture that selected no
+member. The template the alias collapses to is used only to acquire the session
+and build the message. Cron, heartbeat and
 Slack-thread nudge turns pass `stream_and_collect(unattended=True)`. A
 structured monitor wake runs its gate call under the same marker on every
 surface: `build_tool_gate(unattended=True)` for a Slack thread and for a
@@ -2575,6 +2609,14 @@ refuses on an evaluation error. Edits and stream appends are checked too, so a
 channel withdrawn mid-turn gets no further content, and each refused write is
 audited (`slack.write`). A pure `!stop` stays exempt from the inbound check so a
 withdrawn channel can still halt its turn; its notices are withheld there.
+A code channel's id is unknown until Slack creates it, so before opening one the
+code-channel routing asks `channel_policy.new_channel_refusal`, which admits it
+only when the policy's patterns admit any id (`*`, `C*`); a list of explicit ids
+keeps the request in its thread (audited as a denied `slack.code_channel.create`),
+and the created id is checked again before the channel is bound. Every
+`agents.conversations.*` write that names a channel (`CodeChannelsClient._call`;
+the code-channel workspace's views and context bar) asks `channel_refusal`
+before it is sent, as the real client's posts do.
 
 `channels.posture.slack.allowed_enterprise_ids` (policy-only) is enforced in
 `slack.enterprise.validate_enterprise`: a workspace must satisfy the governance
@@ -3706,10 +3748,28 @@ binary while adding a second thing that can be absent. The floor has to be the
 member with the fewest preconditions of its own; revisit if KAS ever ships a
 binary of its own.
 
-This describes today's code. The enterprise edition RFC
-([rfc-crew-enterprise-edition](../../request-for-change/rfc-crew-enterprise-edition.md),
-D6, 2026-11-02) makes KAS the floor and the baseline minimal set in an
-enterprise build; that code change is pending. The `oss` floor stays kiro-cli.
+That reasoning holds in an `oss` build. In an enterprise build the floor is KAS
+(`acp_backends.governance_floor_backend()`, the enterprise edition RFC
+[rfc-crew-enterprise-edition](../../request-for-change/rfc-crew-enterprise-edition.md)
+D6), and the baseline minimal set is `kas`, so the Kiro CLI harness needs a
+remote rule there. KAS now has a route of its own, Crew's engine bundle
+(`acp/kas_bundle.py`), which is the "binary of its own" the paragraph above
+waits for. A KAS proven unable to start on the route it would take refuses the
+gateway start when the main backend runs KAS, and otherwise refuses each
+gateway session whose resolved backend is KAS (`enterprise_boot.require_kas_harness`,
+`enterprise_boot.refuse_unstartable_kas`); no session the provider factory builds
+falls back to the Kiro CLI harness. An enterprise build has no automatic
+fallback to the Kiro CLI harness anywhere: the Kiro CLI harness runs only as an
+explicit pick (`agent.acp_backend` `"kiro"`) that the remote policy allows. Two
+runtimes outside the provider factory fall back to it in `oss` when their backend
+cannot serve them: the knowledge model pool, which never spawns KAS
+(`knowledge/llm_pool.py`), and Code Review Sage's shared review runtime for a
+backend it does not serve (`code_review_sage/sage_lib/review_pool.py`). In an
+enterprise build both refuse instead, before any process exists
+(`KnowledgeHarnessUnavailable`, `ReviewHarnessDenied`); Sage with no backend
+configured runs on the governed default, KAS, and refuses a KAS that boot proved
+cannot start. A background runtime whose `agent.acp_backend` cannot be read takes
+the build's floor, and refuses that KAS the same way.
 
 **Enforced by RECOMPUTING the registry, not by a per-decision read.** This is the
 one scope here whose answer is materialised instead of resolved at each decision.

@@ -242,7 +242,6 @@ test/test_api_shutdown.py
 test/test_app_backend.py
 test/test_app_backend_stale_reap.py
 test/test_app_bridges.py
-test/test_app_cli.py
 test/test_app_config_self_heal.py
 test/test_app_context.py
 test/test_app_dev_mode.py
@@ -480,8 +479,6 @@ test/test_issue_radar_investigation_tool.py
 test/test_issue_radar_list_probe.py
 test/test_issue_radar_recent_repos.py
 test/test_issue_radar_ref_summary.py
-test/test_issue_radar_routes_ai_coverage.py
-test/test_issue_radar_routes_coverage.py
 test/test_issue_radar_tagging.py
 test/test_issue_summary_workflow.py
 test/test_kas_display_mapping.py
@@ -650,8 +647,6 @@ test/test_skill_pending.py
 test/test_skill_pending_notify.py
 test/test_skill_providers.py
 test/test_skill_script_validator.py
-test/test_skill_update_flow.py
-test/test_skill_versioning.py
 test/test_slack_dashboard_live_sync.py
 test/test_slack_linked_approval.py
 test/test_slack_mirror_unlink.py
@@ -725,7 +720,6 @@ test/test_webhooks_event_loop.py
 test/test_webhooks_signing.py
 test/test_webhooks_store.py
 test/test_website_build_heap.py
-test/test_wecom_config_handlers.py
 test/test_wecom_wire.py
 test/test_weixin_media.py
 test/test_windows_sim.py

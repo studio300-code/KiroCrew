@@ -89,6 +89,7 @@ from kiro_crew.agent_parts.kirocrew_launcher import (
     _stale_mcp_purge_marker,
     _through_stable_link,
     ensure_kirocrew_on_path,
+    refresh_own_kirocrew_link,
     run_first_run_setup,
 )
 from kiro_crew.agent_parts.shared_home import (
@@ -169,9 +170,11 @@ from kiro_crew.agent_parts.spec_lookup import (
     markdown_spec_for_agent,
 )
 from kiro_crew.agent_parts.spec_prompts import (
+    _CONDUCTOR_PROMPT_SECTIONS,
     _CONDUCTOR_SYSTEM_PROMPT,
     _CONDUCTOR_WORK_LEDGER_PROTOCOL,
     _DASHBOARD_MANAGER_SYSTEM_PROMPT,
+    _LEDGER_CONDUCTOR_RULES,
     _PIPELINE_CONDUCTOR_SYSTEM_PROMPT,
     _SECURITY_CONDUCTOR_SYSTEM_PROMPT,
     _TEAM_LEAD_SYSTEM_PROMPT,
@@ -252,6 +255,7 @@ from kiro_crew.env import (
 from kiro_crew.hooks import FileTooLargeError, safe_read_file_bytes_nolink
 from kiro_crew.owner_only_files import mkdirs_owner_only, write_text_owner_only
 from kiro_crew.platform import (
+    PlatformCompositionError,
     current_context,
 )
 from kiro_crew.platform import redact_log_via_context as redact_log
@@ -455,6 +459,11 @@ if TYPE_CHECKING:  # served by ``__getattr__`` at runtime; named here for mypy
         _install_team_lead_agent,
         knowledge_agent_model,
         repair_knowledge_agent_spec,
+    )
+    from kiro_crew.agent_materialization.shared_template_view import (  # noqa: F401
+        govern_shared_template_injected_servers,
+        govern_shared_template_view,
+        governed_view_names,
     )
     from kiro_crew.agent_materialization.skill_resources import (  # noqa: F401
         map_prompt_skills,
@@ -1044,6 +1053,11 @@ _EXPORTS_BY_OWNER: dict[str, tuple[str, ...]] = {
         "name_has_another_claimant",
         "hold_spawn_gate",
     ),
+    "kiro_crew.agent_materialization.shared_template_view": (
+        "governed_view_names",
+        "govern_shared_template_injected_servers",
+        "govern_shared_template_view",
+    ),
     "kiro_crew.agent_materialization.service_agents": (
         "_install_guest_agent",
         "_install_lite_agent_fallback",
@@ -1603,6 +1617,7 @@ from kiro_crew.agent_materialization import (  # noqa: E402, F401 -- the owners 
     mcp_aliases,
     mcp_sources,
     service_agents,
+    shared_template_view,
     skill_resources,
     worker_agent,
 )

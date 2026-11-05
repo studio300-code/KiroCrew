@@ -767,7 +767,13 @@ Two distinct serializations:
   the full form. This is additive and status-keyed: `partial_results` stays the
   failed/cancelled channel so a run never reports both, an active run omits both
   (it is still accumulating), and the exposure is a factual record of the calls
-  that settled, not a claim the run produced a validated business artifact. The
+  that settled, not a claim the run produced a validated business artifact. A
+  failed or cancelled run's `partial_result_count` and `partial_results` leave out
+  a call with an entry in `agent_errors`: it keeps its slot in the stored
+  `agent_results`, which reruns replay, but it settled nothing worth preserving, so
+  the "preserved" count never includes a call the failed count also names. A
+  finished run's `agent_results` stays a record of every call, a failed one as
+  `None`. The
   `workflow_result` MCP projection includes these outputs through the same
   recursive redaction as the aggregate result and errors. The completion message
   names the recorded-call count and this field, and explicitly separates a
@@ -781,6 +787,11 @@ Two distinct serializations:
   the chat that launched the run gets the failure through the normal completion
   notice. The load writes the failed status back, so a later boot never
   notifies the same run again.
+  Snapshot `ended_at` is the terminal event's timestamp; if a nonactive run
+  has none (a restored interruption or driver exception), it uses the last
+  recorded event as the latest known activity. This fallback remains unchanged
+  across restarts. An active (`running`/`paused`) run without a terminal event,
+  or any run without events, reports `None`.
 
 Before each model turn, authoring, pooled workers and named sessions publish the
 ordinary strict transport identity for their acquired key. The run itself owns
@@ -1538,6 +1549,16 @@ losing a pathological key beats leaking the secret.
 `_opt_int` coerces `timeout_secs`, rejecting `bool` and any non-`int`, so a
 malformed value becomes `None` ("no override") and can never widen or remove a
 run's ceiling.
+
+The other loosely typed launch fields are read the same lenient way, never
+refused: `_opt_str` reads a `name` on `/run` and `/run_intent` as absent unless
+it is a string, so an object or list never becomes a run's name, and
+`_rerun_from_index` reads a rerun's `from_index` as 0 unless it is a whole
+number, clamping a negative one to 0 (a `bool` would otherwise replay call 0).
+`_opt_title` reads the fallback `title` on all three launch routes the same way:
+an object, list or boolean is absent, so it never titles the chat with its repr,
+while a string passes unchanged and a non-zero number keeps its text (zero stays
+absent).
 
 When the originating chat slot is gone at delivery (the common case for a
 webhook-driven run, whose ephemeral session is destroyed when its turn ends),

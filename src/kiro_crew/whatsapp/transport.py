@@ -266,6 +266,30 @@ def _group_allowlists(groups: list[dict]) -> dict[str, frozenset[str]]:
     return {jid: allowed for jid, allowed in per_group.items() if allowed is not None}
 
 
+#: Submessages whose ``contextInfo`` can carry an @-mention or a quote: typed
+#: text, and the caption a user types on a photo, video or file.
+_CONTEXT_FIELDS = ("extendedTextMessage", "imageMessage", "videoMessage", "documentMessage")
+
+
+def _context_infos(message: Any) -> list[Any]:
+    """Every ``contextInfo`` on *message*'s text or media submessage.
+
+    All are returned rather than the first found: on a real protobuf an absent
+    submessage still reads as a default instance with an empty ``contextInfo``,
+    so stopping at the first would let an empty text context hide a caption's
+    mention.
+    """
+    if not message:
+        return []
+    out = []
+    for name in _CONTEXT_FIELDS:
+        sub = getattr(message, name, None)
+        ctx = getattr(sub, "contextInfo", None) if sub is not None else None
+        if ctx is not None:
+            out.append(ctx)
+    return out
+
+
 class WhatsAppTransport(MessagingTransport):
     """WhatsApp personal-account transport (see module docstring)."""
 
@@ -947,7 +971,7 @@ class WhatsAppTransport(MessagingTransport):
         # answer". Only the wake word, an @mention of the linked account, a
         # quote of its message, or an explicit slash command count.
         is_addressed = (
-            self._is_addressed(inner, chat)
+            self._is_addressed(inner, chat, sender_is_operator)
             or musone_trigger
             or (sender_is_operator and bool(parse_command(text)))
         )
@@ -1088,39 +1112,44 @@ class WhatsAppTransport(MessagingTransport):
                         "whatsapp: retained %d attachment(s) for a queued turn", len(owned)
                     )
 
-    def _is_addressed(self, message: Any, chat: str) -> bool:
+    def _is_addressed(self, message: Any, chat: str, sender_is_operator: bool) -> bool:
         """Mentioned (@-tag of the linked account) or replying to the agent's
         own message.
 
         The operator's own message is deliberately NOT addressed merely because
         it is theirs: in a group the operator talks to the room like everyone
-        else, and the agent answers only when called (`musone`, an @mention, or
-        a quote of something it sent). A reply to the operator's OWN message is
+        else, and the agent answers only when called (`musone`, an @mention, or a
+        quote of something it sent). A reply to the operator's OWN message is
         not a summons either, even though both addresses are the same linked
-        account: only message ids recorded on an agent send count. The caller
-        treats an explicit slash command as a summons; the self-chat never
-        reaches the group gate.
+        account: for the operator only message ids recorded on an agent send
+        count. A PEER quoting the linked account is still a summons, which is
+        what ``sender_is_operator`` separates here. The caller treats an explicit
+        slash command as a summons; the self-chat never reaches the group gate.
 
         Takes the UNWRAPPED message, not the envelope: ``contextInfo`` carries the
         mention list, and it is invisible when the message arrived inside an
         ephemeral or view-once carrier. Reading the envelope made an @-mention in
         a disappearing group message read as "not addressed", so the agent stayed
-        silent exactly when it was called on.
+        silent exactly when it was called on. Every text OR media caption context
+        is read, so a mention done on a photo's caption still counts.
         """
-        extended = getattr(message, "extendedTextMessage", None) if message else None
-        ctx = getattr(extended, "contextInfo", None) if extended is not None else None
-        if ctx is None:
-            return False
         me = self._client.me
-        for mentioned in getattr(ctx, "mentionedJID", []) or []:
-            if me.matches(str(mentioned)):
+        for ctx in _context_infos(message):
+            for mentioned in getattr(ctx, "mentionedJID", []) or []:
+                if me.matches(str(mentioned)):
+                    return True
+            stanza_id = str(getattr(ctx, "stanzaID", "") or "")
+            if stanza_id and chat and (
+                self.echo.is_own_echo(chat, stanza_id)
+                or self.bot_sent.contains(chat, stanza_id)
+            ):
+                return True  # quoted message is one the AGENT sent, not the operator
+            participant = str(getattr(ctx, "participant", "") or "")
+            if not sender_is_operator and participant and me.matches(participant):
+                # A PEER quoting any message of the linked account is a summons.
+                # The operator quoting their own is not, which is why that case
+                # has to be a message id recorded on an agent send (above).
                 return True
-        stanza_id = str(getattr(ctx, "stanzaID", "") or "")
-        if stanza_id and chat and (
-            self.echo.is_own_echo(chat, stanza_id)
-            or self.bot_sent.contains(chat, stanza_id)
-        ):
-            return True  # quoted message is one the AGENT sent, not the operator
         return False
 
     async def _on_voice_wake(self, chat_id: str, transcript: str, message_id: str) -> None:

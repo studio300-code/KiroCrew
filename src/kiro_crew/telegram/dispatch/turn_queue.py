@@ -58,42 +58,21 @@ async def _drain_queue(self: TelegramDispatcher, session_key: str) -> None:
     one message per turn and in order, rather than folding the burst into one
     combined reply.
 
-    The dequeue + receipt flip run together under ``self._queue.lock`` so a
-    concurrent mid-turn ``_enqueue_with_receipt`` (which takes the same lock)
-    cannot interleave and leave an orphaned receipt. The combined turn itself
-    runs OUTSIDE the lock -- messages that arrive during it open a fresh
-    receipt and drain after the next turn. Only the queued text is replayed
-    (matching what ``enqueue`` persists for DM channels: text only).
+    Dequeue and receipt flip share ``self._queue.lock`` with
+    ``_enqueue_with_receipt``, so no receipt is orphaned; the replayed turn runs
+    outside the lock. One turn gets one envelope, so it only answers entries with
+    the same :attr:`_QueuedOrigin.sender_key`, taken from the FIRST entry, never
+    the opener: under ``dm_scope = "unified"`` one queue is shared by every
+    allow-listed person. That is why this takes only the session key. Another
+    sender's entry defers itself and everything behind it (FIFO stays exact).
 
-    One combined turn gets ONE envelope, so it may only combine messages that
-    SHARE one -- same sender, same chat, same Topic. That is
-    :attr:`_QueuedOrigin.sender_key`, and it is taken from the FIRST entry this
-    iteration collapses, never from the turn that opened the queue: under
-    ``dm_scope = "unified"`` one session key, and therefore one queue, is shared
-    by every allow-listed person, so a queue holding two of them is reachable on
-    the live path. Anything from a different sender or place defers itself and
-    everything behind it, so FIFO stays exact and the outer loop drains it next
-    as its own turn under its own envelope.
-
-    Which is why this method is given the session key and nothing else: the
-    opener's identity is not an input it could accidentally fall back to.
-
-    An entry ANOTHER transport recorded shares this queue under the same scope and
-    cannot be answered here at all. It is set aside, and because it has already
-    been accepted and receipted, its owner's drain is woken once this pump is done
-    -- outside ``self._queue.lock``, since that drain takes its own lock and runs a
-    whole turn. See ``messaging/queue_drain.py`` for why the cascade terminates.
+    An entry ANOTHER transport recorded is set aside and its owner's drain is woken
+    after this pump, outside the lock; ``messaging/queue_drain.py`` shows why the
+    cascade terminates.
     """
-    # Iterate rather than recurse: one burst can span multiple
-    # attachment-capped turns, and a message deferred by the cap must drain
-    # in THIS pump rather than waiting for unrelated future user input.
-    # Mirrors the Discord drain.
-    #
-    # Channels whose entries this pump set aside, so they can be woken after it.
-    # The sequence -- pump, then wake outside the queue lock but INSIDE this
-    # channel's active marker, then pump again for any wake a peer could not
-    # deliver back here -- lives in the shared module, because all four drains
-    # need exactly it and getting the order wrong has no local symptom.
+    # Iterate rather than recurse: a message deferred by the attachment cap must
+    # drain in THIS pump, not wait for unrelated user input. The pump/wake/re-pump
+    # order lives in the shared module because all four drains need exactly it.
     await drain_until_quiet(
         channel=_origin._CHANNEL,
         session_key=session_key,
@@ -127,16 +106,11 @@ async def _pump_queue(
         # Whether a person sent the entry this turn answers.
         person = False
         async with self._queue.lock:
-            # Something else holds this session's lease: a dashboard, cron or
-            # auto-nudge turn on the same key, or another channel's turn under a
-            # unified ``dm_scope``. Replaying now would only reach ``_handle_busy``,
-            # which queues the same text again, and the next iteration would
-            # dequeue it straight back -- flipping the receipt to "Now answering"
-            # every lap without a turn ever starting. So nothing is
-            # dequeued and nothing is flipped. The entries stay queued in order,
-            # and ``drain_when_free`` runs this drain again once the lease is
-            # free: that holder's turn may be one no channel drain follows, and
-            # it may hand its permit back without a release hook ever running.
+            # Another turn holds the lease (dashboard, cron, nudge, or a peer
+            # channel). Replaying would re-queue the text via ``_handle_busy`` and
+            # flip the receipt every lap with no turn starting, so dequeue nothing;
+            # ``drain_when_free`` reruns this drain once the lease frees, since the
+            # holder may release without any hook.
             if self.sessions.is_busy(session_key):
                 drain_when_free(
                     channel=_origin._CHANNEL,
@@ -160,15 +134,9 @@ async def _pump_queue(
                 item_attachments = list(item[2].get("attachments") or [])
                 item_origin = _origin._queued_origin(item[2])
                 if item_origin is None:
-                    # ANOTHER transport recorded this entry, so it is not this
-                    # dispatcher's to answer -- it holds no address this channel
-                    # can reach. Set aside for its own channel's drain WITHOUT
-                    # ``defer_rest``: order matters within one sender's messages,
-                    # which ``sender_key`` already keeps exact, while blocking
-                    # this channel's own queue behind a foreign entry would
-                    # strand it whenever that transport sends nothing further.
-                    # Remember WHOSE it is: the entry was already accepted and
-                    # receipted, so its owner is woken once this pump is done.
+                    # ANOTHER transport's entry: no address here can reach it. Set
+                    # aside WITHOUT ``defer_rest`` (blocking behind it would strand
+                    # this queue) and record its channel so its owner is woken.
                     remainder.append(item)
                     foreign_channels.add(entry_channel(item[2]))
                     continue
@@ -222,13 +190,9 @@ async def _pump_queue(
                     # behind it, so queue order stays exact.
                     defer_rest = True
                     remainder.append(item)
-            # How many of the set-aside entries belong to the sender this turn
-            # answers. NOT ``len(remainder)``: that also counts entries from a
-            # DIFFERENT sender and entries another TRANSPORT recorded, each of
-            # which drains in its own turn in its own chat. Showing those to this
-            # sender would promise them a follow-up for messages they never sent
-            # -- and when their own burst fit in one turn, a "+N deferred" where
-            # their true count is zero.
+            # Count only THIS sender's set-aside entries, not ``len(remainder)``:
+            # other senders' and transports' entries drain in their own chats, and
+            # counting them would show this sender a "+N deferred" they never sent.
             own_deferred = 0
             for _ts, rtext, rkw in remainder:
                 r_origin = _origin._queued_origin(rkw)
@@ -362,21 +326,14 @@ async def _enqueue_with_receipt(
     """Atomically enqueue a mid-turn message and create/grow its collapsing
     "⏳ Queued (N): …" receipt, under ``self._queue.lock``.
 
-    Holding the lock across BOTH the enqueue and the receipt bookkeeping is
-    what makes this race-free against the end-of-turn drain (which takes the
-    same lock to dequeue + flip): the drain either sees this message queued
-    WITH its receipt or sees neither yet -- never a half state that would
-    orphan a bubble. Returns True if queued; False if the turn finished in
-    the window (``enqueue`` is a no-op once the semaphore is free), so the
-    caller runs the message as a fresh turn instead.
+    The drain takes the same lock, so it sees this message with its receipt or
+    neither, never an orphaned bubble. Returns False if the turn finished in the
+    window (``enqueue`` is a no-op once the semaphore is free); the caller then
+    runs it as a fresh turn.
 
-    *origin* is REQUIRED and keyword-only: it is who sent THIS message and where
-    its reply goes, and the drain replays the entry under it. A default would be
-    a way to enqueue an unattributed message, which under
-    ``dm_scope = "unified"`` the drain could only answer under someone else's
-    identity. *person_origin* is the message's own
-    ``InboundMessage.person_origin``, which the drained replay's start priority
-    is read from.
+    *origin* is REQUIRED: the drain replays the entry under it, and an
+    unattributed entry under ``dm_scope = "unified"`` could only be answered under
+    someone else's identity. *person_origin* sets the replay's start priority.
     """
     assert self.client is not None
     async with self._queue.lock:
@@ -423,21 +380,12 @@ async def _receipt_flip_locked(
     so a >cap burst doesn't overstate what this turn answers. ``deferred``
     (>0 only past the cap) is noted so the remainder isn't silently implied.
 
-    ``owner`` is WHOSE messages those are, which the flip needs because one bubble
-    can list several principals': a GROUP chat gives every member one chat address
-    and one session key, so a drain answering one member must leave the others'
-    lines -- and the entry that is their only handle -- alone. REQUIRED and
-    keyword-only, the same way the registry transition it forwards to spells it:
-    this wrapper has exactly one caller and that caller always can name the
-    principal, so an omission is a type error rather than a silent return to
-    retiring the whole bubble.
+    ``owner`` is required: in a GROUP chat one bubble lists several members'
+    lines, and a drain answering one member must leave the others' alone; an
+    omission is a type error, not a silent retire of the whole bubble.
 
-    ``chat_id`` is the chat the receipt BUBBLE lives in, which the drain takes
-    from the queued entry's own origin rather than from the turn that opened the
-    queue -- ``create_or_grow_locked`` posted that bubble into the chat of
-    whoever queued first. The ``None`` thread is correct and not an omission:
-    ``flip_answering_locked`` only ever EDITS, and ``edit_message`` addresses a
-    message by its id, which already identifies it within its Topic.
+    ``chat_id`` is the bubble's chat, from the queued entry's origin. The ``None``
+    thread is correct: the flip only EDITS, and a message id already locates it.
     """
     assert self.client is not None
     await self._queue.flip_answering_locked(

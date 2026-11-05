@@ -49,7 +49,7 @@ _BASE_STATE_MEMBERS: dict[str, tuple[str, bool, bool, str]] = {
         False,
         False,
         "(self, session_key: 'str', approval_id: 'str', approved: "
-        "'bool', decision: 'str' = '') -> 'None'",
+        "'bool', decision: 'str' = '', *, instance: 'str' = '') -> 'None'",
     ),
     "_audit_approval": (
         "function",
@@ -385,6 +385,12 @@ _BASE_STATE_MEMBERS: dict[str, tuple[str, bool, bool, str]] = {
     ),
     "get_slot": ("function", False, False, "(self, name: 'str') -> '_ChatSlot | None'"),
     "has_slot": ("function", False, False, "(self, name: 'str') -> 'bool'"),
+    "hold_turn_heartbeat": (
+        "function",
+        False,
+        False,
+        "(self, holder: 'object', slot_key: 'str') -> 'None'",
+    ),
     "hold_folders": (
         "function",
         True,
@@ -480,6 +486,7 @@ _BASE_STATE_MEMBERS: dict[str, tuple[str, bool, bool, str]] = {
         "(self, slug: 'str', version: 'int', *, deleted: 'bool' = False) -> " "'None'",
     ),
     "push_lineage_patch": ("function", False, False, "(self) -> 'None'"),
+    "push_listing_refresh": ("function", False, False, "(self) -> 'None'"),
     "push_refresh": ("function", False, False, "(self, *kinds: 'str') -> 'None'"),
     "push_session_summary": ("function", False, False, "(self, key: 'str') -> 'None'"),
     "push_slot_patch": (
@@ -542,6 +549,7 @@ _BASE_STATE_MEMBERS: dict[str, tuple[str, bool, bool, str]] = {
         False,
         "(self, ws: 'web.WebSocketResponse', *, owner: 'bool' = False) -> 'None'",
     ),
+    "release_turn_heartbeat": ("function", False, False, "(self, holder: 'object') -> 'None'"),
     "release_deleted_slot_keys": (
         "function",
         False,

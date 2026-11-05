@@ -88,6 +88,7 @@ from kiro_crew.platform import (  # noqa: F401
     boot_platform,
     current_context,
 )
+from kiro_crew.platform_compat_offloop_spawn import gateway_loop_factory
 from kiro_crew.preflight import run_preflight_checks
 from kiro_crew.project_dir import PROJECT_MARKERS, detect_project_dir
 from kiro_crew.seed import seed_cmd
@@ -805,7 +806,14 @@ def main() -> None:
                 )
                 _platform_boot_error = exc
             else:
-                raise
+                # Still fail-closed: the command never runs. The error already
+                # names what failed and how (e.g. "unknown governed key
+                # 'sandbox.enabeld' (fail-closed)"), so print it on one line
+                # and exit 1 instead of a traceback; doctor shows the detail.
+                logging.getLogger("kiro_crew").debug("platform composition failed", exc_info=True)
+                print(f"❌ {exc}", file=sys.stderr)
+                print("   Run `kirocrew doctor` for details.", file=sys.stderr)
+                raise SystemExit(1) from None
         else:
             # Standalone boot never raises; only genuinely-unexpected errors
             # reach here, and the standalone edition must not break on a corrupt
@@ -923,7 +931,8 @@ def main() -> None:
             # Only now, holding the lock, move the previous run's log aside: a
             # start refused above must never rotate a running gateway's log.
             _start_gateway_log_after_lock()
-            asyncio.run(_gateway(**gw_kwargs))
+            # Windows: every spawn on this loop builds its child off-loop.
+            asyncio.run(_gateway(**gw_kwargs), loop_factory=gateway_loop_factory())
         finally:
             _gw_lock.release()
     elif args.command == "setup":
@@ -1073,7 +1082,7 @@ def main() -> None:
 
         _policy(args)
     elif args.command == "knowledge":
-        _knowledge(args)
+        sys.exit(_knowledge(args))
     elif args.command == "secrets":
         # Dispatch through the module-level `importlib` rather than a
         # function-local `from kiro_crew.cli_commands import …`: the latter trips

@@ -50,7 +50,7 @@ from kiro_crew.acp.transport_errors import AcpError, AcpToolGateUnroutable
 from kiro_crew.acp.transport_framing import _STDOUT_BUFFER_LIMIT
 from kiro_crew.agent_sdk.backends import launch_for
 from kiro_crew.constants import KIROCREW_SPAWNED_ENV, KIROCREW_SPAWNED_VALUE
-from kiro_crew.env import describe_search_path, mise_data_dir
+from kiro_crew.env import append_mcp_path_dirs, describe_search_path, mise_data_dir
 from kiro_crew.sandbox import RLIMIT_PROFILE_SESSION_HOST, ssh_auth_sock_consent_notice
 
 # The client's logger name, because the helpers below were the client's and every
@@ -209,6 +209,29 @@ def _resolve_node_for_script(script_path: str) -> str | None:
     except (ValueError, IndexError):
         pass
     return None
+
+
+def _npm_windows_shim_target(shim: str, bin_name: str, package_target: Path) -> str | None:
+    """The file an npm Windows bin shim launches, or ``None`` when *shim* is not one.
+
+    On Windows, ``npm i -g`` cannot symlink a package's ``bin``, so it writes text
+    shims into the global bin directory -- ``<bin_name>.cmd`` among them -- each
+    running ``<that dir>/node_modules/<package_target>``. Python's ``CreateProcess``
+    runs such a ``.cmd``, but a Node child does not: since the CVE-2024-27980 fix
+    ``child_process.spawn``/``execFile`` refuse a ``.cmd`` or ``.bat`` without a shell
+    (``spawn EINVAL``). A path Crew hands to a Node child to run is therefore the
+    target the shim names, never the shim, with no shell in between.
+
+    Matched by layout, not by reading the shim: a shim whose name is *bin_name* (any
+    extension) sitting next to ``node_modules/<package_target>``. Reading the shim's
+    text would trust a script anything on PATH can write; the layout check accepts
+    only the file npm itself would have put there.
+    """
+    path = Path(shim)
+    if path.stem.casefold() != bin_name.casefold():
+        return None
+    target = path.parent / "node_modules" / package_target
+    return str(target) if target.is_file() else None
 
 
 #: Sentinel for "not yet resolved": every host's cached resolution starts here, and the
@@ -1166,7 +1189,15 @@ async def launch(host: LaunchHost, request: LaunchRequest, tools: LaunchTools) -
         env.update(await host._to_thread_guarding_sandbox(tools.agent_env_overlay))
     if request.extra_env:
         env.update(request.extra_env)
-    env["PATH"] = tools.augmented_path(env.get("PATH", ""))
+    # The contributed MCP launcher dirs go LAST, after everything the gateway's
+    # PATH already resolves, so a bare-name MCP server kiro-cli starts is found
+    # even when the gateway itself was started without them (a service installed
+    # from a non-login shell). Read from the snapshot the config load above just
+    # refreshed, and never persisted: see ``env.append_mcp_path_dirs``. Off-loop:
+    # validating a ``~user`` entry expands it through a directory-service lookup.
+    env["PATH"] = await host._to_thread_guarding_sandbox(
+        append_mcp_path_dirs, tools.augmented_path(env.get("PATH", ""))
+    )
     env = await request.env_before_scrub(env, spawned_binary)
     # Whether the child would have had an agent socket before the scrub, read
     # here because the driver's credential repair above may have just found one.

@@ -77,6 +77,23 @@ removes:
 No key grants a capability, and voice stays off. `ChatEmbed.hide.test.tsx`
 checks each key both ways and compiles the union against an unknown key.
 
+## Embedded chat `renderers`
+
+`ChatEmbed`'s `renderers` prop (`readonly MessageRenderer[]`) is handed
+unchanged to its `ChatMessageList`, which merges it over the built-in registry
+with `mergeRenderers`, memoized on the array's identity: kind-matched
+built-ins, then host entries, then role-keyed built-ins. Reusing a built-in id
+drops that entry with every role it drew (the built-in `assistant` entry also
+draws the `streaming` tail), and a role claim without `match` outranks the
+role-keyed refinements (the compaction and session-reload notice on
+`assistant`). The documented restyling pattern therefore claims exactly what
+`resolveRenderer(m, defaultMessageRenderers)` gives the built-in `assistant`
+entry and wraps that entry's render. Renderers draw rows only: the composer,
+Stop, queue, approvals and follow-ups are mounted as before, and removing a
+part stays `hide`'s job. `ChatEmbed.renderers.test.tsx` checks that pattern
+draws the settled and the streaming reply while the user row and the
+compaction notice keep their built-in rows.
+
 ## Scoped frontend HTTP transport
 
 `useAppApi()` exposes `raw(path, RequestInit)`, `request(path, RequestInit)` and
@@ -541,6 +558,23 @@ and admitted by the gateway for an own slot only. It also pins the reverse:
 every other slot-scoped frame is named in `_READ_UNCHANGED` with why it leaves
 the read as it was, so a new slot-scoped frame fails until it is placed.
 
+The slot list is the second signal source. A row can enter a slot with no
+slot-scoped frame: the gateway sends no user-row `chat_message` for a `?ws=1`
+send without `meta.sendId`, because its sender may have drawn the row. The
+`slots` frame that follows still restates the slot's row. `useSlotListSync`
+(`hooks/websocket/slotList.ts`) hands each list it applies, a full `slots` frame
+or the partial rows of a `slot_patch`, to `noteAppSlotRows`. For a watched slot
+it compares `messages`, `running`, `stopping`, `queue_depth` and
+`pending_approval` (`SLOT_ROW_FIELDS`) with the values it last saw, and a change
+signals the owning app as a frame does. A field a `slot_patch` row omits keeps
+its last value. The first values are the row this tab lists when the watch
+starts, because the embed reads at mount. A slot not listed then signals on its
+first row, which can already carry a send the mount read missed: a spurious
+signal costs one read, a missed one a backstop poll. An app token receives the same row for its own slot
+(`filter_slots_for_app`), so this source grants nothing new either. The cost is
+up to one extra read when a turn starts or ends, joined with the frame signals
+of the same moment by the 250 ms gap below.
+
 Reads: a signal reads at once. Signals during an in-flight read collapse into
 one trailing read, at least 250 ms after the previous one, and the read joins
 an in-flight request rather than aborting it (`cancelRefetch: false`), so a
@@ -574,9 +608,11 @@ whose slot is unowned; session controls; the vendored iframe SDK) pass none
 and poll.
 Writers: `website/src/app-sdk/slotPush.ts`, `website/src/app-sdk/ChatEmbed.tsx`,
 `website/src/utils/appSlotPush.ts`, `website/src/hooks/useWebSocket.ts`,
+`website/src/hooks/websocket/slotList.ts`,
 `website/src/hooks/websocket/gatewayConnectivity.ts`.
 Tests: `website/src/test/ChatEmbed.pushRead.test.tsx`,
-`website/src/test/appSlotPush.test.ts`, `test/test_app_slot_push_frames.py`.
+`website/src/test/appSlotPush.test.ts`,
+`website/src/test/useWebSocket.appSlotRows.test.ts`, `test/test_app_slot_push_frames.py`.
 
 ## App Store source selection
 
@@ -3661,9 +3697,11 @@ It differs in serving the wider `_ALLOWED_EXTENSIONS` set (`.js`/`.json`/`.mjs`/
 and in being UNAUTHENTICATED, which is why it streams in `_UI_STREAM_CHUNK` pieces
 instead of buffering.
 
-`/api/apps/blob` (`handle_blob_proxy`) is the one route that still serves `.svg` from
-this origin through `web.FileResponse` with no per-response policy; it reads a cache
-the gateway itself wrote, not an app-owned install tree.
+`/api/apps/blob` (`handle_blob_proxy`) serves registry art, `.svg` included, through
+`web.FileResponse` from a cache the gateway itself wrote, not an app-owned install
+tree. It answers with the same `default-src 'none'; sandbox` policy, because those
+bytes come from a registry author's repo and a top-level open would otherwise run
+them as a document on this origin.
 
 **`O_NONBLOCK` is in the open flags because it is what makes those checks
 reachable.** Opening a FIFO blocks until a writer appears, and the handler runs inside
@@ -4081,6 +4119,18 @@ order it this way, and
 (`AppProcess.is_running`) rather than asserted from the record merely existing.
 For an adopted backend, where we hold no handle to poll, "we still track it"
 is the only honest answer and `healthy` is the load-bearing signal.
+
+**A built-in app skipped at boot is reported as unavailable.** When
+`dashboard.routes.system.register` cannot import a built-in app because reading
+its files raises `OSError`, it logs the warning, skips the app's routes and
+records the skip with `apps.builtin_unavailable.record_unavailable_builtin`, on
+the aiohttp application, keyed by the installed-app name (`builtin_app_name`: the
+package name with `_` spelled `-`, pinned for every shipped built-in). `GET /api/apps` and `GET /api/apps/{name}` then carry
+`unavailable: {"reason": "<ExceptionType>: <message>"}` (redacted) on that app's
+built-in record, and the Library tile and the app detail page show it as
+unavailable with the reason (an `ErrorNotice` with the agent hand-off) instead of
+as a working app. A record that loaded
+carries no `unavailable` key. Only `origin == "builtin"` records are stamped.
 
 Writers: `apps/backend_runtime/supervision.py` (`_health_check_loop`,
 `_watch_backend_health`, `_supervise_backend_health`, `_start_health_supervisor`,
@@ -4811,9 +4861,8 @@ that binds that name, and each owner reads its own bindings, so a
 reaches the call site in whichever owner makes the call. The mutable state is one
 object per name, defined once in its owner and imported by the owners that act on it,
 so `bmod._processes.clear()` empties the table every owner reads and replacing it
-through the facade reaches every holder. The two flags rebound with `global` each have
-one holder: `_warned_unconfined_cache` in `backend.py` and `_DEFERRED_BOUND_PORT_APPS` in
-`startup.py`. Every owner logs through the `kiro_crew.apps.backend` logger, and
+through the facade reaches every holder. The one flag rebound with `global` has one
+holder: `_warned_unconfined_cache` in `backend.py`. Every owner logs through the `kiro_crew.apps.backend` logger, and
 `importlib.reload(backend)` reloads each owner in layer order.
 `mock.patch(..., create=True)` on a forwarded name is the one spelling the facade
 cannot undo, and a guard refuses it. The lock order is unchanged: `_health_reconcile_lock`
@@ -5838,8 +5887,9 @@ through one seam that is empty by default:
 - **Host grants** (`apps/builtin_host_grants.py`). A package in `BUILTIN_NAMES` may ship
   a `host_grants.py` data module holding one `HOST_GRANTS` mapping: `build_rlimit` (the
   backend spawns with `RLIMIT_PROFILE_BUILD`), `bound_port` (the backend receives
-  `KIROCREW_BOUND_PORT` and `backend_runtime/startup.py` defers its spawn to
-  `start_deferred_app_backends`), `backend_env_names` / `backend_env_prefixes`
+  `KIROCREW_BOUND_PORT` at spawn; it starts in the one boot wave, which runs after
+  `start_dashboard` has reserved the port and exported that value),
+  `backend_env_names` / `backend_env_prefixes`
   (operator-set `KIROCREW_*` variables `apps/backend.py` forwards to every backend),
   `config_top_keys` (`config/validation._APP_OWNED_TOP_KEYS`), `strict_internal_paths`
   (folded into `server._STRICT_INTERNAL_API_PATHS`) and `relay_credential_paths`

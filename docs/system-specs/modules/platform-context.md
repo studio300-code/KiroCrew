@@ -729,7 +729,10 @@ behavior is unchanged because each Default adapter delegates to that same global
 Wired sites:
 
 - `cli.py:main` / `slack/gateway_runtime/process_entry.py:run_gateway` — `boot_platform(cfg)` once at
-  startup (gateway raises fail-closed; cli is defensive — standalone never raises).
+  startup (gateway raises fail-closed; cli is defensive — standalone never raises). A
+  `PlatformCompositionError` in `cli.main` still stops every command except `doctor` and the
+  sign-in verbs, but as one `❌ <error>` line plus a `kirocrew doctor` hint and exit 1, not a
+  traceback (an enterprise build's policy refusal exits through `refuse_policy_boot` first).
 - `slack/gateway_runtime/service_boot.py` gateway boot — `AgentRuntime.run_first_run_setup()` through
   `safe_context_call`. Previously this imported `agent.run_first_run_setup`
   directly, bypassing the seam; routing it through the context makes first-run
@@ -740,6 +743,25 @@ Wired sites:
   `test_gateway_first_run_setup_routes_through_the_seam`). Best-effort: the
   gateway's surrounding `except` keeps a failure non-fatal to startup, and
   `PlatformCompositionError` still propagates fail-closed.
+- Agent-spec rebuild callers — a `PlatformCompositionError` out of
+  `rebuild_agent_config` stops the rebuild before any spec is composed from the
+  open-source defaults, which is the fail-closed outcome; every caller runs after
+  its own config write has landed, so none re-raises it. The
+  dashboard save paths handle it apart from an ordinary rebuild failure: an ERROR
+  gateway-log line naming governance (`COMPOSITION_REFUSED_LOG`), and where the
+  response carries a reason, that reason names it too — `rebuild.error` on MCP apply
+  is `AGENT_SPEC_COMPOSITION_REFUSED`, and an OAuth client change's stale-projection
+  error says the enterprise setup could not be built. Those paths are MCP apply
+  (`dashboard/handlers/mcp.py`), an OAuth client change
+  (`dashboard/handlers/connections.py`), disconnect (`connections/ownership.py`),
+  endpoint migration (`connections/endpoint_migration.py`), a template MCP addition
+  (`dashboard/handlers/template_server_request.py`) and the shared
+  `rebuild_agent_spec` behind MCP custom writes and MCP import. A response whose
+  only field is the `agent_spec_rewritten` boolean keeps that shape and reports
+  `false`. The boot, config-watch, MCP-broker, session-consent, launch-resolve and
+  readiness-gate rebuilds, and the worker and heartbeat re-derives, keep their
+  broad degrade: boot is where composition is enforced, and the heartbeat spawn
+  gate refuses the start.
 - `sandbox_argv.py` — `_live_plan_host`, the plan host `_build_launcher_script` /
   `_build_seatbelt_profile` both plan with, sources the sensitive-dir lists from
   `current_context().sandbox` through `sandbox._sandbox_policy` (Seatbelt's
@@ -1616,8 +1638,11 @@ representative rather than exhaustive.
   - `SlackEnterpriseGate.intercept_message(orch, *, channel, sender_id,
     clean_text, thread_ts, msg_ts) -> InterceptDecision` — wired in
     `slack/events.py::_route_message`. Default `PROCESS` (inline, OSS-identical).
-    **Ordering is security-critical:** the call site is placed immediately after
-    the user-allowlist check and BEFORE any content is recorded or processed
+    **Ordering is security-critical:** the call site is placed after the
+    user-allowlist check and the two activation drops that record nothing
+    (`activation=off` without a `!channel` command; an unmentioned message in a
+    `mention`/`review` channel that thread-follow does not admit), and BEFORE
+    any content is recorded or processed
     (observe-mode `channel_history.push`, audio transcription, image/file
     download, and the non-observe history push all follow it), so an unverified
     sender's content can never be persisted to channel history where a later
@@ -1645,9 +1670,13 @@ representative rather than exhaustive.
     (never the warning strings, which embed a truncated credential prefix).
 
   Interceptor ordering + dedup + audit (security-critical, all in `_route_message`):
-  the `intercept_message` call runs after the user-allowlist check and after the
-  interceptor-specific retry-dedup guard, but BEFORE any content recording/
-  processing. A non-`PROCESS` decision (1) records an `intercept:<msg_ts>` key in
+  the `intercept_message` call runs after the user-allowlist check, the
+  activation drops above, and the interceptor-specific retry-dedup guard, but
+  BEFORE any content recording/processing. A message the bot ignores anyway is
+  dropped with its usual `slack.message` SEL denial and never reaches the
+  interceptor, so an edition's challenge is not posted on unaddressed messages
+  in shared channels. Observe mode records history, so its push stays after the
+  interceptor. A non-`PROCESS` decision (1) records an `intercept:<msg_ts>` key in
   the `SeenCache` so a Slack ack-timeout re-delivery does not re-mint the challenge
   (PROCESS never records, preserving the paired `app_mention`/`message` dual-event
   and the standalone inline path), and (2) emits a

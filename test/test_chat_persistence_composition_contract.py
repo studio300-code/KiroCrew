@@ -33,6 +33,7 @@ import sys
 import types
 from pathlib import Path
 
+import composition_contract_checks
 import pytest
 from chat_test_helpers import _make_state
 from source_corpus import repo_files_named, repo_root
@@ -461,7 +462,7 @@ _SIGNATURES: dict[str, str] = {
     "restore_recent_sessions": "(state: 'DashboardState', window_minutes: 'int' = 30, *, folders_only: 'bool' = False) -> 'int'",
     "restore_recent_sessions_async": "(state: 'DashboardState', window_minutes: 'int' = 30, *, folders_only: 'bool' = False) -> 'int'",
     "save_all_slots_to_history": "(state: 'DashboardState') -> 'None'",
-    "save_slot_off_loop": "(state: 'DashboardState', slot: '_ChatSlot', messages: 'list[dict] | None' = None, *, closed: 'bool' = False, closed_at: 'float | None' = None, force: 'bool' = False, rewrite: 'bool' = False, best_effort: 'bool' = True, expected_history_key: 'str | None' = None, expected_slot_name: 'str | None' = None, expected_disk_older_count: 'int | None' = None, rows_only: 'bool' = False, issued_by_the_retraction: 'bool' = False, mutes_opened_override: 'bool | None' = None, muted_override: 'bool | None' = None, after_commit_under_lock: 'Callable[[], None] | None' = None, turn_timeout_override: 'tuple[int | None] | None' = None, retired_rows: 'list[dict] | None' = None, takeover_basis: 'TakeoverBasis | None' = None) -> 'bool'",
+    "save_slot_off_loop": "(state: 'DashboardState', slot: '_ChatSlot', messages: 'list[dict] | None' = None, *, closed: 'bool' = False, closed_at: 'float | None' = None, force: 'bool' = False, rewrite: 'bool' = False, best_effort: 'bool' = True, expected_history_key: 'str | None' = None, expected_slot_name: 'str | None' = None, expected_disk_older_count: 'int | None' = None, rows_only: 'bool' = False, issued_by_the_retraction: 'bool' = False, mutes_opened_override: 'bool | None' = None, muted_override: 'bool | None' = None, after_commit_under_lock: 'Callable[[], None] | None' = None, turn_timeout_override: 'tuple[int | None] | None' = None, retired_rows: 'list[dict] | None' = None, takeover_basis: 'TakeoverBasis | None' = None, verdict_source: 'str | None' = None) -> 'bool'",
     "session_transcript_remains": "(state: 'DashboardState', slot: '_ChatSlot') -> 'bool'",
     "session_was_deleted": "(state: 'DashboardState', slot: '_ChatSlot') -> 'bool'",
     "update_reasoning_effort_values": "(acp_levels: 'list[str]') -> 'None'",
@@ -517,9 +518,7 @@ def _module_scope_imports(tree: ast.Module) -> list[tuple[int, str]]:
     return found
 
 
-class TestSurface:
-    def test_the_package_holds_exactly_the_composed_modules(self) -> None:
-        assert set(_owner_sources()) == OWNER_MODULES
+class TestSurface(composition_contract_checks.ThePackageHoldsExactlyTheComposedModules):
 
     def test_every_name_the_facade_defined_still_resolves(self) -> None:
         assert [name for name in sorted(_FACADE_DEFINED) if not hasattr(cp, name)] == []
@@ -603,7 +602,7 @@ class TestSurface:
         assert (OWNER_DIR / "__init__.py").is_file()
 
 
-class TestEagerOwners:
+class TestEagerOwners(composition_contract_checks.ThePackageInitImportsNothing):
     def test_the_facade_imports_every_owner_last(self) -> None:
         """At module scope and after every other statement, so loading the owners
         cannot reorder anything the facade itself imports or binds."""
@@ -663,10 +662,6 @@ class TestEagerOwners:
             if extra:
                 offenders[stem] = extra
         assert offenders == {}
-
-    def test_the_package_init_imports_nothing(self) -> None:
-        tree = ast.parse((OWNER_DIR / "__init__.py").read_text(encoding="utf-8"))
-        assert [n for n in ast.walk(tree) if isinstance(n, (ast.Import, ast.ImportFrom))] == []
 
 
 #: Every spelling a test uses to reach the facade module.
@@ -792,7 +787,7 @@ def _bare_loads(source: str, names: set[str]) -> list[str]:
     return sorted(set(hits), key=lambda hit: (int(hit.split(":")[0]), hit))
 
 
-class TestPlacement:
+class TestPlacement(composition_contract_checks.NoOwnerAnchorsAPathOnItsOwnFile):
     """The rules that keep a patch on the facade effective once the code has moved."""
 
     def test_owners_reach_the_facade_as_a_module_at_call_time(self) -> None:
@@ -930,11 +925,6 @@ class TestPlacement:
                 assert _owner(stem).logger is cp.logger is logging.getLogger(FACADE)
                 logged += 1
         assert logged >= 5
-
-    def test_no_owner_anchors_a_path_on_its_own_file(self) -> None:
-        for stem, source in _owner_sources().items():
-            names = [n for n in ast.walk(ast.parse(source)) if isinstance(n, ast.Name)]
-            assert not [n for n in names if n.id == "__file__"], stem
 
     def test_no_owner_defines_an_async_function(self) -> None:
         """The async restore drivers and the on-loop save entry point stay on the

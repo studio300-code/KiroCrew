@@ -172,7 +172,7 @@ _BASE_NAMES = frozenset("""
         setup_spawn_resume_routes setup_tunnel setup_weixin_routes
         setup_whatsapp_routes should_canonicalize_host shutdown_event
         slot_ownership_middleware start_api_server start_dashboard
-        start_deferred_app_backends start_enabled_app_backends stop_hook_reconciler
+        start_enabled_app_backends stop_hook_reconciler
         subprocess_executor sweep_stale_dumps tailnet
         tailnet_effective_allowed_logins tailnet_identity_unknown tailnet_serve
         take_dropped_grant token_auth_middleware token_embed_parent_port
@@ -301,7 +301,7 @@ def _global_names(code: types.CodeType):
 def test_every_name_the_facade_bound_at_the_base_still_resolves() -> None:
     """Tests and other modules read private names off the server as well as public
     ones, so every module-level binding survives the split."""
-    assert len(_BASE_NAMES) == 319
+    assert len(_BASE_NAMES) == 318
     assert sorted(name for name in _BASE_NAMES if not hasattr(server, name)) == []
 
 
@@ -396,6 +396,7 @@ _LAZY_IMPORTS = {
     "kiro_crew.config": "live",
     "kiro_crew.config.paths": "data_home",
     "kiro_crew.config.live": "ConfigChange",
+    "kiro_crew.config.loader": "KiroCrewAgentConfig",
     "kiro_crew.config.resolution": "DEGRADED_WHOLE_CONFIG",
     "kiro_crew.connections.endpoint_migration": "migrate_retired_endpoints",
     "kiro_crew.connections.warm": "scavenge_warm_mint_artifacts shutdown_warm_mint",
@@ -408,6 +409,7 @@ _LAZY_IMPORTS = {
     ),
     "kiro_crew.enterprise_boot": "require_kiro_login",
     "kiro_crew.dashboard.handlers": "remote_puller wf_handlers work_ledger",
+    "kiro_crew.dashboard.handlers.agents": "_remove_member_leftovers",
     "kiro_crew.dashboard.handlers.artifact_download": "register_artifact_download_routes",
     "kiro_crew.dashboard.handlers.ask_question": (
         "api_agent_ask_open api_agent_ask_wait api_agent_ask_withdraw "
@@ -416,9 +418,9 @@ _LAZY_IMPORTS = {
     ),
     "kiro_crew.dashboard.handlers.autonudge": (
         "api_autonudge_delete api_autonudge_fire api_autonudge_get api_autonudge_list "
-        "api_autonudge_start api_autonudge_update api_monitor_clear api_monitor_create "
-        "api_monitor_restart api_monitor_slot_get api_monitor_stop api_monitor_update "
-        "api_monitors_list api_session_monitor_get"
+        "api_autonudge_start api_autonudge_update api_monitor_clear api_monitor_contract "
+        "api_monitor_create api_monitor_restart api_monitor_slot_get api_monitor_stop "
+        "api_monitor_update api_monitors_list api_session_monitor_get"
     ),
     "kiro_crew.dashboard.handlers.browser_harness_status": "auto_setup_browser_harness",
     "kiro_crew.dashboard.handlers.change_cards": "change_card_middleware",
@@ -483,7 +485,7 @@ def test_the_lazy_imports_stay_inside_the_functions_that_need_them() -> None:
                     for alias in node.names:
                         local.setdefault(alias.asname or alias.name, set()).add(alias.name)
     assert local == {name: {module} for name, module in expected.items()}
-    assert len(expected) == 126
+    assert len(expected) == 129
 
 
 def test_a_star_import_carries_the_moved_public_names(tmp_path: Path) -> None:
@@ -537,7 +539,7 @@ def test_every_moved_name_is_one_object_in_its_owner() -> None:
     strays = [f"{o}:{n}" for o, n in placed if getattr(server, n) is not vars(_owner(o)).get(n)]
     assert strays == []
     names = [name for _, name in placed]
-    assert len(names) == len(set(names)) == 91 + 23
+    assert len(names) == len(set(names)) == 91 + 22
 
 
 def test_the_moved_names_keep_their_base_shapes() -> None:
