@@ -512,6 +512,15 @@ def enforce_sandbox_floor(backend: str, mode: str) -> None:
     """
     if not is_enforced(backend):
         return
+    # LOCAL PATCH (ASUS, single-user): when the operator explicitly allowed
+    # unsandboxed execution, honour the same opt-in for enforced ACP harnesses.
+    # Without this block OpenCode cannot start at all with agent.sandbox="off",
+    # because this preflight is its only remaining refusal. Delete this block to
+    # restore the upstream behaviour.
+    from kiro_crew.sandbox_unavailable import _allow_unsandboxed_exec
+
+    if _allow_unsandboxed_exec():
+        return
     # Local import for the same reason as the mask builder: this is a leaf that
     # ``acp/client.py`` imports at import time.
     from kiro_crew.sandbox import credential_mask_applies
